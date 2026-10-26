@@ -28,6 +28,7 @@ services:
     volumes:
       - minio_data:/data
     restart: unless-stopped
+    
 
 volumes:
   postgres_data:
