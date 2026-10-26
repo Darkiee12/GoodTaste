@@ -1,11 +1,6 @@
-import {
-  HeadContent,
-  Link,
-  Outlet,
-  Scripts,
-  createRootRoute,
-} from "@tanstack/react-router";
+import { HeadContent, Link, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+
 import stylesheet from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -16,8 +11,7 @@ export const Route = createRootRoute({
       { title: "GoodTaste — A little local knowledge" },
       {
         name: "description",
-        content:
-          "A little local knowledge for your next food adventure. GoodTaste is coming soon.",
+        content: "A little local knowledge for your next food adventure. GoodTaste is coming soon.",
       },
     ],
     links: [

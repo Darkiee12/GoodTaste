@@ -1,4 +1,5 @@
 import { createRouter } from "@tanstack/react-router";
+
 import { routeTree } from "./routeTree.gen";
 
 // Start creates a router for each request. Never share one across SSR requests.
