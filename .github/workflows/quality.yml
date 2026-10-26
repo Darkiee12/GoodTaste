@@ -1,0 +1,28 @@
+name: Quality
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static:
+    name: Format, lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # Temporary while the updated Bun lockfile is not yet committed.
+      # After regenerating bun.lock, replace with: bun ci
+      - name: Install dependencies
+        run: bun install --no-save
+      - name: Formatting
+        run: bun run format
+      - name: Type-aware lint
+        run: bun run lint
+      - name: TypeScript
+        run: bun run check-types

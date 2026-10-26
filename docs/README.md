@@ -29,6 +29,9 @@
 ## Decision log
 - [ADR index](decisions/README.md): recorded architectural choices.
 
+## Development quality
+- [Quality gates](development/quality-gates.md): Oxlint, Oxfmt, type checks, UI verification and CI behavior.
+
 ## Reference material
 - [Sources](references.md): canonical external documentation and researched repositories.
 

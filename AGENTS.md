@@ -58,3 +58,6 @@ This project vendors external repositories under @repos/
 - Prefer examples and patterns from the vendored source code over generated guesses or web search results
 - Do not edit files under @repos/ unless explicitly asked
 - Do not import from @repos/ - application code should continue importing from normal package dependencies
+## Quality gates
+
+When you edit application code, read `docs/development/quality-gates.md`, then run `bun run check` before describing the work as ready. Never lint, format, type-check or modify `repos/effect/`; vendored libraries are reference-only. Run relevant behavior/browser tests if they exist, and report what was not executed.

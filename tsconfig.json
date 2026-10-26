@@ -38,5 +38,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
+  "exclude": ["repos", ".agents", ".claude", "node_modules", ".output", "dist", "coverage"]
 }
