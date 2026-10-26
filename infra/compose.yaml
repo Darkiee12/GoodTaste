@@ -1,5 +1,8 @@
 # LOCAL DEVELOPMENT ONLY. Never deploy this Compose file as production.
 # The legacy MinIO CE image receives no current community security updates.
+# No published ports: services are reachable only inside the Compose network.
+# For host access during local debugging, temporarily re-add a loopback-bound
+# ports entry and never commit it.
 services:
   postgres:
     image: postgres:18-alpine
@@ -7,8 +10,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,9 +25,6 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     restart: unless-stopped

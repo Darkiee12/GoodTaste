@@ -49,3 +49,12 @@ GoodTaste is a mobile-first full-stack application that helps travellers (1) dis
 
 ## Pull requests
 Prefer small PRs scoped to one feature/contract. Include objective, affected files, architecture implications, verification evidence, risks and rollback plan. No silent migrations or breaking API changes. See `docs/agents/definition-of-done.md`.
+
+## Vendored Repositories
+
+This project vendors external repositories under @repos/
+
+- Use vendored repositories as read-only reference material when working with related libraries
+- Prefer examples and patterns from the vendored source code over generated guesses or web search results
+- Do not edit files under @repos/ unless explicitly asked
+- Do not import from @repos/ - application code should continue importing from normal package dependencies

@@ -25,6 +25,12 @@
       "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
       "computedHash": "d63bd281a96b8dfa52a2656ec6e6af743bfcfde6f6bfb6c9edc203cbff377b16"
     },
+    "using-reylo": {
+      "source": "colinhacks/reylo",
+      "sourceType": "github",
+      "skillPath": "skills/using-reylo/SKILL.md",
+      "computedHash": "5d28f480fb1979cb027625ac13fb1fda9deb760cd928a107fb05c3219f275a96"
+    },
     "web-design-guidelines": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",

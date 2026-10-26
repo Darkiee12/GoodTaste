@@ -9,7 +9,7 @@
 - Relational data: PostgreSQL 17 development baseline (minor version pinned during implementation review).
 - Binary images: object storage, private buckets and Postgres asset metadata.
 - Configuration: validated environment variables; secrets injected at deploy, never bundled.
-- Network: DB/storage administrative endpoints internal only; local published ports bound to loopback.
+- Network: DB/storage endpoints internal to the Compose network only; no ports published to the host.
 
 ## Topology
 ```text

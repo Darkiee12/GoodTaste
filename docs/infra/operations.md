@@ -10,7 +10,7 @@ Docker Engine with Compose plugin. Bun/Node for app implementation later. Option
 2. Set new local-only secrets in `infra/.env`; review and approve the MinIO legacy image risk.
 3. Validate: `docker compose --env-file infra/.env -f infra/compose.yaml config` (do not paste output in public logs; it contains credentials).
 4. Start: `docker compose --env-file infra/.env -f infra/compose.yaml up -d`.
-5. Verify: `docker compose --env-file infra/.env -f infra/compose.yaml ps`, then Postgres `pg_isready`, MinIO API on `http://127.0.0.1:9000` and console at `http://127.0.0.1:9001` (local only).
+5. Verify: `docker compose --env-file infra/.env -f infra/compose.yaml ps`, then Postgres `pg_isready` via `docker compose --env-file infra/.env -f infra/compose.yaml exec postgres pg_isready`. No ports are published to the host, so reach MinIO only from inside the Compose network (e.g. `compose exec`) unless you temporarily re-add loopback-bound ports for local debugging.
 6. Create a private bucket `goodtaste-private` via reviewed CLI/UI provisioning. Verify that anonymous GET is forbidden. The MVP does **not** require a public bucket.
 7. Before real uploads, test local S3 API auth, presign URL hostname, CORS and deletion using an integration test.
 
