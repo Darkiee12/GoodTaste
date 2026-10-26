@@ -11,7 +11,7 @@
     "lint:fix": "oxlint . --disable-nested-config --ignore-pattern 'repos/**' --fix",
     "format": "oxfmt --check .",
     "fmt": "oxfmt .",
-    "check-types": "tsc --noEmit -p tsconfig.json",
+    "check-types": "tsc --noEmit --runExternalCode -p tsconfig.json",
     "check": "bun run format && bun run lint && bun run check-types"
   },
   "devDependencies": {
