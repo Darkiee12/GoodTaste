@@ -12,16 +12,6 @@
     "types": [
       "bun"
     ],
-    "contentMappers": [
-      {
-        "package": "reylo",
-        "extensions": [
-          ".sql",
-          ".reylo.yaml",
-          ".reylo.yml"
-        ]
-      }
-    ],
     // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -39,6 +29,16 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
+  "contentMappers": [
+    {
+      "package": "reylo",
+      "extensions": [
+        ".sql",
+        ".reylo.yaml",
+        ".reylo.yml"
+      ]
+    }
+  ],
   "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
   "exclude": ["repos", ".agents", ".claude", "node_modules", ".output", "dist", "coverage"]
 }
