@@ -5,6 +5,7 @@ import { nitro } from "nitro/vite";
 import reylo from "reylo/vite";
 import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
+
 export default defineConfig({
   server: {
     port: 3000,

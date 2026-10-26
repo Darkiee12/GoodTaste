@@ -65,6 +65,12 @@ No root `packages/`, no generic root `services/`, and no parallel `backend/` pro
 - Food Discovery owns the canonical dish concept. Restaurant Discovery owns venue records, source-backed menu/serving evidence and venue-to-dish associations. User owns member account and saved items.
 - Menu translation and ordering start as module operations/workflows; do not pre-create new domains to accommodate hypothetical future features.
 
+## Schema and query placement
+
+Schema migrations always live at repository root in `db/migrations/` under a single Flyway version history. Reylo application query files belong to their owning module in `server/repository/sql/`, one statement per `.sql` file. An application module may use a repository adapter when it adds genuine value; it is not required to create `repository.ts` or `service.ts` as boilerplate. Database pool and transaction infrastructure remain in `src/server/database/`, but Flyway execution stays outside the application process.
+
+Read [persistence conventions](persistence.md) and [migration lifecycle](../infra/migrations.md) before creating SQL files or DDL.
+
 ## Agent review rule
 
 Before adding a file, state its owning module and whether it is browser-safe, transport, application, or infrastructure. Before a cross-module import, identify the published contract and check for cycles. Shared contract edits need coordinator review. Static lint is not yet a substitute for enforcing import ownership.

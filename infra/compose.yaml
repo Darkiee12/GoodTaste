@@ -1,5 +1,8 @@
 # LOCAL DEVELOPMENT ONLY. Never deploy this Compose file as production.
+# Flyway migrates the database in a one-shot container before app startup.
 # The legacy MinIO CE image receives no current community security updates.
+# Postgres 18 requires a volume at /var/lib/postgresql (not the PG17 /data path).
+# Existing volumes using the old mount require a manual backup/migration review.
 # No published ports: services are reachable only inside the Compose network.
 # For host access during local debugging, temporarily re-add a loopback-bound
 # ports entry and never commit it.
@@ -11,13 +14,30 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  migrator:
+    image: flyway/flyway:13.11.1
+    command: ["-connectRetries=60", "migrate"]
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+      FLYWAY_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+      FLYWAY_BASELINE_ON_MIGRATE: "false"
+      FLYWAY_CLEAN_DISABLED: "true"
+    volumes:
+      - ../db/migrations:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   minio:
     image: ${MINIO_IMAGE:?Select audited local-only legacy image}

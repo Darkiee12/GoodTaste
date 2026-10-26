@@ -16,4 +16,6 @@ Before implementing a public operation, specify:
 
 Do not expose raw SQL/driver exceptions through RPC. Translate expected Effect failures to client-safe outcomes at the transport edge.
 
+Database contracts: Flyway owns all ordered DDL in `db/migrations/`; every domain owns its Reylo query files under `server/repository/sql/`. Typed query results do not replace business invariants or evidence provenance checks. Read `docs/architecture/persistence.md` before adding database layers or a repository facade.
+
 For multi-module atomic writes, the coordinating workflow establishes a single transaction scope and supplies the same transaction-bound client to participating repositories. Each module retains ownership of its data and validation rules.

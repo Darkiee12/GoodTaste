@@ -26,3 +26,23 @@ jobs:
         run: bun run lint
       - name: TypeScript
         run: bun run check-types
+
+  migration:
+    name: PostgreSQL 18 + Flyway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate local Compose configuration
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml config --quiet
+      - name: Start disposable PostgreSQL
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml up -d --wait postgres
+      - name: Run Flyway migrations
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator
+      - name: Validate Flyway migration history
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator validate
+      - name: Check idempotent versioned migration pass
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml down --remove-orphans
