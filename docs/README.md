@@ -7,6 +7,8 @@
 - [MVP delivery](product/mvp.md): 10-day scope, acceptance outcomes, deliberate exclusions.
 
 ## Architecture
+- [Module organization](architecture/modules.md): canonical paths, owners and cross-module imports.
+- [Guest/member access](architecture/access-control.md): actor policy and endpoint authorization.
 - [System overview](architecture/overview.md): request flow and dependency boundaries.
 - [Contracts](architecture/contracts.md): shapes and ownership of cross-team APIs.
 - [Data model](architecture/data-model.md): conceptual entities and provenance.

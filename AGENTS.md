@@ -22,6 +22,17 @@ GoodTaste is a mobile-first full-stack application that helps travellers (1) dis
 6. AI recommendations or menu analysis: `docs/architecture/trust-and-safety.md`, `docs/architecture/contracts.md`.
 7. Architecture change: review relevant `docs/decisions/` and propose an ADR before implementing breaking changes.
 
+## Module architecture and access control
+
+Read `docs/architecture/modules.md` and `docs/architecture/access-control.md` before creating any application path, server function, cross-module call, or authentication-sensitive operation.
+
+- Use exactly three foundational domains: `src/modules/user/`, `src/modules/food-discovery/`, and `src/modules/restaurant-discovery/`.
+- `src/routes/` is for TanStack pages and external HTTP endpoints; `src/server/` owns shared server-only infrastructure and cross-domain workflows. Do not add a generic `services/` or `packages/` root without a documented reason.
+- Public discovery is accessible to guests and members; member-owned actions require verified session identity and ownership checks at **every endpoint/operation**. Do not treat route guards as authorization.
+- Cross-module calls use each module's published server-only API; do not import another module's private repository/SQL. Coordinate cycles in `src/server/workflows/`.
+- HTTP inputs use Zod 4.6; database SQL uses Reylo's inferred types, without duplicate row parsing. Validate external AI/Places output separately.
+- Compose Effect v4 operations and layers without creating a parallel HTTP server or storing per-request identity in global runtime state.
+
 ## Non-negotiable engineering rules
 - Respect dependency direction: route/UI → application operation → provider/repository interface → infrastructure adapter. Do not import DB, secrets, or object SDKs into browser code.
 - Server functions validate every external input, authorize protected operations at the server boundary, and return explicit client-safe outcomes. Do not expose internal stack traces.
@@ -52,12 +63,12 @@ Prefer small PRs scoped to one feature/contract. Include objective, affected fil
 
 ## Vendored Repositories
 
-This project vendors external repositories under @repos/
+This project vendors external repositories under `repos/`
 
 - Use vendored repositories as read-only reference material when working with related libraries
 - Prefer examples and patterns from the vendored source code over generated guesses or web search results
-- Do not edit files under @repos/ unless explicitly asked
-- Do not import from @repos/ - application code should continue importing from normal package dependencies
+- Do not edit files under `repos/` unless explicitly asked
+- Do not import from `repos/` - application code should continue importing from normal package dependencies
 ## Quality gates
 
 When you edit application code, read `docs/development/quality-gates.md`, then run `bun run check` before describing the work as ready. Never lint, format, type-check or modify `repos/effect/`; vendored libraries are reference-only. Run relevant behavior/browser tests if they exist, and report what was not executed.
