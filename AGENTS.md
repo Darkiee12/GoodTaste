@@ -14,6 +14,7 @@ GoodTaste is a mobile-first full-stack application that helps travellers (1) dis
 
 ## Required reading (load only what is relevant)
 1. All tasks: `docs/README.md`, `docs/agents/workflow.md`, `docs/agents/definition-of-done.md`.
+   Frontend work, UI reviews, prototyping, or module design: use the [skill routing guide](docs/agents/skills.md) to load only the relevant skill.
 2. Infra, secrets, deployments: `docs/infra/overview.md`, `docs/infra/operations.md` and relevant service runbook.
 3. Data or migrations: `docs/architecture/data-model.md`, `docs/infra/postgres.md`.
 4. Uploads, photos, review images: `docs/infra/object-storage.md`, `docs/architecture/trust-and-safety.md`.
