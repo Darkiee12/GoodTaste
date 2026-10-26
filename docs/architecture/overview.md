@@ -15,7 +15,7 @@ Do not confuse a dish with a venue's offering. An inferred dish-to-venue match i
 TanStack route or module server function / external API → Zod 4.6 validation of HTTP input → verified guest/member actor and authorization → Effect application operation → domain module or cross-domain workflow → Effect-provided Reylo/Postgres/AI/Places/storage adapters.
 
 - Browser components never import server-only code. Server functions may be imported statically as TanStack's transformed RPC stubs.
-- Public discovery is available to both guests and members; user-owned operations require sign-in and ownership validation.
+- Public discovery is available to both guests and members; user-owned operations require sign-in and ownership validation. Represent request principals as a trusted `Data.TaggedEnum` Actor and supply `CurrentActor` per Effect invocation, not in the singleton runtime.
 - Use a process-scoped ManagedRuntime for shared connections, but **never** store the current user in that singleton.
 - SQL results are typed by Reylo and constrained by PostgreSQL; do not wrap every trusted row in duplicate Zod schemas. Still validate AI/external-provider output.
 - Any direct inter-module dependency must use a public server contract, remain acyclic and not bypass authorization.

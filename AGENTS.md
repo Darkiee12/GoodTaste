@@ -31,6 +31,8 @@ Read `docs/architecture/modules.md` and `docs/architecture/access-control.md` be
 - Public discovery is accessible to guests and members; member-owned actions require verified session identity and ownership checks at **every endpoint/operation**. Do not treat route guards as authorization.
 - Cross-module calls use each module's published server-only API; do not import another module's private repository/SQL. Coordinate cycles in `src/server/workflows/`.
 - HTTP inputs use Zod 4.6; database SQL uses Reylo's inferred types, without duplicate row parsing. Validate external AI/Places output separately.
+- Follow Effect v4 **ADT conventions** for domain cases: `Data.TaggedEnum` + `Data.taggedEnum` constructors, exhaustive `$match`; use `Schema.TaggedUnion` when codecs are needed and `Data.TaggedError` for typed domain failures. Do not invent hand-written `{kind: ...}` unions for `Actor`.
+- The `Actor` is constructed from verified server session identity and provided as a per-request `CurrentActor` `Context.Service` requirement (or explicitly passed to a small operation); never store it in a singleton `ManagedRuntime` Layer. See `docs/architecture/domain-modeling.md` and `docs/architecture/access-control.md`.
 - Compose Effect v4 operations and layers without creating a parallel HTTP server or storing per-request identity in global runtime state.
 
 ## SQL, migrations and release safety

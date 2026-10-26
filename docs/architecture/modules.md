@@ -31,7 +31,7 @@ src/
 │           ├── operations/
 │           └── repository/sql/
 ├── server/
-│   ├── auth/                          # Session verification, access policy and ownership
+│   ├── auth/                          # Verified Actor ADT, CurrentActor service, access policy
 │   ├── database/                      # Pool, migration lifecycle, transactions
 │   ├── integrations/                  # AI, Places and object storage adapters
 │   ├── workflows/                     # Genuine multi-module use cases
@@ -48,6 +48,7 @@ TanStack-specific `src/start.ts`/`src/server.ts` framework entrypoints may be ad
 - `routes/` owns navigation, page rendering and HTTP route registration; no SQL or business policy.
 - `<module>/*.functions.ts` is a **transport adapter**: validate external input, resolve server-trusted actor, authorize, invoke Effect, serialize safe output. TanStack's static `createServerFn` imports are allowed in React; do not dynamically import these functions.
 - `<module>/*.schema.ts` is a client-safe Zod HTTP/input schema; never duplicate Reylo-inferred row types solely to validate database rows.
+- `src/server/auth/actor.ts` conceptually owns the **Effect `Data.TaggedEnum`** for `Guest` and `Member`; `src/server/auth/current-actor.ts` conceptually declares the request-scoped `Context.Service`. Construct members only after verifying server sessions; do not import either into browser components.
 - `<module>/server/` owns application/domain operations and its SQL queries. Other modules can import only its intentional `server/index.ts` exports, not internal operation or repository files.
 - Browser-facing modules never import `src/server/` or another module's `server/` directly. Never mix client-safe and server-only exports in one barrel.
 - `src/server/` owns shared infrastructure and multi-domain workflows, not a dumping ground called `services/`.
@@ -69,7 +70,7 @@ No root `packages/`, no generic root `services/`, and no parallel `backend/` pro
 
 Schema migrations always live at repository root in `db/migrations/` under a single Flyway version history. Reylo application query files belong to their owning module in `server/repository/sql/`, one statement per `.sql` file. An application module may use a repository adapter when it adds genuine value; it is not required to create `repository.ts` or `service.ts` as boilerplate. Database pool and transaction infrastructure remain in `src/server/database/`, but Flyway execution stays outside the application process.
 
-Read [persistence conventions](persistence.md) and [migration lifecycle](../infra/migrations.md) before creating SQL files or DDL.
+Read [Effect domain modeling](domain-modeling.md) before defining authenticated actors, domain ADTs, errors or outcome variants. Read [persistence conventions](persistence.md) and [migration lifecycle](../infra/migrations.md) before creating SQL files or DDL.
 
 ## Agent review rule
 

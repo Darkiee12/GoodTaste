@@ -94,7 +94,7 @@ A transaction must pin one physical database connection. `src/server/database/tr
 
 ## Domain trust and access
 
-A guest can use public discovery reads; a member's saved data must be queried with actor-scoped predicates (e.g. `WHERE owner_id = :actorId`) and ownership checks. The `user` module owns identity/user preferences; Food Discovery owns dish identity; Restaurant Discovery owns venue-to-food offering evidence. No module imports another module's private SQL.
+A guest or member is represented by a trusted Effect `Data.TaggedEnum` actor; its per-request service must not be cached in a shared runtime. A guest can use public discovery reads; a member's saved data must be queried with actor-scoped predicates (e.g. `WHERE owner_id = :actorId`) and ownership checks. The `user` module owns identity/user preferences; Food Discovery owns dish identity; Restaurant Discovery owns venue-to-food offering evidence. No module imports another module's private SQL.
 
 Input parsing belongs at HTTP/AI/external-provider trust boundaries; do not introduce duplicate Zod row validators just because Reylo returns a row. Domain invariants still need checks and safe output serialization.
 

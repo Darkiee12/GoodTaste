@@ -6,7 +6,9 @@ TanStack Start owns HTTP. Effect v4 is the application backend toolkit, **not a 
 - Use `Context.Service` and `Layer` for real capabilities with lifetimes or replaceable implementations (PostgreSQL/Reylo pool, AI provider, Places, object storage), not boilerplate pass-through facades.
 - A process-scoped server-only `ManagedRuntime` is composed under `src/server/runtime.ts` and `src/server/layers.ts`; connect it to TanStack endpoints. Dispose scoped resources with server shutdown.
 - Do not run a fresh Effect runtime inside every domain function; compose Effect values and run at the HTTP/application integration edge.
-- Session actors, request IDs and ownership checks are request-scoped, never mutable singleton layer state. Supply the actor explicitly or through request-scoped Effect context.
+- Model application ADTs (including `Guest | Member`) with **Effect v4 `Data.TaggedEnum` and `Data.taggedEnum` constructors**, using `_tag` and exhaustive `$match`. Use `Schema.TaggedUnion` only when runtime decoding/encoding is independently justified. Avoid reinventing Effect's tagged union constructors with hand-written `{kind: ...}` unions.
+- Define domain failures with `Data.TaggedError` or `Schema.TaggedError` when encoded error schemas are needed; recover by tag, not by matching message strings. Use `Option` for optional values when it materially improves domain semantics; do not wrap ordinary values without reason.
+- Session actors, request IDs and ownership checks are request-scoped, never mutable singleton layer state. `CurrentActor` can be a `Context.Service` requirement supplied **per request** via `Effect.provideService` by the TanStack transport adapter. Explicit actor arguments are also valid for small operations; do not register a per-user `Layer` inside the singleton `ManagedRuntime`.
 - Expected errors use a typed domain vocabulary. Unexpected defects and raw driver errors are logged securely and transformed to safe client responses at the transport boundary.
 
 **HTTP:** Zod 4.6 validates query/form/request data in TanStack server-function or raw HTTP adapters. Server session verification and resource authorization are independent of Zod input parsing.
@@ -15,7 +17,7 @@ TanStack Start owns HTTP. Effect v4 is the application backend toolkit, **not a 
 
 **Other trust boundaries:** AI and external Places data require runtime checking and provenance. Typed SQL does not establish that an AI claim is factual. Never claim verified dietary safety on inference alone.
 
-See `docs/architecture/persistence.md` and `docs/infra/migrations.md` for query ownership, transaction boundary and the release gate.
+Read `docs/architecture/domain-modeling.md` and `docs/architecture/access-control.md` before implementing Actor, permissions, domain outcomes or failures. See `docs/architecture/persistence.md` and `docs/infra/migrations.md` for query ownership, transaction boundary and the release gate.
 
 Reylo type checking needs a schema-available development database (or explicitly supported cached analysis). Keep TypeScript 7.1 content mapper configuration and `--runExternalCode` working. Run migrations before checks once SQL imports exist.
 
