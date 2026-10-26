@@ -39,6 +39,9 @@ jobs:
         run: docker compose --env-file infra/.env.example -f infra/compose.yaml up -d --wait postgres
       - name: Run Flyway migrations
         run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator
+      - name: Verify PostGIS extension and spatial operation
+        run: |
+          docker compose --env-file infra/.env.example -f infra/compose.yaml exec -T postgres sh -ec 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 -c "SELECT postgis_version(), ST_DWithin(ST_SetSRID(ST_MakePoint(106.7, 10.8), 4326)::geography, ST_SetSRID(ST_MakePoint(106.7, 10.8), 4326)::geography, 100.0);"'
       - name: Validate Flyway migration history
         run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator validate
       - name: Check idempotent versioned migration pass

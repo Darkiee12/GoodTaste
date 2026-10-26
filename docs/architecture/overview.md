@@ -2,6 +2,8 @@
 
 **Decision:** Single-deployment TanStack Start + Effect v4 modular monolith, not multiple applications or workspace packages. TanStack owns requests and rendering; Effect runs backend operations and provides dependencies; Reylo types PostgreSQL SQL imports.
 
+**Geospatial architecture:** PostGIS handles venue proximity and spatial indexing. MapLibre GL JS via `react-map-gl/maplibre` renders a browser-only interactive map in TanStack Start, using separately hosted vector tiles. See [maps](maps.md).
+
 Three foundational modules:
 
 - **User (`user`)**: accounts, verified identities, member preferences and member-owned records. A guest is an *actor*, not an automatically created User row.

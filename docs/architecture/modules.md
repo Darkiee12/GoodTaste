@@ -46,6 +46,7 @@ TanStack-specific `src/start.ts`/`src/server.ts` framework entrypoints may be ad
 ## Ownership and imports
 
 - `routes/` owns navigation, page rendering and HTTP route registration; no SQL or business policy.
+- Restaurant Discovery owns its MapLibre-based browser map components and Reylo/PostGIS geosearch operations; no unrelated top-level `maps/` domain. Read [maps](maps.md) before implementation.
 - `<module>/*.functions.ts` is a **transport adapter**: validate external input, resolve server-trusted actor, authorize, invoke Effect, serialize safe output. TanStack's static `createServerFn` imports are allowed in React; do not dynamically import these functions.
 - `<module>/*.schema.ts` is a client-safe Zod HTTP/input schema; never duplicate Reylo-inferred row types solely to validate database rows.
 - `src/server/auth/actor.ts` conceptually owns the **Effect `Data.TaggedEnum`** for `Guest` and `Member`; `src/server/auth/current-actor.ts` conceptually declares the request-scoped `Context.Service`. Construct members only after verifying server sessions; do not import either into browser components.

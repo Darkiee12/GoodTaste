@@ -15,6 +15,7 @@ Flyway image is pinned to `flyway/flyway:13.11.1` in `infra/compose.yaml`. It re
 
 - `FLYWAY_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}`
 - `FLYWAY_USER`, `FLYWAY_PASSWORD`: wired to local Postgres bootstrap values only.
+- `FLYWAY_SCHEMAS=goodtaste`, `FLYWAY_DEFAULT_SCHEMA=goodtaste`: extension objects are initialized in `public`, but Flyway history and GoodTaste application tables are in their own schema.
 - `FLYWAY_VALIDATE_MIGRATION_NAMING=true`, `FLYWAY_BASELINE_ON_MIGRATE=false`, `FLYWAY_CLEAN_DISABLED=true`.
 
 Its SQL directory is mounted read-only at `/flyway/sql`. A `flyway_schema_history` record is created in Postgres when migration tooling initializes an appropriate schema; this is not a replacement for a database backup.
@@ -33,6 +34,10 @@ The application must not receive `FLYWAY_PASSWORD` or DDL credentials; the migra
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL`.
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
+
+## Map frontend configuration (when the UI lands)
+
+`VITE_MAP_STYLE_URL` is a **public browser-visible** MapLibre vector-style URL; a MapTiler-hosted style is the initial recommendation. Domain/referrer-restrict the map provider key and monitor API usage. **Never** use this browser variable for private database, AI, or S3 credentials. Provider terms and pricing must be reviewed before production.
 
 ## Secret handling rules
 

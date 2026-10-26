@@ -14,7 +14,7 @@
 
 ## Required test scenarios when schema/code arrives
 
-1. Fresh-database migration: migrate all files in one order, validate, and record schema-history versions.
+1. Fresh-database migration: migrate all files in order into schema `goodtaste`, validate, ensure the PostGIS extension and `ST_DWithin` function work, and record history versions.
 2. Upgrade-path test: start from previous deployed schema and verify migrations apply without deleting user data or breaking older deployed readers during rollout.
 3. Query shape and invariants: PK/unique nullability, missing rows, foreign keys, under/over-limit pagination, Unicode food names, source/evidence nullability.
 4. Actor access: guest public discovery works; private tables reject guest reads/writes; member A cannot access member B's saved items, including through bulk operations.
@@ -44,3 +44,7 @@ bun run check-types
 The Compose network deliberately exposes **no PostgreSQL port to the host**. Until an intentional loopback-only forwarding strategy or a containerized typecheck is implemented, running `bun run check-types` directly on the host with live `.sql` imports requires explicit access to the database; do not promise it will work by default. Document the chosen access mechanism with the application scaffold.
 
 This document describes **required scenarios**, not an already-implemented or passing test suite.
+
+## Geospatial tests (once restaurant schema exists)
+
+Test strict coordinate/radius bounds, venue inclusion/exclusion at the edge of the radius, null/missing coordinates, stable ordering and spatial-index use. Browser-test TanStack SSR-safe MapLibre mounting, map/list selection, narrow/mobile scrolling, missing-location permission and map attribution. See `docs/architecture/maps.md`.

@@ -16,6 +16,8 @@ src/server/database/
 infra/compose.yaml                     # Local PostgreSQL + one-shot migrator
 ```
 
+**PostGIS + schema ownership:** `V20261027_001__enable_postgis.sql` records the extension prerequisite. The PostGIS image initializes extension objects in `public`, which can make Flyway reject a first migration in that nonempty schema. Use `FLYWAY_SCHEMAS=goodtaste` and `FLYWAY_DEFAULT_SCHEMA=goodtaste` for a fresh app schema/history, keeping `baselineOnMigrate=false`. All future GoodTaste app tables must be placed in `goodtaste` explicitly or via a deliberately configured DB search path. Production/managed Postgres may require DBA provision of the extension. The PostGIS image currently supports AMD64; document host compatibility before running locally.
+
 The database-wide schema history is centralized; *query ownership* stays with User, Food Discovery or Restaurant Discovery. A cross-domain foreign key may need coordinated review, but it still appears in the single ordered Flyway migration stream.
 
 Flyway stores version, checksum, outcome and timestamp in `flyway_schema_history`. A versioned SQL script is applied once. Never silently edit or renumber an already-applied migration; write a new forward migration. Repeatable scripts rerun when their checksum changes: keep them idempotent and reserve them for views/functions or other appropriate objects.
@@ -74,7 +76,7 @@ To inspect problems, use `docker compose ... logs migrator` for the normal `up` 
 
 CI should provision a fresh, disposable PostgreSQL 18 instance, run **all** migrations in version order, run Flyway `validate`, then type-check Reylo `.sql` imports against the migrated schema and run repository integration tests. Running migration scripts twice on fresh CI can additionally detect accidental non-repeatability of initial migration deployment.
 
-The initial scaffold CI may validate the Flyway container and an empty migration directory; **that is not equivalent to proving future SQL query correctness**. Once the first `.sql` import arrives, CI must configure Reylo's actual database connection/analysis settings, execute migrations first, and fail on a schema/query mismatch or unavailable database. Never silently fall back to a stale analysis cache as the sole CI source of truth.
+Scaffold CI now verifies the PostGIS extension with a real spatial function plus its first Flyway migration. **This is not equivalent to proving future restaurant query correctness**. Once the first `.sql` import arrives, CI must configure Reylo's actual database connection/analysis settings, execute migrations first, and fail on a schema/query mismatch or unavailable database. Never silently fall back to a stale analysis cache as the sole CI source of truth.
 
 ## Deployment policy: Compose vs Docker Swarm
 

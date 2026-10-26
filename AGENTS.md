@@ -37,6 +37,7 @@ Read `docs/architecture/modules.md` and `docs/architecture/access-control.md` be
 
 ## SQL, migrations and release safety
 
+- Restaurant Discovery uses PostGIS 3.6 for geosearch and a browser-only MapLibre GL JS + `react-map-gl/maplibre` React map. Never conflate a basemap/tile provider with restaurant/POI sources. Read `docs/architecture/maps.md` before implementing geolocation or map UI.
 - **Flyway** is the sole schema migrator. Put DDL/data migrations in global `db/migrations/`; application `.sql` queries belong to the owning module's `server/repository/sql/` path and are typed through Reylo.
 - Prefer direct SQL and small Effect operations over `Controller → Service → Repository` boilerplate. Use repositories when they protect meaningful persistence/transaction contracts; never let transport handlers bypass authorization.
 - In local Compose, the one-shot migrator depends on PostgreSQL health; future app containers must await its successful exit. Docker Swarm requires an **external release pipeline gate**, not `depends_on`.

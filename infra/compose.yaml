@@ -1,5 +1,6 @@
 # LOCAL DEVELOPMENT ONLY. Never deploy this Compose file as production.
 # Flyway migrates the database in a one-shot container before app startup.
+# PostGIS image currently targets AMD64; existing volumes require review/backup.
 # The legacy MinIO CE image receives no current community security updates.
 # Postgres 18 requires a volume at /var/lib/postgresql (not the PG17 /data path).
 # Existing volumes using the old mount require a manual backup/migration review.
@@ -8,7 +9,7 @@
 # ports entry and never commit it.
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgis/postgis:18-3.6-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
@@ -29,6 +30,10 @@ services:
       FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
       FLYWAY_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      # PostGIS initializes extension objects in public, so the application
+      # and Flyway history use a separate schema.
+      FLYWAY_SCHEMAS: goodtaste
+      FLYWAY_DEFAULT_SCHEMA: goodtaste
       FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
       FLYWAY_BASELINE_ON_MIGRATE: "false"
       FLYWAY_CLEAN_DISABLED: "true"

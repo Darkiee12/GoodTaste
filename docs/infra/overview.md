@@ -2,7 +2,7 @@
 
 ## Environments
 
-- **Local:** a TanStack Start app process (future scaffold), PostgreSQL 18, one-shot Flyway migrator, and a local S3-compatible MinIO sample for development only. AI/Places integrations run behind server-only adapters.
+- **Local:** a TanStack Start app process (future scaffold), PostgreSQL 18 + PostGIS 3.6 (AMD64-compatible host required), one-shot Flyway migrator, and a local S3-compatible MinIO sample for development only. AI/Places integrations run behind server-only adapters.
 - **Preview / CI:** disposable Postgres 18 initialized through the same Flyway history; synthetic fixtures; isolated object-store test bucket or fake. Once Reylo SQL imports exist, CI must typecheck against the migrated live schema.
 - **Production:** app release behind HTTPS, separately orchestrated **one-shot Flyway deployment job**, managed/backed-up PostgreSQL with restricted app credentials, and a maintained S3-compatible object service. Legacy MinIO CE is not approved for production.
 

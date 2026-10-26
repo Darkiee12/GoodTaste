@@ -4,7 +4,7 @@ This runbook covers **local-only** Docker Compose, not production deployment or 
 
 ## Prerequisites
 
-Docker Engine + recent Compose plugin, repository checkout, adequate local disk and ability to pull `postgres:18-alpine`, `flyway/flyway:13.11.1`, and any intentionally approved legacy MinIO image. Bun/Node is needed only for application development after the app is scaffolded.
+Docker Engine + recent Compose plugin, repository checkout, adequate local disk and ability to pull `postgis/postgis:18-3.6-alpine`, `flyway/flyway:13.11.1`, and any intentionally approved legacy MinIO image. Bun/Node is needed only for application development after the app is scaffolded.
 
 ## Safe local setup
 

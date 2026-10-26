@@ -14,6 +14,7 @@
 - [Contracts](architecture/contracts.md): shapes and ownership of cross-team APIs.
 - [Data model](architecture/data-model.md): conceptual entities and provenance.
 - [Effect conventions](architecture/effect.md): typed effects and adapter practices.
+- [Maps and geosearch](architecture/maps.md): PostGIS, MapLibre React, TanStack SSR, tile/Places separation.
 - [Effect domain modeling](architecture/domain-modeling.md): ADTs, tagged errors, request-scoped Actor and codec boundaries.
 - [Trust and safety](architecture/trust-and-safety.md): food claims, privacy, media and AI risks.
 

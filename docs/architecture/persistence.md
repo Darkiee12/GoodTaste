@@ -92,6 +92,10 @@ A transaction must pin one physical database connection. `src/server/database/tr
 - Beware parallel requests using the same transaction connection concurrently. Serialize DB statements unless the chosen driver and transaction design explicitly support a concurrency pattern.
 - Log failures with request correlation but never raw credentials, SQL parameters that contain private data, or production URLs with embedded passwords.
 
+## Geographic queries
+
+PostGIS 3.6 in PostgreSQL 18 handles Restaurant Discovery radius and bounding-box queries through domain-owned Reylo SQL. Prefer `geography(Point,4326)` + GiST, use `ST_DWithin` for index-aware filtering and select scalar distances rather than raw geography payloads. Long/lat/radius are bounded by Zod at the HTTP adapter. MapLibre renders results only; it is not the geographic search service. See [maps](maps.md).
+
 ## Domain trust and access
 
 A guest or member is represented by a trusted Effect `Data.TaggedEnum` actor; its per-request service must not be cached in a shared runtime. A guest can use public discovery reads; a member's saved data must be queried with actor-scoped predicates (e.g. `WHERE owner_id = :actorId`) and ownership checks. The `user` module owns identity/user preferences; Food Discovery owns dish identity; Restaurant Discovery owns venue-to-food offering evidence. No module imports another module's private SQL.

@@ -1,6 +1,6 @@
 # PostgreSQL operating contract
 
-**Baseline:** PostgreSQL 18 for the existing **local** `infra/compose.yaml`, not PostgreSQL 17. Production vendor/patch version is selected with documented compatibility and security review. No host port is published by default.
+**Baseline:** PostgreSQL 18 + **PostGIS 3.6** on local AMD64 hosts. The standard PostGIS image initializes extension objects in `public`, so Flyway uses a separate `goodtaste` schema for application tables and its schema-history table, with automatic baseline disabled. The DB role/search path must be configured deliberately for these tables. Production vendor/patch version is selected with documented compatibility and security review. No host port is published by default.
 
 ## Owners and privilege boundaries
 
@@ -15,7 +15,7 @@ See [the migration runbook](migrations.md) and [SQL-first persistence](../archit
 
 ## Local development
 
-`postgres:18-alpine` runs inside the Docker Compose network. Its readiness probe uses `pg_isready`, and volume `postgres_data` is mounted at **`/var/lib/postgresql`**, the correct mount location for official PostgreSQL 18 images (which store data under `/var/lib/postgresql/18/docker`), and stores data across container restarts. **Do not** use the pre-18 `/var/lib/postgresql/data` mount path. If an older local named volume exists, inspect its actual data/layout and back it up before changing the mount; changing image/mount settings is not a safe database upgrade procedure. This configuration intentionally publishes **no** `5432` port to the host or internet.
+`postgis/postgis:18-3.6-alpine` runs inside the Docker Compose network. The official PostGIS image currently targets AMD64; ARM64 setups need a reviewed alternative. Switching an existing Postgres volume/image requires backup and review, never deletion or blind replacement. Its readiness probe uses `pg_isready`, and volume `postgres_data` is mounted at **`/var/lib/postgresql`**, the correct mount location for official PostgreSQL 18 images (which store data under `/var/lib/postgresql/18/docker`), and stores data across container restarts. **Do not** use the pre-18 `/var/lib/postgresql/data` mount path. If an older local named volume exists, inspect its actual data/layout and back it up before changing the mount; changing image/mount settings is not a safe database upgrade procedure. This configuration intentionally publishes **no** `5432` port to the host or internet.
 
 From the repository root, after preparing `infra/.env`:
 
@@ -34,7 +34,7 @@ If you run Bun/TypeScript/Reylo **on the host**, `DATABASE_URL=postgres://...@lo
 
 - Use parameterized SQL, Postgres constraints, unique keys, foreign keys and transaction boundaries; avoid manual string-concatenated SQL.
 - Queries should select only required columns, return deliberate nullability, use deterministic pagination ordering and enforce ownership for private data.
-- Add or change indexes through reviewed Flyway migrations; inspect actual query plans and measure p95/p99 and lock behavior when optimizing. Writing raw SQL is not automatically the fastest plan.
+- Add or change indexes through reviewed Flyway migrations; Restaurant Discovery's planned PostGIS `geography(Point,4326)` needs an appropriate GiST index. Inspect real query plans and measure p95/p99 and lock behavior. Writing raw SQL is not automatically the fastest plan.
 - Prefer short transactions. A cross-domain atomic workflow shares one pinned transaction client, coordinated under `src/server/database/`.
 - Avoid running network AI/provider calls inside an open DB transaction.
 
