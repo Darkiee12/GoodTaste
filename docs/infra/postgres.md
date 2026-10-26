@@ -15,7 +15,7 @@ See [the migration runbook](migrations.md) and [SQL-first persistence](../archit
 
 ## Local development
 
-`postgres:18-alpine` runs inside the Docker Compose network. Its readiness probe uses `pg_isready`, and volume `postgres_data` stores data across container restarts. This configuration intentionally publishes **no** `5432` port to the host or internet.
+`postgres:18-alpine` runs inside the Docker Compose network. Its readiness probe uses `pg_isready`, and volume `postgres_data` is mounted at **`/var/lib/postgresql`**, the correct mount location for official PostgreSQL 18 images (which store data under `/var/lib/postgresql/18/docker`), and stores data across container restarts. **Do not** use the pre-18 `/var/lib/postgresql/data` mount path. If an older local named volume exists, inspect its actual data/layout and back it up before changing the mount; changing image/mount settings is not a safe database upgrade procedure. This configuration intentionally publishes **no** `5432` port to the host or internet.
 
 From the repository root, after preparing `infra/.env`:
 

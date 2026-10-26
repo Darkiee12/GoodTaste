@@ -113,3 +113,7 @@ No routine `DROP`, `clean`, volume deletion, `repair`, or ad hoc production SQL.
 - https://documentation.red-gate.com/fd/flyway-docker
 - https://docs.docker.com/reference/compose-file/services/
 - https://docs.docker.com/reference/cli/docker/stack/deploy/
+
+## PostgreSQL 18 Docker volume note
+
+Official PostgreSQL 18 images store `PGDATA` at `/var/lib/postgresql/18/docker` and expect the volume mount at **`/var/lib/postgresql`**. Earlier images expected `/var/lib/postgresql/data`. GoodTaste's Compose now uses the 18-compatible mount. If an existing named volume was created under the older layout, do not automatically relocate or delete it: inspect, back up and follow the official major-upgrade/volume migration procedure before changing the container. See https://github.com/docker-library/docs/blob/master/postgres/README.md#pgdata.

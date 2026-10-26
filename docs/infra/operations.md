@@ -28,6 +28,8 @@ docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator inf
 docker compose --env-file infra/.env -f infra/compose.yaml ps
 ```
 
+For official PostgreSQL 18 images, the named volume is mounted at `/var/lib/postgresql`, **not** `/var/lib/postgresql/data` (the PostgreSQL 17-and-earlier convention). Existing volumes from the old layout must be backed up and reviewed before manual migration. Never drop or recreate a volume as a quick fix.
+
 The first command waits for the Postgres health check, the second runs pending Flyway migrations and **must exit 0** before running app code, and the third validates the applied history. `run --rm` removes the transient migrator container. The migration files currently contain only the directory README until schema work is approved. Do not infer that a successful no-op migration means a user/dish/restaurant table exists.
 
 For a full local dependency startup:
