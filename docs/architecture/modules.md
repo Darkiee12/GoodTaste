@@ -1,0 +1,70 @@
+# Canonical directory and module rules
+
+**Status: authoritative scaffold convention.** The tree is a *target layout*, not a claim the code already exists. Create real files only when the related functionality is implemented.
+
+```text
+src/
+├── routes/                            # TanStack pages; routes/api for external HTTP/webhooks
+├── modules/
+│   ├── user/
+│   │   ├── components/
+│   │   ├── user.schema.ts            # Client-safe Zod 4.6 transport schemas
+│   │   ├── user.functions.ts         # createServerFn wrappers
+│   │   └── server/
+│   │       ├── index.ts              # Intentional server-only public module API
+│   │       ├── operations/
+│   │       └── repository/sql/       # Owned Reylo .sql queries
+│   ├── food-discovery/
+│   │   ├── components/
+│   │   ├── food.schema.ts
+│   │   ├── food.functions.ts
+│   │   └── server/
+│   │       ├── index.ts
+│   │       ├── operations/
+│   │       └── repository/sql/
+│   └── restaurant-discovery/
+│       ├── components/
+│       ├── restaurant.schema.ts
+│       ├── restaurant.functions.ts
+│       └── server/
+│           ├── index.ts
+│           ├── operations/
+│           └── repository/sql/
+├── server/
+│   ├── auth/                          # Session verification, access policy and ownership
+│   ├── database/                      # Pool, migration lifecycle, transactions
+│   ├── integrations/                  # AI, Places and object storage adapters
+│   ├── workflows/                     # Genuine multi-module use cases
+│   ├── layers.ts                      # Effect composition root
+│   └── runtime.ts                     # Server-only ManagedRuntime
+├── components/ui/                     # Shared visual primitives
+└── shared/                            # Deliberately shared client-safe types
+```
+
+TanStack-specific `src/start.ts`/`src/server.ts` framework entrypoints may be added as required by its current documented conventions; Effect does **not** replace TanStack's HTTP server.
+
+## Ownership and imports
+
+- `routes/` owns navigation, page rendering and HTTP route registration; no SQL or business policy.
+- `<module>/*.functions.ts` is a **transport adapter**: validate external input, resolve server-trusted actor, authorize, invoke Effect, serialize safe output. TanStack's static `createServerFn` imports are allowed in React; do not dynamically import these functions.
+- `<module>/*.schema.ts` is a client-safe Zod HTTP/input schema; never duplicate Reylo-inferred row types solely to validate database rows.
+- `<module>/server/` owns application/domain operations and its SQL queries. Other modules can import only its intentional `server/index.ts` exports, not internal operation or repository files.
+- Browser-facing modules never import `src/server/` or another module's `server/` directly. Never mix client-safe and server-only exports in one barrel.
+- `src/server/` owns shared infrastructure and multi-domain workflows, not a dumping ground called `services/`.
+- `src/routes/api/` is for external raw HTTP or webhooks, not a second backend. Public APIs and internal server functions invoke the **same** application operations.
+- `repos/effect/` is read-only reference source, not the runtime dependency and not application code.
+
+No root `packages/`, no generic root `services/`, and no parallel `backend/` project until justified by real independent reuse or deployment. A package boundary is not a substitute for an ownership boundary. Do not create placeholders just to fill the tree.
+
+## Module interactions
+
+- A module **may** call another module's public server operation when the dependency is one-way and the contract is stable.
+- Cross-domain orchestration (e.g. recommend food and find places serving it) lives in `src/server/workflows/`: it can call Food Discovery, Restaurant Discovery and optionally User preferences.
+- If A needs B and B needs A, fix the ownership or move the orchestration upwards; do not conceal cycles behind Effect services.
+- Neither domain reads the other's SQL or directly mutates its tables. Cross-module writes coordinate a **single shared database transaction** from the workflow when atomicity is required.
+- Food Discovery owns the canonical dish concept. Restaurant Discovery owns venue records, source-backed menu/serving evidence and venue-to-dish associations. User owns member account and saved items.
+- Menu translation and ordering start as module operations/workflows; do not pre-create new domains to accommodate hypothetical future features.
+
+## Agent review rule
+
+Before adding a file, state its owning module and whether it is browser-safe, transport, application, or infrastructure. Before a cross-module import, identify the published contract and check for cycles. Shared contract edits need coordinator review. Static lint is not yet a substitute for enforcing import ownership.
