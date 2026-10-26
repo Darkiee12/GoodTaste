@@ -1,0 +1,13 @@
+# Secrets and runtime artifacts
+.env
+.env.*
+!.env.example
+infra/.env
+*.local
+node_modules/
+.output/
+dist/
+coverage/
+.DS_Store
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

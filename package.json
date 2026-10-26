@@ -1,0 +1,30 @@
+{
+  "name": "goodtaste",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "typecheck": "bun check"
+  },
+  "devDependencies": {
+    "@playwright/cli": "^0.1.22",
+    "@types/bun": "latest",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react-swc": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.170.46",
+    "@tanstack/react-start": "^1.169.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}
