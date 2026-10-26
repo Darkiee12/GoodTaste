@@ -9,10 +9,16 @@
     "start": "bun .output/server/index.mjs",
     "start:node": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit --runExternalCode",
-    "format": "prettier --write src vite.config.ts tsconfig.json package.json README.md",
-    "format:check": "prettier --check src vite.config.ts tsconfig.json package.json README.md"
+    "lint": "oxlint . --disable-nested-config --ignore-pattern 'repos/**' --max-warnings 0",
+    "lint:fix": "oxlint . --disable-nested-config --ignore-pattern 'repos/**' --fix",
+    "format": "oxfmt --check .",
+    "format:check": "oxfmt --check .",
+    "fmt": "oxfmt .",
+    "check-types": "tsc --noEmit --runExternalCode -p tsconfig.json",
+    "check": "bun run format && bun run lint && bun run check-types"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.79.0",
     "@playwright/cli": "^0.1.22",
     "@reylosql/postgres": "^0.5.0",
     "@types/bun": "latest",
@@ -22,6 +28,9 @@
     "@vitejs/plugin-react": "^6.1.2",
     "@vitejs/plugin-react-swc": "^4.3.3",
     "nitro": "^3.0.260903-beta",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2002",
     "prettier": "^3.9.10",
     "typescript": "^7.1.0-dev.20261026.1",
     "vite": "^8.3.5",

@@ -31,6 +31,6 @@
       "extensions": [".sql", ".reylo.yaml", ".reylo.yml"]
     }
   ],
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
-  "exclude": ["node_modules", "repos", "dist", ".output"]
+  "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
+  "exclude": ["repos", ".agents", ".claude", "node_modules", ".output", "dist", "coverage"]
 }
