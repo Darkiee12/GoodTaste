@@ -1,20 +1,44 @@
-# Configuration and secrets
+# Environment configuration and secrets
 
-## Local Docker Compose config (`infra/.env`)
-`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_IMAGE`. Example defaults are **development only** and must be replaced.
+## Local Compose `infra/.env`
 
-## Proposed application variables (to validate after scaffold)
-- `DATABASE_URL` (server-only)
-- `S3_ENDPOINT_INTERNAL` (server-only internal API endpoint)
-- `S3_ENDPOINT_PUBLIC` (browser-resolvable host used for signed URLs)
-- `S3_REGION`, `S3_BUCKET_PRIVATE`
-- `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`
-- `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`
-- `APP_BASE_URL`, optional `LOG_LEVEL`
+Copy `infra/.env.example` to `infra/.env`. Required local-only variables:
 
-## Process rules
-- Validate runtime config during server startup and fail early on absent critical settings.
-- Client-exposed vars must be explicitly allowlisted, never inferred from `process.env` broadly.
-- Use different credentials for storage root/admin vs application bucket-access account in production; create least-privilege app credentials during infra provisioning.
-- Secrets go into secure deployment secret storage. Do not print env values in logs/CI output or commit generated configs.
-- `.env.example` contains examples only; `.env` and `*.local` are ignored.
+| Variable | Owner | Notes |
+| --- | --- | --- |
+| `POSTGRES_USER` | PostgreSQL initialization + Flyway | Local bootstrap account; do **not** assume this role is suitable for production app queries |
+| `POSTGRES_PASSWORD` | PostgreSQL initialization + Flyway | Local-only, never publish/log |
+| `POSTGRES_DB` | PostgreSQL initialization + Flyway | Injected into Flyway JDBC URL; must match initialized database |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_IMAGE` | Legacy local object store | MinIO example is local-only and unmaintained |
+
+Flyway image is pinned to `flyway/flyway:13.11.1` in `infra/compose.yaml`. It reads:
+
+- `FLYWAY_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}`
+- `FLYWAY_USER`, `FLYWAY_PASSWORD`: wired to local Postgres bootstrap values only.
+- `FLYWAY_VALIDATE_MIGRATION_NAMING=true`, `FLYWAY_BASELINE_ON_MIGRATE=false`, `FLYWAY_CLEAN_DISABLED=true`.
+
+Its SQL directory is mounted read-only at `/flyway/sql`. A `flyway_schema_history` record is created in Postgres when migration tooling initializes an appropriate schema; this is not a replacement for a database backup.
+
+## Production role separation
+
+**Never** use the app runtime account as the schema owner or migration superuser. Use a controlled DDL/migrator credential with ownership/migration privileges appropriate to the schema and a separate app credential with only required SELECT/INSERT/UPDATE/DELETE/USAGE rights. Manage grants in reviewed provisioning/migrations without embedding passwords in SQL or configuration committed to Git.
+
+The application must not receive `FLYWAY_PASSWORD` or DDL credentials; the migrator must not receive AI/S3 secrets. Flyway is executed by a pre-deploy job rather than as part of every server process.
+
+## App and Reylo variables (to finalize with app scaffold)
+
+- `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
+- For Reylo analysis, the URL must point **directly** to a migrated Postgres schema; avoid transaction-mode PgBouncer. A distinct development/CI connection may be used instead of the runtime pool URL.
+- `S3_ENDPOINT_INTERNAL`, `S3_ENDPOINT_PUBLIC` (browser-valid presigned hostname), `S3_REGION`, `S3_BUCKET_PRIVATE`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL`.
+
+**Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
+
+## Secret handling rules
+
+- Validate server config at startup; fail with sanitized messages when required variables are absent.
+- Explicitly allowlist client-visible variables. Never import private DB/migrator credentials into browser components.
+- Use managed deployment secret storage and rotate/limit accounts. Rendered Compose config can reveal secret values: prefer `docker compose ... config --quiet` when only validating.
+- Do not commit `.env`, keys, private images or database dumps. Do not print secrets in CI traces, PR descriptions or troubleshooting posts.
+
+See [migration operations](migrations.md) and [local runbook](operations.md).

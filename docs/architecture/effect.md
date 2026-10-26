@@ -11,9 +11,11 @@ TanStack Start owns HTTP. Effect v4 is the application backend toolkit, **not a 
 
 **HTTP:** Zod 4.6 validates query/form/request data in TanStack server-function or raw HTTP adapters. Server session verification and resource authorization are independent of Zod input parsing.
 
-**SQL:** Reylo's TypeScript 7.1 `.sql` imports infer parameters, results and cardinality against the live PostgreSQL schema. Each module owns its SQL under its `server/repository/sql/`; shared pool, transaction plumbing and migrations belong to `src/server/database/`. Avoid redundant Zod schemas for trusted SQL rows. PostgreSQL constraints and domain invariants remain necessary.
+**SQL:** Flyway (external CLI/container) migrates PostgreSQL **before** the app; it never runs inside an Effect service or during every server startup. Reylo's TypeScript 7.1 `.sql` imports infer parameters, results and cardinality against the live PostgreSQL schema. Each module owns its SQL under its `server/repository/sql/`; shared pool, transaction plumbing and migrations belong to `src/server/database/`. Avoid redundant Zod schemas for trusted SQL rows. PostgreSQL constraints and domain invariants remain necessary.
 
 **Other trust boundaries:** AI and external Places data require runtime checking and provenance. Typed SQL does not establish that an AI claim is factual. Never claim verified dietary safety on inference alone.
+
+See `docs/architecture/persistence.md` and `docs/infra/migrations.md` for query ownership, transaction boundary and the release gate.
 
 Reylo type checking needs a schema-available development database (or explicitly supported cached analysis). Keep TypeScript 7.1 content mapper configuration and `--runExternalCode` working. Run migrations before checks once SQL imports exist.
 

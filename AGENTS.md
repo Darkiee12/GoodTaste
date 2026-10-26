@@ -16,7 +16,7 @@ GoodTaste is a mobile-first full-stack application that helps travellers (1) dis
 1. All tasks: `docs/README.md`, `docs/agents/workflow.md`, `docs/agents/definition-of-done.md`.
    Frontend work, UI reviews, prototyping, or module design: use the [skill routing guide](docs/agents/skills.md) to load only the relevant skill.
 2. Infra, secrets, deployments: `docs/infra/overview.md`, `docs/infra/operations.md` and relevant service runbook.
-3. Data or migrations: `docs/architecture/data-model.md`, `docs/infra/postgres.md`.
+3. Data, SQL, schema or migrations: `docs/architecture/data-model.md`, `docs/architecture/persistence.md`, `docs/infra/postgres.md`, `docs/infra/migrations.md`, and `docs/development/database-testing.md`. Run migrations as a separate pre-deploy job, never automatically in the Effect server or each replica.
 4. Uploads, photos, review images: `docs/infra/object-storage.md`, `docs/architecture/trust-and-safety.md`.
 5. Frontend/server functions/Effect: `docs/architecture/overview.md`, `docs/architecture/effect.md`, `docs/architecture/contracts.md`.
 6. AI recommendations or menu analysis: `docs/architecture/trust-and-safety.md`, `docs/architecture/contracts.md`.
@@ -32,6 +32,14 @@ Read `docs/architecture/modules.md` and `docs/architecture/access-control.md` be
 - Cross-module calls use each module's published server-only API; do not import another module's private repository/SQL. Coordinate cycles in `src/server/workflows/`.
 - HTTP inputs use Zod 4.6; database SQL uses Reylo's inferred types, without duplicate row parsing. Validate external AI/Places output separately.
 - Compose Effect v4 operations and layers without creating a parallel HTTP server or storing per-request identity in global runtime state.
+
+## SQL, migrations and release safety
+
+- **Flyway** is the sole schema migrator. Put DDL/data migrations in global `db/migrations/`; application `.sql` queries belong to the owning module's `server/repository/sql/` path and are typed through Reylo.
+- Prefer direct SQL and small Effect operations over `Controller → Service → Repository` boilerplate. Use repositories when they protect meaningful persistence/transaction contracts; never let transport handlers bypass authorization.
+- In local Compose, the one-shot migrator depends on PostgreSQL health; future app containers must await its successful exit. Docker Swarm requires an **external release pipeline gate**, not `depends_on`.
+- Production application credentials are distinct from migration credentials. Never change already-applied versioned Flyway files, bypass migration history with `db push`, or treat `repair`/`clean` as normal recovery.
+- After the first Reylo `.sql` import, CI must migrate a fresh database **before** checking SQL types/building; an empty migration-history check is not proof that application SQL works.
 
 ## Non-negotiable engineering rules
 - Respect dependency direction: route/UI → application operation → provider/repository interface → infrastructure adapter. Do not import DB, secrets, or object SDKs into browser code.

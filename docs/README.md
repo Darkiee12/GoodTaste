@@ -10,6 +10,7 @@
 - [Module organization](architecture/modules.md): canonical paths, owners and cross-module imports.
 - [Guest/member access](architecture/access-control.md): actor policy and endpoint authorization.
 - [System overview](architecture/overview.md): request flow and dependency boundaries.
+- [SQL-first persistence](architecture/persistence.md): Reylo queries, Effect operations, transactions and module query ownership.
 - [Contracts](architecture/contracts.md): shapes and ownership of cross-team APIs.
 - [Data model](architecture/data-model.md): conceptual entities and provenance.
 - [Effect conventions](architecture/effect.md): typed effects and adapter practices.
@@ -17,7 +18,8 @@
 
 ## Infrastructure
 - [Infra overview](infra/overview.md): local/production topology and responsibilities.
-- [PostgreSQL](infra/postgres.md): persistence, migrations, backups, restore.
+- [PostgreSQL](infra/postgres.md): persistence, privilege model, backups, restore.
+- [Flyway migrations](infra/migrations.md): one-shot migration container, schema history, deployment gating and failure recovery.
 - [Object storage](infra/object-storage.md): images, S3 API, security, retention.
 - [Environment](infra/environment.md): configuration and secret handling.
 - [Operations](infra/operations.md): local runbook and smoke checks.
@@ -33,6 +35,7 @@
 
 ## Development quality
 - [Quality gates](development/quality-gates.md): Oxlint, Oxfmt, type checks, UI verification and CI behavior.
+- [Database testing](development/database-testing.md): PostgreSQL/Flyway checks and Reylo test prerequisites.
 
 ## Reference material
 - [Sources](references.md): canonical external documentation and researched repositories.

@@ -1,26 +1,71 @@
-# Local operations and infrastructure checks
+# Local operations and infra verification
 
-This runbook describes the **proposed local dev** Compose configuration. No remote host is targeted.
+This runbook covers **local-only** Docker Compose, not production deployment or Docker Swarm. MinIO's legacy CE image is unsupported and remains restricted to local development.
 
 ## Prerequisites
-Docker Engine with Compose plugin. Bun/Node for app implementation later. Optional AWS CLI for bucket smoke tests.
 
-## Start (local only)
-1. From repo root: `cp infra/.env.example infra/.env` (or copy manually on Windows).
-2. Set new local-only secrets in `infra/.env`; review and approve the MinIO legacy image risk.
-3. Validate: `docker compose --env-file infra/.env -f infra/compose.yaml config` (do not paste output in public logs; it contains credentials).
-4. Start: `docker compose --env-file infra/.env -f infra/compose.yaml up -d`.
-5. Verify: `docker compose --env-file infra/.env -f infra/compose.yaml ps`, then Postgres `pg_isready` via `docker compose --env-file infra/.env -f infra/compose.yaml exec postgres pg_isready`. No ports are published to the host, so reach MinIO only from inside the Compose network (e.g. `compose exec`) unless you temporarily re-add loopback-bound ports for local debugging.
-6. Create a private bucket `goodtaste-private` via reviewed CLI/UI provisioning. Verify that anonymous GET is forbidden. The MVP does **not** require a public bucket.
-7. Before real uploads, test local S3 API auth, presign URL hostname, CORS and deletion using an integration test.
+Docker Engine + recent Compose plugin, repository checkout, adequate local disk and ability to pull `postgres:18-alpine`, `flyway/flyway:13.11.1`, and any intentionally approved legacy MinIO image. Bun/Node is needed only for application development after the app is scaffolded.
 
-## Stop safely
-`docker compose --env-file infra/.env -f infra/compose.yaml stop` stops without deleting volumes. `down` removes containers/network; **never add `-v`** without user authorization and data backup.
+## Safe local setup
 
-## Recovery
-- DB unavailable: check container status and volume capacity, review redacted logs, avoid reset; run read-only health check.
-- Object store unavailable: verify volume, credentials and endpoint DNS; do not change ACL to public as a workaround.
-- Signed URL fails from browser: check public endpoint hostname/TLS, region/addressing and CORS; `minio:9000` only resolves from Compose network.
+Run from repository root. On Windows, copy `.env.example` manually if a POSIX `cp` command is unavailable.
 
-## Production prerequisites
-Choose supported object-store provider, deploy app, configure HTTPS, backups + restore rehearsal, quotas/rate limits, monitoring, secret rotation, data retention and incident ownership. Local Compose is never a production deployment plan.
+```bash
+cp infra/.env.example infra/.env
+# Edit infra/.env to use fresh local-only values. Do not print the file to public logs.
+docker compose --env-file infra/.env -f infra/compose.yaml config --quiet
+```
+
+The full `config` output expands secrets; use `--quiet` for validation without dumping them. Never commit `infra/.env`.
+
+## PostgreSQL and one-shot Flyway
+
+```bash
+docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait postgres
+docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator
+docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator validate
+docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator info
+docker compose --env-file infra/.env -f infra/compose.yaml ps
+```
+
+The first command waits for the Postgres health check, the second runs pending Flyway migrations and **must exit 0** before running app code, and the third validates the applied history. `run --rm` removes the transient migrator container. The migration files currently contain only the directory README until schema work is approved. Do not infer that a successful no-op migration means a user/dish/restaurant table exists.
+
+For a full local dependency startup:
+
+```bash
+docker compose --env-file infra/.env -f infra/compose.yaml up -d
+```
+
+This also starts MinIO and the one-shot `migrator`. Check its exit status/logs rather than assuming `up -d` proves migration success. When the app container is introduced it **must** use `depends_on: migrator: {condition: service_completed_successfully}`. Until that app exists, the foreground `run --rm migrator` command is the clearer gate.
+
+If an image cannot be downloaded or credentials are wrong, investigate **without deleting volumes**. To change a migration file already applied, add a new migration instead of editing the original.
+
+## MinIO and private bucket
+
+Do not start MinIO without accepting the legacy image risk described in [object storage](object-storage.md). No host ports are published. Create a private `goodtaste-private` bucket using reviewed CLI/UI provisioning via the Compose network. Check anonymous GET is denied and signed URLs use a browser-reachable endpoint; `minio:9000` resolves only within the Compose network.
+
+Before enabling real uploads test CORS, object type/size verification, presign semantics and deletion with synthetic data.
+
+## App + Reylo connection caveat
+
+No application container is currently defined in `infra/compose.yaml`. TypeScript's Reylo analysis uses a direct connection to the **migrated** database. Because Postgres has no published port, a host-side Bun process cannot automatically reach it. Decide on a network-local typecheck runner or a loopback-only local mapping when integrating the first `.sql` import; document the arrangement rather than silently using a public port.
+
+## Stop and investigate
+
+```bash
+docker compose --env-file infra/.env -f infra/compose.yaml stop
+docker compose --env-file infra/.env -f infra/compose.yaml ps -a
+```
+
+`stop` preserves containers and volumes; ordinary `down` removes containers/network while keeping named volumes. Do not add `--volumes` to local commands without explicit user authorization and a data backup.
+
+- PostgreSQL down: inspect health check, local disk and DB logs; use read-only diagnostics.
+- Migrator failed: check its exit code, schema-history state, SQL filename and errors; **block app deployment** until resolved. `flyway repair` is not normal recovery.
+- Reylo check fails: verify migrated schema, direct connection and SQL import; no silent cache-only success in CI.
+- MinIO unavailable: inspect internal DNS, credentials, volume; never expose public ACL/ports as an emergency workaround.
+
+## Production and CI
+
+Local Compose is not a production deployment. For Docker Swarm, `depends_on` is **not** a rollout gate; run exactly one release-scoped Flyway job through deployment orchestration and deploy/update the app only after success. Use separate DDL/runtime DB credentials, reviewed rollback compatibility, backups, monitoring and a supported object-store provider.
+
+See [migration and deployment policy](migrations.md), [database operation](postgres.md) and [quality gates](../development/quality-gates.md).

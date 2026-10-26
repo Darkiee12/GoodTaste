@@ -30,6 +30,8 @@ The only application route is `/`, with full-document SSR and Start's default se
 
 **Important:** MinIO community source was archived in April 2026. The example local MinIO image is legacy/unmaintained; it is not a production recommendation. Review `docs/infra/object-storage.md` and ADR 0003 before deployment.
 
+**SQL and schema:** Postgres 18 uses a one-shot Flyway container (`infra/compose.yaml`) to apply reviewed `db/migrations/*.sql` before future app startup. Application queries will be domain-local Reylo imports (see `docs/architecture/persistence.md`). The migration folder contains **no application schema yet**.
+
 **Local infrastructure:** copy `infra/.env.example` to `infra/.env`, customize secrets, then run `docker compose --env-file infra/.env -f infra/compose.yaml config` before starting services. See `docs/infra/operations.md`.
 
 Source references are collected in `docs/references.md`.
