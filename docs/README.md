@@ -24,6 +24,7 @@
 - [Workflow](agents/workflow.md): agent roles, worktree coordination, shared files.
 - [Definition of done](agents/definition-of-done.md): measurable completion criteria.
 - [Task template](agents/task-template.md): copy for assignments.
+- [Skill routing](agents/skills.md): what to load for UI, prototype, accessibility, motion and module-design work.
 
 ## Decision log
 - [ADR index](decisions/README.md): recorded architectural choices.
