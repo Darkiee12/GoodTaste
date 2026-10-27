@@ -1,4 +1,4 @@
-# GoodTaste Documentation Index
+# FeastJourney Documentation Index
 
 **Read this first.** Docs express design intent; `AGENTS.md` expresses agent behavior. Each file has a narrow owner and purpose. Avoid duplicated rules.
 

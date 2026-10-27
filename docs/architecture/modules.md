@@ -45,6 +45,7 @@ TanStack-specific `src/start.ts`/`src/server.ts` framework entrypoints may be ad
 
 ## Ownership and imports
 
+- Application source imports through the `@/*` path alias (resolving to `src/*`) for every application-to-application import, including same-directory siblings; do not write relative `../` or `./` application imports. The alias is declared in `tsconfig.json` (`paths`) and resolved by Vite (`vite-tsconfig-paths`), `tsc`, Oxlint, and Bun. Generated files (`src/routeTree.gen.ts`) and vendored trees (`repos/`, `tools/oxlint/`) are exempt and keep their own import style.
 - `routes/` owns navigation, page rendering and HTTP route registration; no SQL or business policy.
 - Restaurant Discovery owns its MapLibre-based browser map components and Reylo/PostGIS geosearch operations; no unrelated top-level `maps/` domain. Read [maps](maps.md) before implementation.
 - `<module>/*.functions.ts` is a **transport adapter**: validate external input, resolve server-trusted actor, authorize, invoke Effect, serialize safe output. TanStack's static `createServerFn` imports are allowed in React; do not dynamically import these functions.
@@ -76,3 +77,9 @@ Read [Effect domain modeling](domain-modeling.md) before defining authenticated 
 ## Agent review rule
 
 Before adding a file, state its owning module and whether it is browser-safe, transport, application, or infrastructure. Before a cross-module import, identify the published contract and check for cycles. Shared contract edits need coordinator review. Static lint is not yet a substitute for enforcing import ownership.
+
+## shadcn primitives
+
+- CLI-managed primitives live in `src/components/ui/` (installed with `bunx --bun shadcn@latest add ...`, configured by `components.json`: new-york style, no RSC, `lucide` icons, `@/` alias to `src/*`). Class merging comes from the `cn` package and primitives from the `radix-ui` package; there is no hand-written `lib/utils`.
+- Installed components are owned source: customize them in place to match the product palette (e.g. the dropdown menu's semantic tokens are mapped onto the dark header colors in `src/styles.css`). Theme additions stay minimal: only tokens referenced by installed components.
+- Update from upstream with `--dry-run`/`--diff` merges; never hand-fetch upstream files. New primitives need coordinator approval as shared-contract surface.

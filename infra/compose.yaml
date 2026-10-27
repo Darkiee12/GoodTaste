@@ -32,8 +32,8 @@ services:
       FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       # PostGIS initializes extension objects in public, so the application
       # and Flyway history use a separate schema.
-      FLYWAY_SCHEMAS: goodtaste
-      FLYWAY_DEFAULT_SCHEMA: goodtaste
+      FLYWAY_SCHEMAS: feastjourney
+      FLYWAY_DEFAULT_SCHEMA: feastjourney
       FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
       FLYWAY_BASELINE_ON_MIGRATE: "false"
       FLYWAY_CLEAN_DISABLED: "true"
@@ -51,7 +51,7 @@ services:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?Set a 64-character hex GARAGE_RPC_SECRET}
       GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
       GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
-      GARAGE_DEFAULT_BUCKET: goodtaste-private
+      GARAGE_DEFAULT_BUCKET: feastjourney-private
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_meta:/var/lib/garage/meta

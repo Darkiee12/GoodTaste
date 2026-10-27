@@ -1,4 +1,4 @@
-# GoodTaste architecture
+# FeastJourney architecture
 
 **Decision:** Single-deployment TanStack Start + Effect v4 modular monolith, not multiple applications or workspace packages. TanStack owns requests and rendering; Effect runs backend operations and provides dependencies; Reylo types PostgreSQL SQL imports.
 

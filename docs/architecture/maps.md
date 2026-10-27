@@ -13,7 +13,7 @@
 | MapLibre GL JS + `react-map-gl/maplibre` | Interactive WebGL vector map and React controls |
 | Hosted tile style (MapTiler initially) | Roads, boundaries, labels and map style, **not restaurant records** |
 
-GoodTaste's restaurant location and "serves dish" evidence live in PostgreSQL. A map tile provider is neither a source of verified menus nor a geocoding/Places replacement. Preserve provenance and serving-claim uncertainty.
+FeastJourney's restaurant location and "serves dish" evidence live in PostgreSQL. A map tile provider is neither a source of verified menus nor a geocoding/Places replacement. Preserve provenance and serving-claim uncertainty.
 
 ## Component boundary under TanStack Start
 
@@ -84,7 +84,7 @@ Test SSR/build behavior with the actual TanStack/Bun versions first; MapLibre's 
 - Coordinates are **longitude then latitude** for `ST_MakePoint(lon, lat)`; Zod validates bounds `[-180,180]` / `[-90,90]`, allowed radius and maximum result count at the transport boundary.
 - Query uses `ST_DWithin` for index-assisted radius filtering, `ST_Distance` only for eligible candidates/ranking; `geography` distances are in meters.
 - Return scalar columns (`distance_meters`, IDs, evidence, names), letting Reylo infer types from SQL. Do not expose raw geometry values without an explicit codec/format.
-- Tables will live in the **`goodtaste`** PostgreSQL schema, separately from PostGIS's installed extension objects in `public`. Query tables by schema-qualified name or configure search_path intentionally.
+- Tables will live in the **`feastjourney`** PostgreSQL schema, separately from PostGIS's installed extension objects in `public`. Query tables by schema-qualified name or configure search_path intentionally.
 - Stable ordering and pagination matter. Dish identity belongs to Food Discovery; venue/menu/serving evidence belongs to Restaurant Discovery. Distance alone is not proof a dish is served.
 
 ## Product and performance rules

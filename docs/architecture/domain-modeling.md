@@ -1,6 +1,6 @@
 # Effect v4 domain modeling (ADTs, actors, errors)
 
-**Canonical scaffold rule.** GoodTaste uses **Effect's data-modeling primitives** in the backend, rather than hand-writing every discriminated union or Java-style DTO class. The project chooses **Zod 4.6** for external HTTP validation and **Reylo** for SQL typing; neither means the *internal application model* should ignore Effect. This guide is grounded in our vendored v4 source at `repos/effect/packages/effect/src/Data.ts`, `Schema.ts`, `Context.ts`, `Effect.ts`, and in `repos/effect/packages/effect/SCHEMA.md`.
+**Canonical scaffold rule.** FeastJourney uses **Effect's data-modeling primitives** in the backend, rather than hand-writing every discriminated union or Java-style DTO class. The project chooses **Zod 4.6** for external HTTP validation and **Reylo** for SQL typing; neither means the *internal application model* should ignore Effect. This guide is grounded in our vendored v4 source at `repos/effect/packages/effect/src/Data.ts`, `Schema.ts`, `Context.ts`, `Effect.ts`, and in `repos/effect/packages/effect/SCHEMA.md`.
 
 ## Pick the right primitive
 
@@ -56,7 +56,7 @@ import { Actor } from "./actor";
 export class CurrentActor extends Context.Service<
   CurrentActor,
   Actor
->()("goodtaste/auth/CurrentActor") {}
+>()("feastjourney/auth/CurrentActor") {}
 
 export const currentActorLabel = Effect.gen(function* () {
   const actor = yield* CurrentActor;

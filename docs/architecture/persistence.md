@@ -1,6 +1,6 @@
 # SQL-first persistence with Reylo and Effect v4
 
-**Authoritative design rule.** GoodTaste uses PostgreSQL as its relational source of truth, **Flyway** for schema migrations, **Reylo** for typed application SQL, **Effect** for application operations/dependency lifetimes and **Zod 4.6** for network input. These tools solve different problems. No Prisma/Drizzle schema DSL, Kysely query builder, or ORM should be added merely for migration management.
+**Authoritative design rule.** FeastJourney uses PostgreSQL as its relational source of truth, **Flyway** for schema migrations, **Reylo** for typed application SQL, **Effect** for application operations/dependency lifetimes and **Zod 4.6** for network input. These tools solve different problems. No Prisma/Drizzle schema DSL, Kysely query builder, or ORM should be added merely for migration management.
 
 ## Canonical paths
 

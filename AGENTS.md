@@ -1,9 +1,9 @@
-# GoodTaste — Coding Agent Instructions
+# FeastJourney — Coding Agent Instructions
 
 This file is the mandatory repository entry point for coding agents. It is not a replacement for domain documentation. Read the documents indicated for your task before editing. If required files have not been created yet, report that rather than inventing their contents.
 
 ## Mission and scope
-GoodTaste is a mobile-first full-stack application that helps travellers (1) discover culturally relevant dishes, (2) find verified places that serve them, and (3) understand unfamiliar menus and prepare bilingual orders. Dietary requirements and uncertainty are first-class concerns. Read `docs/product/vision.md` and `docs/product/mvp.md` for acceptance criteria.
+FeastJourney is a mobile-first full-stack application that helps travellers (1) discover culturally relevant dishes, (2) find verified places that serve them, and (3) understand unfamiliar menus and prepare bilingual orders. Dietary requirements and uncertainty are first-class concerns. Read `docs/product/vision.md` and `docs/product/mvp.md` for acceptance criteria.
 
 ## Stack and architectural decisions
 - Modular monolith: TanStack Start (React) with server functions; Effect for application operations; PostgreSQL for relational truth; an S3-compatible object store, using Garage in local development. No separate HTTP backend in the MVP.
@@ -49,6 +49,8 @@ Read `docs/architecture/modules.md` and `docs/architecture/access-control.md` be
 - Server functions validate every external input, authorize protected operations at the server boundary, and return explicit client-safe outcomes. Do not expose internal stack traces.
 - Do not create abstractions without a second use case or a meaningful external boundary. Prefer small, cohesive features over generic frameworks.
 - Avoid `any`, hidden global side effects, swallowed errors, bare magic values, and mutable cross-request state.
+- Do not use `Record<K, V>` for application maps; use `ReadonlyMap<K, V>` instead and handle absent keys explicitly (no non-null assertions to unwrap `.get()`). The only exception is data or schema shapes coming from the database. Generated and vendored code is exempt.
+- All workspace-relative import paths must start with the `@/` alias (mapped to `src/` in `tsconfig.json`); never use relative imports like `../` or `./` for project code. Generated and vendored code is exempt.
 - Use Effect for orchestration, typed failures, cancellation, retries, and resource management where valuable. Avoid wrapping every pure function in Effect.
 - Changes that cross feature boundaries need documented contracts and an independent reviewer.
 - Production secrets are never committed or printed. Never commit `.env`, test user photos, private data, model credentials, or production connection strings.

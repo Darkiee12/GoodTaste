@@ -1,6 +1,6 @@
 # PostgreSQL operating contract
 
-**Baseline:** PostgreSQL 18 + **PostGIS 3.6** on local AMD64 hosts. The standard PostGIS image initializes extension objects in `public`, so Flyway uses a separate `goodtaste` schema for application tables and its schema-history table, with automatic baseline disabled. The DB role/search path must be configured deliberately for these tables. Production vendor/patch version is selected with documented compatibility and security review. No host port is published by default.
+**Baseline:** PostgreSQL 18 + **PostGIS 3.6** on local AMD64 hosts. The standard PostGIS image initializes extension objects in `public`, so Flyway uses a separate `feastjourney` schema for application tables and its schema-history table, with automatic baseline disabled. The DB role/search path must be configured deliberately for these tables. Production vendor/patch version is selected with documented compatibility and security review. No host port is published by default.
 
 ## Owners and privilege boundaries
 

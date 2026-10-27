@@ -13,4 +13,4 @@ See `docs/infra/migrations.md`, `docs/infra/postgres.md`, and `docs/architecture
 
 An initial schema must be chosen and reviewed before writing `V1` or any other DDL. This README is not itself a Flyway migration.
 
-Flyway manages the `goodtaste` app schema and schema history, while PostGIS extension objects are in `public` on initialization. Schema-qualify future app tables or set search_path intentionally; do not enable automatic baselining merely to bypass PostGIS-created public objects.
+Flyway manages the `feastjourney` app schema and schema history, while PostGIS extension objects are in `public` on initialization. Schema-qualify future app tables or set search_path intentionally; do not enable automatic baselining merely to bypass PostGIS-created public objects.

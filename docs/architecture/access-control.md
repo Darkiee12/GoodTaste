@@ -39,7 +39,7 @@ import type { Actor } from "./actor";
 
 export class CurrentActor
   extends Context.Service<CurrentActor, Actor>()(
-    "goodtaste/auth/CurrentActor",
+    "feastjourney/auth/CurrentActor",
   ) {}
 
 export const describeActor = Effect.gen(function* () {

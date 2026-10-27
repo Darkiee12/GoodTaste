@@ -1,6 +1,6 @@
 # Flyway migrations and deployment lifecycle
 
-**Status: authoritative decision and operational contract.** GoodTaste uses PostgreSQL 18, SQL-first migration files, and Flyway's standalone CLI/container. Bun, Reylo, Effect, and TanStack Start do **not** execute schema migrations as part of the application startup.
+**Status: authoritative decision and operational contract.** FeastJourney uses PostgreSQL 18, SQL-first migration files, and Flyway's standalone CLI/container. Bun, Reylo, Effect, and TanStack Start do **not** execute schema migrations as part of the application startup.
 
 ## Ownership and directory layout
 
@@ -16,7 +16,7 @@ src/server/database/
 infra/compose.yaml                     # Local PostgreSQL + one-shot migrator
 ```
 
-**PostGIS + schema ownership:** `V20261027_001__enable_postgis.sql` records the extension prerequisite. The PostGIS image initializes extension objects in `public`, which can make Flyway reject a first migration in that nonempty schema. Use `FLYWAY_SCHEMAS=goodtaste` and `FLYWAY_DEFAULT_SCHEMA=goodtaste` for a fresh app schema/history, keeping `baselineOnMigrate=false`. All future GoodTaste app tables must be placed in `goodtaste` explicitly or via a deliberately configured DB search path. Production/managed Postgres may require DBA provision of the extension. The PostGIS image currently supports AMD64; document host compatibility before running locally.
+**PostGIS + schema ownership:** `V20261027_001__enable_postgis.sql` records the extension prerequisite. The PostGIS image initializes extension objects in `public`, which can make Flyway reject a first migration in that nonempty schema. Use `FLYWAY_SCHEMAS=feastjourney` and `FLYWAY_DEFAULT_SCHEMA=feastjourney` for a fresh app schema/history, keeping `baselineOnMigrate=false`. All future FeastJourney app tables must be placed in `feastjourney` explicitly or via a deliberately configured DB search path. Production/managed Postgres may require DBA provision of the extension. The PostGIS image currently supports AMD64; document host compatibility before running locally.
 
 The database-wide schema history is centralized; *query ownership* stays with User, Food Discovery or Restaurant Discovery. A cross-domain foreign key may need coordinated review, but it still appears in the single ordered Flyway migration stream.
 
@@ -40,7 +40,7 @@ Flyway stores version, checksum, outcome and timestamp in `flyway_schema_history
 postgres starts → postgres becomes healthy → migrator runs migrate → exits 0
                                                          |
                                                          v
-                                    future GoodTaste app service may start
+                                    future FeastJourney app service may start
 ```
 
 A future application service in this **local Compose** file must declare:
@@ -118,4 +118,4 @@ No routine `DROP`, `clean`, volume deletion, `repair`, or ad hoc production SQL.
 
 ## PostgreSQL 18 Docker volume note
 
-Official PostgreSQL 18 images store `PGDATA` at `/var/lib/postgresql/18/docker` and expect the volume mount at **`/var/lib/postgresql`**. Earlier images expected `/var/lib/postgresql/data`. GoodTaste's Compose now uses the 18-compatible mount. If an existing named volume was created under the older layout, do not automatically relocate or delete it: inspect, back up and follow the official major-upgrade/volume migration procedure before changing the container. See https://github.com/docker-library/docs/blob/master/postgres/README.md#pgdata.
+Official PostgreSQL 18 images store `PGDATA` at `/var/lib/postgresql/18/docker` and expect the volume mount at **`/var/lib/postgresql`**. Earlier images expected `/var/lib/postgresql/data`. FeastJourney's Compose now uses the 18-compatible mount. If an existing named volume was created under the older layout, do not automatically relocate or delete it: inspect, back up and follow the official major-upgrade/volume migration procedure before changing the container. See https://github.com/docker-library/docs/blob/master/postgres/README.md#pgdata.

@@ -1,4 +1,4 @@
-# GoodTaste
+# FeastJourney
 
 Mobile-first food discovery for travellers. This repository currently contains a **TanStack Start landing page** and local infrastructure blueprint.
 
@@ -30,7 +30,7 @@ The only application route is `/`, with full-document SSR and Start's default se
 
 **Architecture direction:** TanStack Start + Effect modular monolith, PostgreSQL, S3-compatible object storage (Garage local-only). Application features will be built later.
 
-**Object storage:** Garage runs as a private, single-node development store. Generate local credentials and follow [object storage setup](docs/infra/object-storage.md). Existing MinIO data must be copied through S3 separately; its volume is never reused or deleted by this configuration.
+**Object storage:** Garage runs as a private, single-node development store. Generate local credentials and follow [object storage setup](docs/infra/object-storage.md). 
 
 **SQL and schema:** Postgres 18 uses a one-shot Flyway container (`infra/compose.yaml`) to apply reviewed `db/migrations/*.sql` before future app startup. Application queries will be domain-local Reylo imports (see `docs/architecture/persistence.md`). The migration folder contains **no application schema yet**.
 

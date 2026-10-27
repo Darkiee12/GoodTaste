@@ -14,7 +14,7 @@
 
 ## Required test scenarios when schema/code arrives
 
-1. Fresh-database migration: migrate all files in order into schema `goodtaste`, validate, ensure the PostGIS extension and `ST_DWithin` function work, and record history versions.
+1. Fresh-database migration: migrate all files in order into schema `feastjourney`, validate, ensure the PostGIS extension and `ST_DWithin` function work, and record history versions.
 2. Upgrade-path test: start from previous deployed schema and verify migrations apply without deleting user data or breaking older deployed readers during rollout.
 3. Query shape and invariants: PK/unique nullability, missing rows, foreign keys, under/over-limit pagination, Unicode food names, source/evidence nullability.
 4. Actor access: guest public discovery works; private tables reject guest reads/writes; member A cannot access member B's saved items, including through bulk operations.

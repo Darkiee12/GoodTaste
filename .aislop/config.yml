@@ -1,0 +1,8 @@
+exclude:
+  - repos/**
+  - tools/oxlint/**/*.ts
+
+# Dependency CVEs are gated by `bun audit` (the audit:dependencies script);
+# aislop's registry-only audit would duplicate it.
+security:
+  audit: false

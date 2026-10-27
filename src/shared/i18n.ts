@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Shared, browser-safe UI copy. Locale comes from each route match, never a singleton.
-export const locales = ["en", "vi"] as const;
+export const locales = ["en", "vi", "hi", "es", "zh"] as const;
 
 export type Locale = (typeof locales)[number];
 
@@ -9,50 +9,195 @@ export const localeSearchSchema = z.object({
   lang: z.enum(locales).catch("en"),
 });
 
-export const localeNames: Record<Locale, string> = {
-  en: "English",
-  vi: "Tiếng Việt",
-};
+export const fallbackLocaleName = "English";
+
+export const localeNames: ReadonlyMap<Locale, string> = new Map<Locale, string>([
+  ["en", fallbackLocaleName],
+  ["vi", "Tiếng Việt"],
+  ["hi", "हिन्दी"],
+  ["es", "Español"],
+  ["zh", "简体中文"],
+]);
+
+// BCP 47 tags for HTML lang/hreflang. Chinese uses the Simplified script subtag.
+export const localeBcp47Tags: ReadonlyMap<Locale, string> = new Map<Locale, string>([
+  ["en", "en"],
+  ["vi", "vi"],
+  ["hi", "hi"],
+  ["es", "es"],
+  ["zh", "zh-Hans"],
+]);
 
 const english = {
-  title: "GoodTaste — A little local knowledge",
-  description: "A little local knowledge for your next food adventure. GoodTaste is coming soon.",
-  homeLabel: "GoodTaste home",
+  title: "FeastJourney — The world is on your menu",
+  description:
+    "Discover incredible local dishes and the places that make them. What to eat? Where to find it? We got you.",
+  homeLabel: "FeastJourney home",
   skipContent: "Skip to content",
   languageLabel: "Language",
-  comingSoon: "Coming soon",
-  kicker: "Good food starts with curiosity.",
-  heading: "Bring a little local knowledge to the table.",
-  introduction:
-    "Get to know a dish before you order. A little context for unfamiliar food, and room for discovery on your next trip.",
-  launchNote: "GoodTaste is taking shape. More to explore soon.",
-  noteHeading: "A guide, with room for questions.",
-  noteBody:
-    "Every kitchen is different. Confirm ingredients and preparation with the people making your food.",
+  heroHeading: "The world is on your menu.",
+  heroSub: "What to eat? Where to find it? We got you.",
+  heroSubExtra: "Discover incredible local dishes and the places that make them.",
+  ctaExplore: "Let's Explore",
+  ctaSurprise: "Surprise me",
+  globeLabel: "Animated globe showing dishes from around the world",
+  globeStaticLabel: "Illustration of the Earth rising above the horizon",
+  popupHint: "Activate for details.",
+  previewShowAnother: "Show another dish",
+  previewClose: "Close",
+  previewOpened: "Dish details opened.",
+  previewClosed: "Dish details closed.",
+  discoverHeading: "A whole world of yum.",
+  discoverIntro:
+    "Sixteen dishes from six continents to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
+  discoverAll: "All",
+  categoryLocalFavorites: "Local favorites",
+  categoryStreetFood: "Street-food discoveries",
+  categoryComfortingBowls: "Comforting bowls",
+  categoryWorthTravelling: "Dishes worth travelling for",
   footerTagline: "A little local knowledge.",
   footerAdvice: "Stay curious. Ask before you order.",
 };
 
-type Messages = { [Key in keyof typeof english]: string };
+export type Messages = { [Key in keyof typeof english]: string };
 
-export const messages: Record<Locale, Messages> = {
-  en: english,
-  vi: {
-    title: "GoodTaste — Hiểu thêm về ẩm thực địa phương",
-    description: "Hiểu thêm về ẩm thực địa phương cho chuyến đi tiếp theo. GoodTaste sắp ra mắt.",
-    homeLabel: "Trang chủ GoodTaste",
-    skipContent: "Chuyển đến nội dung",
-    languageLabel: "Ngôn ngữ",
-    comingSoon: "Sắp ra mắt",
-    kicker: "Món ngon bắt đầu từ sự tò mò.",
-    heading: "Mang chút hiểu biết địa phương vào mỗi bữa ăn.",
-    introduction:
-      "Tìm hiểu món ăn trước khi gọi. Hiểu thêm về những món chưa quen và khám phá nhiều hơn trong chuyến đi tiếp theo.",
-    launchNote: "GoodTaste đang được xây dựng. Hẹn bạn cùng khám phá trong thời gian tới.",
-    noteHeading: "Một cuốn cẩm nang để bạn tự tin đặt câu hỏi.",
-    noteBody:
-      "Mỗi gian bếp đều khác nhau. Hãy xác nhận nguyên liệu và cách chế biến với người chuẩn bị món ăn.",
-    footerTagline: "Hiểu thêm về ẩm thực địa phương.",
-    footerAdvice: "Luôn tò mò. Hỏi rõ trước khi gọi món.",
-  },
+const vietnamese: Messages = {
+  title: "FeastJourney — Cả thế giới trong thực đơn của bạn",
+  description:
+    "Khám phá những món ngon địa phương và nơi làm ra chúng. Ăn gì? Ở đâu? Cứ để chúng tôi lo.",
+  homeLabel: "Trang chủ FeastJourney",
+  skipContent: "Chuyển đến nội dung",
+  languageLabel: "Ngôn ngữ",
+  heroHeading: "Cả thế giới trong thực đơn của bạn.",
+  heroSub: "Ăn gì? Ở đâu? Cứ để chúng tôi lo.",
+  heroSubExtra: "Khám phá những món ngon địa phương và nơi làm ra chúng.",
+  ctaExplore: "Cùng khám phá",
+  ctaSurprise: "Món bất ngờ",
+  globeLabel: "Quả địa cầu động giới thiệu các món ăn khắp thế giới",
+  globeStaticLabel: "Hình minh họa Trái Đất nhô lên trên đường chân trời",
+  popupHint: "Nhấn để xem chi tiết.",
+  previewShowAnother: "Xem món khác",
+  previewClose: "Đóng",
+  previewOpened: "Đã mở chi tiết món ăn.",
+  previewClosed: "Đã đóng chi tiết món ăn.",
+  discoverHeading: "Cả thế giới món ngon.",
+  discoverIntro:
+    "Mười sáu món ăn từ sáu châu lục để bắt đầu hành trình. Mỗi gian bếp đều khác nhau — hãy xác nhận nguyên liệu với người chuẩn bị món ăn.",
+  discoverAll: "Tất cả",
+  categoryLocalFavorites: "Món được yêu thích",
+  categoryStreetFood: "Khám phá ẩm thực đường phố",
+  categoryComfortingBowls: "Món ấm lòng",
+  categoryWorthTravelling: "Món ngon đáng đi xa",
+  footerTagline: "Hiểu thêm về ẩm thực địa phương.",
+  footerAdvice: "Luôn tò mò. Hỏi rõ trước khi gọi món.",
 };
+
+const hindi: Messages = {
+  title: "FeastJourney — पूरी दुनिया आपके मेन्यू में",
+  description: "शानदार स्थानीय व्यंजन और उन्हें बनाने वाली जगहें खोजें। क्या खाएं? कहां मिलेगा? हम हैं न।",
+  homeLabel: "FeastJourney होम",
+  skipContent: "मुख्य सामग्री पर जाएं",
+  languageLabel: "भाषा",
+  heroHeading: "पूरी दुनिया आपके मेन्यू में।",
+  heroSub: "क्या खाएं? कहां मिलेगा? हम हैं न।",
+  heroSubExtra: "शानदार स्थानीय व्यंजन और उन्हें बनाने वाली जगहें खोजें।",
+  ctaExplore: "चलो खोजें",
+  ctaSurprise: "कुछ नया दिखाओ",
+  globeLabel: "दुनिया भर के व्यंजन दिखाता एनिमेटेड ग्लोब",
+  globeStaticLabel: "क्षितिज के ऊपर उगती पृथ्वी का चित्र",
+  popupHint: "विवरण के लिए सक्रिय करें।",
+  previewShowAnother: "कोई और व्यंजन दिखाओ",
+  previewClose: "बंद करें",
+  previewOpened: "व्यंजन विवरण खुल गया।",
+  previewClosed: "व्यंजन विवरण बंद हो गया।",
+  discoverHeading: "स्वाद से भरी पूरी दुनिया।",
+  discoverIntro:
+    "अपनी यात्रा शुरू करने के लिए छह महाद्वीपों के सोलह व्यंजन। हर रसोई अलग होती है — खाना बनाने वालों से सामग्री ज़रूर पूछें।",
+  discoverAll: "सभी",
+  categoryLocalFavorites: "स्थानीय पसंदीदा",
+  categoryStreetFood: "स्ट्रीट फ़ूड की खोज",
+  categoryComfortingBowls: "सुकून भरे कटोरे",
+  categoryWorthTravelling: "सफ़र के लायक़ व्यंजन",
+  footerTagline: "थोड़ी स्थानीय जानकारी।",
+  footerAdvice: "जिज्ञासु रहें। ऑर्डर से पहले पूछें।",
+};
+
+const spanish: Messages = {
+  title: "FeastJourney — El mundo está en tu menú",
+  description:
+    "Descubre platos locales increíbles y los lugares que los preparan. ¿Qué comer? ¿Dónde encontrarlo? Nosotros te ayudamos.",
+  homeLabel: "Inicio de FeastJourney",
+  skipContent: "Saltar al contenido",
+  languageLabel: "Idioma",
+  heroHeading: "El mundo está en tu menú.",
+  heroSub: "¿Qué comer? ¿Dónde encontrarlo? Nosotros te ayudamos.",
+  heroSubExtra: "Descubre platos locales increíbles y los lugares que los preparan.",
+  ctaExplore: "Vamos a explorar",
+  ctaSurprise: "Sorpréndeme",
+  globeLabel: "Globo animado con platos de todo el mundo",
+  globeStaticLabel: "Ilustración de la Tierra sobre el horizonte",
+  popupHint: "Activa para ver los detalles.",
+  previewShowAnother: "Mostrar otro plato",
+  previewClose: "Cerrar",
+  previewOpened: "Detalles del plato abiertos.",
+  previewClosed: "Detalles del plato cerrados.",
+  discoverHeading: "Un mundo entero de sabor.",
+  discoverIntro:
+    "Dieciséis platos de seis continentes para empezar tu viaje. Cada cocina es distinta: confirma los ingredientes con quienes preparan tu comida.",
+  discoverAll: "Todo",
+  categoryLocalFavorites: "Favoritos locales",
+  categoryStreetFood: "Descubrimientos callejeros",
+  categoryComfortingBowls: "Cuencos reconfortantes",
+  categoryWorthTravelling: "Platos que valen un viaje",
+  footerTagline: "Un poco de conocimiento local.",
+  footerAdvice: "Sé curioso. Pregunta antes de pedir.",
+};
+
+const chinese: Messages = {
+  title: "FeastJourney — 世界尽在你的菜单",
+  description: "发现令人惊叹的当地美食，以及制作它们的地方。吃什么？去哪找？交给我们吧。",
+  homeLabel: "FeastJourney 首页",
+  skipContent: "跳到正文",
+  languageLabel: "语言",
+  heroHeading: "世界尽在你的菜单。",
+  heroSub: "吃什么？去哪找？交给我们吧。",
+  heroSubExtra: "发现令人惊叹的当地美食，以及制作它们的地方。",
+  ctaExplore: "开始探索",
+  ctaSurprise: "给我个惊喜",
+  globeLabel: "展示世界各地美食的动态地球仪",
+  globeStaticLabel: "地球从地平线升起的插图",
+  popupHint: "点击查看详情。",
+  previewShowAnother: "换一道菜",
+  previewClose: "关闭",
+  previewOpened: "已展开菜品详情。",
+  previewClosed: "已关闭菜品详情。",
+  discoverHeading: "美味遍布全世界。",
+  discoverIntro: "来自六大洲的十六道菜，开启你的美食之旅。每家厨房各不相同——请向制作者确认食材。",
+  discoverAll: "全部",
+  categoryLocalFavorites: "当地人气美食",
+  categoryStreetFood: "街头美食发现",
+  categoryComfortingBowls: "暖心美食",
+  categoryWorthTravelling: "值得专程前往的美食",
+  footerTagline: "一点当地美食知识。",
+  footerAdvice: "保持好奇，下单前先问清楚。",
+};
+
+export const messages: ReadonlyMap<Locale, Messages> = new Map<Locale, Messages>([
+  ["en", english],
+  ["vi", vietnamese],
+  ["hi", hindi],
+  ["es", spanish],
+  ["zh", chinese],
+]);
+
+export function messagesFor(locale: Locale): Messages {
+  return messages.get(locale) ?? english;
+}
+
+export function localeNameFor(locale: Locale): string {
+  return localeNames.get(locale) ?? fallbackLocaleName;
+}
+
+export function bcp47TagFor(locale: Locale): string {
+  return localeBcp47Tags.get(locale) ?? locale;
+}

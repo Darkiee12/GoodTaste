@@ -17,17 +17,17 @@ Save values only in the ignored `infra/.env`; do not paste them into logs or com
 docker compose --env-file infra/.env -f infra/compose.yaml config --quiet
 docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait garage
 docker compose --env-file infra/.env -f infra/compose.yaml exec -T garage /garage status
-docker compose --env-file infra/.env -f infra/compose.yaml exec -T garage /garage bucket info goodtaste-private
+docker compose --env-file infra/.env -f infra/compose.yaml exec -T garage /garage bucket info feastjourney-private
 ```
 
-Garage initializes its single-node layout and the private `goodtaste-private` bucket at startup. Only the configured local S3 key receives access. Metadata and blobs persist separately in `garage_meta` and `garage_data`. Keep both volumes. RPC is container-loopback only; website and HTTP administration listeners are disabled. No host ports are published.
+Garage initializes its single-node layout and the private `feastjourney-private` bucket at startup. Only the configured local S3 key receives access. Metadata and blobs persist separately in `garage_meta` and `garage_data`. Keep both volumes. RPC is container-loopback only; website and HTTP administration listeners are disabled. No host ports are published.
 
-Future network-local S3 clients use `http://garage:3900`, region `garage`, bucket `goodtaste-private`, Signature V4, and path-style addressing. The local bootstrap key is bucket-owner scoped; a production app needs a separate least-privilege key. Garage uses its own per-key bucket grants, not AWS bucket policies or object ACLs.
+Future network-local S3 clients use `http://garage:3900`, region `garage`, bucket `feastjourney-private`, Signature V4, and path-style addressing. The local bootstrap key is bucket-owner scoped; a production app needs a separate least-privilege key. Garage uses its own per-key bucket grants, not AWS bucket policies or object ACLs.
 
 The host-run landing page does not need an S3 connection. Host clients and browser uploads need a separately reviewed loopback mapping or reverse proxy; do not use Docker DNS names in browser URLs.
 
 ## Bucket design
-- `goodtaste-private`: private menu uploads, user review drafts, extracted/debug assets if justified.
+- `feastjourney-private`: private menu uploads, user review drafts, extracted/debug assets if justified.
 - Public images: **not in scope** until consent/moderation/rights and delivery strategy are implemented.
 - Key strategy: `menu/{session-id}/{opaque-uuid}` and `review/{session-id}/{opaque-uuid}`; opaque IDs prevent filenames/PII in keys.
 - Postgres `Asset` row stores owner, purpose, key, bucket, MIME, size, checksum, retention timestamps; do not store direct permanent object URLs.

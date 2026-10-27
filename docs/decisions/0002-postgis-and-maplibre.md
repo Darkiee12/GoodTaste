@@ -9,7 +9,7 @@ Restaurant Discovery uses **PostgreSQL 18 + PostGIS 3.6** for source-of-truth ve
 
 Domain queries use Reylo SQL, typed operations run under Effect, HTTP input uses Zod 4.6, and Flyway owns migration/index DDL. Favor `geography(Point,4326)` and GiST for distance queries once physical restaurant schema is approved.
 
-Local infrastructure uses `postgis/postgis:18-3.6-alpine`, currently **AMD64-only**. This image preloads PostGIS objects in `public`; Flyway uses `goodtaste` as its separate application/default schema and history, with `baselineOnMigrate=false`. A first Flyway migration records the PostGIS extension prerequisite. Production/ARM64 installations require verified support and explicit role/extension provisioning.
+Local infrastructure uses `postgis/postgis:18-3.6-alpine`, currently **AMD64-only**. This image preloads PostGIS objects in `public`; Flyway uses `feastjourney` as its separate application/default schema and history, with `baselineOnMigrate=false`. A first Flyway migration records the PostGIS extension prerequisite. Production/ARM64 installations require verified support and explicit role/extension provisioning.
 
 ## Alternatives considered
 

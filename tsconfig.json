@@ -10,6 +10,9 @@
     "types": ["bun", "vite/client"],
     // Bundler mode
     "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false,
     "noEmit": true,

@@ -1,6 +1,6 @@
 # Agent skill routing
 
-This guide routes GoodTaste work to the appropriate task-specific skill. Read `AGENTS.md`, the relevant product/architecture docs, and **only** the skills needed for the change. Keep an agent's active instructions focused.
+This guide routes FeastJourney work to the appropriate task-specific skill. Read `AGENTS.md`, the relevant product/architecture docs, and **only** the skills needed for the change. Keep an agent's active instructions focused.
 
 | Task | Skill |
 | --- | --- |
@@ -26,7 +26,7 @@ This guide routes GoodTaste work to the appropriate task-specific skill. Read `A
 
 ## Scope and provenance
 
-The skills `baseline-ui`, `fixing-accessibility`, `fixing-motion-performance`, `prototype`, and `codebase-design` are GoodTaste-specific adaptations of `SCUtilities/SCUtilities/.agents/skills/`, not exact upstream copies. The existing `frontend-design` skill already in this branch is preserved unchanged.
+The skills `baseline-ui`, `fixing-accessibility`, `fixing-motion-performance`, `prototype`, and `codebase-design` are FeastJourney-specific adaptations of `SCUtilities/SCUtilities/.agents/skills/`, not exact upstream copies. The existing `frontend-design` skill already in this branch is preserved unchanged.
 
 Other installed skills are not replaced. No formatter, linter, application source, dependency, infra, or CI behavior is changed by this skills phase.
 

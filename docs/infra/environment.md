@@ -16,7 +16,7 @@ Flyway image is pinned to `flyway/flyway:13.11.1` in `infra/compose.yaml`. It re
 
 - `FLYWAY_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}`
 - `FLYWAY_USER`, `FLYWAY_PASSWORD`: wired to local Postgres bootstrap values only.
-- `FLYWAY_SCHEMAS=goodtaste`, `FLYWAY_DEFAULT_SCHEMA=goodtaste`: extension objects are initialized in `public`, but Flyway history and GoodTaste application tables are in their own schema.
+- `FLYWAY_SCHEMAS=feastjourney`, `FLYWAY_DEFAULT_SCHEMA=feastjourney`: extension objects are initialized in `public`, but Flyway history and FeastJourney application tables are in their own schema.
 - `FLYWAY_VALIDATE_MIGRATION_NAMING=true`, `FLYWAY_BASELINE_ON_MIGRATE=false`, `FLYWAY_CLEAN_DISABLED=true`.
 
 Its SQL directory is mounted read-only at `/flyway/sql`. A `flyway_schema_history` record is created in Postgres when migration tooling initializes an appropriate schema; this is not a replacement for a database backup.
@@ -31,7 +31,7 @@ The application must not receive `FLYWAY_PASSWORD` or DDL credentials; the migra
 
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
 - For Reylo analysis, the URL must point **directly** to a migrated Postgres schema; avoid transaction-mode PgBouncer. A distinct development/CI connection may be used instead of the runtime pool URL.
-- `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=goodtaste-private`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose network.
+- `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=feastjourney-private`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose network.
 - `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL`.
 

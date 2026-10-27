@@ -44,7 +44,7 @@ If an image cannot be downloaded or credentials are wrong, investigate **without
 
 ## Garage and private bucket
 
-Follow [object storage setup](object-storage.md) to generate credentials, start only Garage, and inspect its cluster/bucket. Startup creates the private `goodtaste-private` bucket using Garage's single-node bootstrap flags. No host ports are published; `http://garage:3900` is reachable only within the Compose network. The landing page does not use storage yet.
+Follow [object storage setup](object-storage.md) to generate credentials, start only Garage, and inspect its cluster/bucket. Startup creates the private `feastjourney-private` bucket using Garage's single-node bootstrap flags. No host ports are published; `http://garage:3900` is reachable only within the Compose network. The landing page does not use storage yet.
 
 Before enabling real uploads test CORS, object type/size verification, presign semantics and deletion with synthetic data.
 

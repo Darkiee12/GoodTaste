@@ -1,12 +1,12 @@
 # ADR 0001 — SQL-first PostgreSQL with Reylo and Flyway
 
-- **Status:** Accepted as the GoodTaste scaffolding design
+- **Status:** Accepted as the FeastJourney scaffolding design
 - **Date:** 2026-10-27
 - **Scope:** Database migrations, typed application queries, schema ownership, release ordering
 
 ## Context
 
-GoodTaste is a TanStack Start + Effect v4 modular monolith with three foundational domains: User, Food Discovery and Restaurant Discovery. We want PostgreSQL-native SQL, direct query ownership in each domain, and reliable type checking without defining a parallel ORM schema. We also need repeatable CI/deploy operations and to avoid each app instance racing to modify the schema.
+FeastJourney is a TanStack Start + Effect v4 modular monolith with three foundational domains: User, Food Discovery and Restaurant Discovery. We want PostgreSQL-native SQL, direct query ownership in each domain, and reliable type checking without defining a parallel ORM schema. We also need repeatable CI/deploy operations and to avoid each app instance racing to modify the schema.
 
 ## Decision
 
