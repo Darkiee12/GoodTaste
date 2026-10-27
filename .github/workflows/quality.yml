@@ -1,0 +1,87 @@
+name: Quality
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static:
+    name: Format, lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Formatting
+        run: bun run format
+      - name: Type-aware lint
+        run: bun run lint
+      - name: TypeScript
+        run: bun run check-types
+
+  test:
+    name: Unit tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Unit tests
+        run: bun run test
+      - name: Production build
+        run: bun run build
+
+  audit:
+    name: Dependency and code audits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Dependency vulnerabilities
+        run: bun run audit:dependencies
+      - name: AI slop gate
+        run: bun run audit:slop
+      - name: React Doctor
+        run: bun run audit:react-doctor
+      - name: React Compiler readiness
+        run: bun run audit:react-compiler
+
+  migration:
+    name: PostgreSQL 18 + Flyway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate local Compose configuration
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml config --quiet
+      - name: Start disposable PostgreSQL
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml up -d --wait postgres
+      - name: Run Flyway migrations
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator
+      - name: Verify PostGIS extension and spatial operation
+        run: |
+          docker compose --env-file infra/.env.example -f infra/compose.yaml exec -T postgres sh -ec 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 -c "SELECT postgis_version(), ST_DWithin(ST_SetSRID(ST_MakePoint(106.7, 10.8), 4326)::geography, ST_SetSRID(ST_MakePoint(106.7, 10.8), 4326)::geography, 100.0);"'
+      - name: Validate Flyway migration history
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator validate
+      - name: Check idempotent versioned migration pass
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml run --rm migrator
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file infra/.env.example -f infra/compose.yaml down --remove-orphans

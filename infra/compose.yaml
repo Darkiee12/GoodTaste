@@ -1,0 +1,69 @@
+# LOCAL DEVELOPMENT ONLY. Never deploy this Compose file as production.
+# Flyway migrates the database in a one-shot container before app startup.
+# PostGIS image currently targets AMD64; existing volumes require review/backup.
+# Garage runs as a single-node development store, without redundancy.
+# Postgres 18 requires a volume at /var/lib/postgresql (not the PG17 /data path).
+# Existing volumes using the old mount require a manual backup/migration review.
+# No published ports: services are reachable only inside the Compose network.
+# For host access during local debugging, temporarily re-add a loopback-bound
+# ports entry and never commit it.
+services:
+  postgres:
+    image: postgis/postgis:18-3.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrator:
+    image: flyway/flyway:13.11.1
+    command: ["-connectRetries=60", "migrate"]
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+      FLYWAY_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      # PostGIS initializes extension objects in public, so the application
+      # and Flyway history use a separate schema.
+      FLYWAY_SCHEMAS: feastjourney
+      FLYWAY_DEFAULT_SCHEMA: feastjourney
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+      FLYWAY_BASELINE_ON_MIGRATE: "false"
+      FLYWAY_CLEAN_DISABLED: "true"
+    volumes:
+      - ../db/migrations:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  garage:
+    image: dxflrs/garage:v2.5.0
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?Set a 64-character hex GARAGE_RPC_SECRET}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+      GARAGE_DEFAULT_BUCKET: feastjourney-private
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  garage_meta:
+  garage_data:

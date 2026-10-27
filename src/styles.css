@@ -1,0 +1,222 @@
+@import "tailwindcss" source("./");
+@import "tw-animate-css";
+
+@theme {
+  --color-brand-blue: #2563eb;
+  --color-brand-blue-hover: #1d4ed8;
+  --color-space-deep: #071b46;
+  --color-ocean-deep: #102a52;
+  --color-ocean-glow: #0b2350;
+  --color-food-orange: #f97316;
+  --color-food-orange-strong: #c2410c;
+  --color-food-orange-dark: #9a3412;
+  --color-mango: #fbbf24;
+  --color-cosmic-violet: #8b5cf6;
+  --color-cream: #fff8ef;
+  --color-ink: #172033;
+  --color-muted: #64748b;
+  --color-muted-on-dark: #c3d0e8;
+  --color-border-soft: #f0e2cf;
+
+  --font-display: "Bangers", "Arial Narrow", system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", roboto, "Helvetica Neue", arial, sans-serif;
+
+  --text-shadow-hero: 0 2px 24px rgb(3 10 30 / 0.55);
+
+  --animate-popup-enter: popup-enter 450ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --animate-popup-exit: popup-exit 380ms ease-in forwards;
+
+  @keyframes popup-enter {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.85);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes popup-exit {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(8px) scale(0.92);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    overflow-x: clip;
+  }
+
+  body {
+    overflow-x: clip;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-brand-blue-hover);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .site-header :focus-visible,
+  .hero :focus-visible,
+  .site-footer :focus-visible {
+    outline-color: var(--color-mango);
+  }
+
+  main {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: 3rem 1.5rem 4rem;
+    min-height: 70vh;
+  }
+
+  main:has(> .home) {
+    max-width: none;
+    margin-inline: 0;
+    padding: 0;
+  }
+
+  main:focus {
+    outline: none;
+  }
+}
+
+/* Composite hero background art: layered gradients utilities cannot express. */
+@layer components {
+  .hero {
+    background:
+      radial-gradient(120% 60% at 50% 108%, rgb(139 92 246 / 0.28), transparent 60%),
+      linear-gradient(180deg, var(--color-space-deep) 0%, var(--color-ocean-deep) 58%, #0b2350 100%);
+  }
+
+  .hero-stars,
+  .hero-stars::after {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-repeat: repeat;
+  }
+
+  .hero-stars {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480'%3E%3Cg fill='white'%3E%3Ccircle cx='42' cy='58' r='1.4' opacity='.8'/%3E%3Ccircle cx='128' cy='22' r='1' opacity='.5'/%3E%3Ccircle cx='208' cy='88' r='1.7' opacity='.9'/%3E%3Ccircle cx='296' cy='36' r='1.1' opacity='.6'/%3E%3Ccircle cx='372' cy='102' r='1.5' opacity='.8'/%3E%3Ccircle cx='448' cy='54' r='1' opacity='.5'/%3E%3Ccircle cx='88' cy='168' r='1.2' opacity='.6'/%3E%3Ccircle cx='168' cy='214' r='1.6' opacity='.85'/%3E%3Ccircle cx='258' cy='176' r='1' opacity='.5'/%3E%3Ccircle cx='338' cy='226' r='1.4' opacity='.75'/%3E%3Ccircle cx='418' cy='188' r='1.1' opacity='.6'/%3E%3Ccircle cx='28' cy='298' r='1.3' opacity='.7'/%3E%3Ccircle cx='118' cy='348' r='1' opacity='.5'/%3E%3Ccircle cx='198' cy='302' r='1.6' opacity='.85'/%3E%3Ccircle cx='288' cy='356' r='1.2' opacity='.6'/%3E%3Ccircle cx='368' cy='308' r='1.5' opacity='.8'/%3E%3Ccircle cx='452' cy='352' r='1' opacity='.5'/%3E%3Ccircle cx='68' cy='428' r='1.4' opacity='.75'/%3E%3Ccircle cx='158' cy='452' r='1' opacity='.5'/%3E%3Ccircle cx='248' cy='418' r='1.3' opacity='.7'/%3E%3Ccircle cx='328' cy='448' r='1.1' opacity='.6'/%3E%3Ccircle cx='408' cy='418' r='1.6' opacity='.85'/%3E%3C/g%3E%3C/svg%3E");
+    animation: star-twinkle 7s ease-in-out infinite alternate;
+  }
+
+  .hero-stars::after {
+    content: "";
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cg fill='%23cfe3ff'%3E%3Ccircle cx='96' cy='120' r='1.2' opacity='.6'/%3E%3Ccircle cx='264' cy='64' r='1.6' opacity='.8'/%3E%3Ccircle cx='424' cy='150' r='1' opacity='.5'/%3E%3Ccircle cx='560' cy='88' r='1.4' opacity='.7'/%3E%3Ccircle cx='176' cy='280' r='1.1' opacity='.55'/%3E%3Ccircle cx='344' cy='330' r='1.5' opacity='.75'/%3E%3Ccircle cx='504' cy='290' r='1' opacity='.5'/%3E%3Ccircle cx='64' cy='470' r='1.3' opacity='.65'/%3E%3Ccircle cx='232' cy='530' r='1' opacity='.5'/%3E%3Ccircle cx='400' cy='500' r='1.4' opacity='.7'/%3E%3Ccircle cx='560' cy='560' r='1.1' opacity='.55'/%3E%3C/g%3E%3C/svg%3E");
+    animation: star-twinkle 9s ease-in-out infinite alternate-reverse;
+  }
+
+  @keyframes star-twinkle {
+    from {
+      opacity: 0.45;
+    }
+    to {
+      opacity: 0.85;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-stars,
+    .hero-stars::after {
+      animation: none;
+    }
+  }
+
+  /* Static cropped-planet art for SSR, reduced motion, and WebGL failures.
+     Geometry mirrors computeGlobeLayout exactly via container units: the
+     diameter (104% mobile, min(180%, 320% of hero height) desktop) and the
+     visible cap (70%/32% of diameter, clamped to 50% of hero height). */
+  .fallback-frame {
+    container-type: size;
+  }
+
+  .fallback-planet {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 104cqw;
+    aspect-ratio: 1 / 1;
+    transform: translate(-50%, max(30%, calc(100% - 50cqh)));
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 50% 26%,
+      #4a9be8 0%,
+      #2f7fd8 34%,
+      #1e5fc4 62%,
+      #173f86 100%
+    );
+    box-shadow:
+      0 0 72px rgb(125 211 252 / 0.35),
+      inset -18px -30px 80px rgb(3 10 30 / 0.45);
+    overflow: hidden;
+  }
+
+  .fallback-land {
+    position: absolute;
+    background: linear-gradient(160deg, #8fd45e, #5cab45);
+    filter: blur(1px);
+  }
+
+  .fallback-land-a {
+    left: 14%;
+    top: -3%;
+    width: 27%;
+    height: 17%;
+    border-radius: 48% 52% 55% 45% / 70% 65% 35% 30%;
+    transform: rotate(-8deg);
+  }
+
+  .fallback-land-b {
+    left: 51%;
+    top: 1%;
+    width: 31%;
+    height: 15%;
+    border-radius: 55% 45% 40% 60% / 60% 55% 45% 40%;
+  }
+
+  .fallback-land-c {
+    left: 76%;
+    top: 7%;
+    width: 15%;
+    height: 10%;
+    border-radius: 50%;
+  }
+
+  @media (min-width: 48rem) {
+    .fallback-planet {
+      width: min(180cqw, 320cqh);
+      transform: translate(-50%, max(68%, calc(100% - 50cqh)));
+    }
+  }
+}
+
+/* shadcn dropdown-menu tokens, mapped onto the dark header palette.
+   Only the semantic colors the dropdown references are defined; the
+   component file itself is untouched CLI output. */
+@theme {
+  --color-popover: #0b2350;
+  --color-popover-foreground: #ffffff;
+  --color-accent: rgb(255 255 255 / 0.12);
+  --color-accent-foreground: #ffffff;
+  --color-border: rgb(255 255 255 / 0.14);
+  --color-muted-foreground: #c3d0e8;
+  --color-destructive: #f87171;
+}
+
+@layer base {
+  /* The menu uses a bare border-width utility; without shadcn's global
+     border-color reset it would render as solid currentColor. */
+  [data-slot="dropdown-menu-content"] {
+    border-color: var(--color-border);
+  }
+}
