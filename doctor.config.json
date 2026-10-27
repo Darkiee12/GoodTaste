@@ -1,0 +1,7 @@
+{
+  "$schema": "https://react.doctor/schema/config.json",
+  "//": "no-hydration-branch is warn (not error): the globe's reduced-motion branch only renders inside a ClientOnly boundary, so it can never hydrate on the server.",
+  "rules": {
+    "react-doctor/no-hydration-branch-on-browser-global": "warn"
+  }
+}

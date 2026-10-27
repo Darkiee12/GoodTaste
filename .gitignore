@@ -1,0 +1,18 @@
+# Secrets and runtime artifacts
+.env
+.env.*
+!.env.example
+infra/.env
+*.local
+node_modules/
+.output/
+dist/
+.tanstack/
+.nitro/
+coverage/
+.DS_Store
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+
+# Aislop local scan history (config.yml is tracked)
+.aislop/history.jsonl

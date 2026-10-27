@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "sortImports": {
+    "internalPattern": [
+      "@/",
+      "~/"
+    ],
+    "sortSideEffects": false,
+    "newlinesBetween": true
+  },
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "repos/**",
+    "**/repos/**",
+    ".agents/**",
+    ".claude/**",
+    ".playwright/**",
+    "node_modules/**",
+    ".output/**",
+    "dist/**",
+    "coverage/**",
+    ".vite/**",
+    "**/routeTree.gen.ts",
+    "**/*.generated.ts",
+    "docs/**",
+    "infra/**",
+    "bun.lock",
+    "**/*.md",
+    "**/*.json",
+    "**/*.jsonc",
+    "tools/oxlint/**"
+  ]
+}
