@@ -6,6 +6,46 @@ Direct one-way calls are permitted; cyclic dependencies are not. A workflow unde
 
 **Core example:** Food Discovery returns dish identities and food details; Restaurant Discovery takes identifiers/criteria and returns places plus *sourced serving evidence*; an orchestration workflow combines results, optionally informed by member preferences. It must not turn inferred matches into confirmed restaurant menu facts.
 
+## Implemented catalog contracts (Food Discovery)
+
+Public read operations (`DishService`, `CatalogService`) serve guests and members:
+
+- `searchDishes`: multilingual text search with deterministic tier ranking, or
+  faceted filtering (ingredients any/all, categories any/all, place subtree,
+  cuisine, association), plus recency-browsed keyset pagination. Cursor
+  payloads differ per sort, so cursors must never cross sort modes.
+- `getDish`: accepts a decimal ID **or** canonical slug and returns the
+  composed catalog profile (`id`, `slug`, localized `name`,
+  `english_name`, `native_names`, localized `description`, ingredients,
+  places with association/kind/ISO/display coordinates, cuisines, categories,
+  `sources`, Unix-second `last_update`). IDs are strings at the HTTP boundary;
+  raw `bigint` is never serialized.
+- `getRelated`: sibling variants and categorically/geographically similar
+  published dishes, ranked by shared relations.
+- `listPlaces` returns places plus parent edges (hierarchy built client-side);
+  `searchPlaces` resolves names in supported languages.
+
+Administrative writes (`AdminService`, requires the `x-admin-key` credential):
+
+- `createDish`: slug optional (generated from the display name with collision
+  suffixes); duplicate slugs conflict instead of merging.
+- `updateDish` / `updateDishStatus`: publishing runs server-side validation
+  (preferred English name, category, description or summary); failures return
+  `InvalidDishData` with explicit reasons rather than partial writes.
+- Translation, description, ingredient/place/category/cuisine links, each of
+  which records a `catalog_revisions` row in the same transaction.
+- `CurationService`: `validatePublication`, `recordRevision`, curation notes
+  (`review`/`correction`/`question`), revision inspection, and the review
+  queue over `review`-status dishes.
+- `CatalogImportService.validateImport`: parses and validates an
+  Effect-Schema-checked authoring payload, resolves ingredients/places/
+  cuisines/categories against canonical records, flags possible duplicates
+  for human review, and stages the job plus per-record results **without**
+  applying anything. `applyImport` only runs `validated` jobs, applying each
+  valid record in its own transaction and recording revisions and notes.
+  Unknown references invalidate the record; slugs that collide are skipped,
+  never merged.
+
 Before implementing a public operation, specify:
 - owning module, callers and observable user outcome;
 - typed input, result and expected errors;

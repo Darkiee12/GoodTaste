@@ -1,0 +1,11 @@
+# Reylo analysis database. Interpolated from the environment so local
+# development, CI, and editor integrations all use one knob:
+#   export DATABASE_URL="postgres://USER:PASSWORD@127.0.0.1:5433/feastjourney"
+# The database must have all Flyway migrations applied before typechecking;
+# without a reachable migrated database the typecheck fails closed instead of
+# silently trusting the local .reylo/ cache.
+direct_url: ${DATABASE_URL}
+
+cli:
+  include: ["src/**/*.sql"]
+  exclude: ["node_modules/**", ".output/**"]

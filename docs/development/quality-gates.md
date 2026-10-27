@@ -46,10 +46,19 @@ PR description should state: behavior changed, contracts touched, quality comman
 
 A green static check is necessary, not proof of correct food information, accessible UX, or safe dietary conclusions.
 
-## Database migration job (scaffold phase)
+## Database migration job (implemented)
 
-The `Quality` workflow now also has an independent `PostgreSQL 18 + Flyway` job. It checks Compose configuration without printing expanded secrets, starts disposable PostgreSQL, runs `migrate`, runs `validate` and repeats `migrate` to exercise an idempotent no-op pass.
+The `Quality` workflow's `PostgreSQL 18 + Flyway` job checks Compose
+configuration without printing expanded secrets, starts disposable PostgreSQL,
+runs `migrate`, verifies the PostGIS extension with a real spatial function,
+runs `validate`, and repeats `migrate` to exercise an idempotent no-op pass.
 
-The migration folder intentionally contains no schema DDL yet; a green migration job demonstrates **container wiring and migration history**, not actual user/dish/restaurant schema compatibility. Once the first Reylo `.sql` import or app repository lands, integrate migrations and Reylo typecheck/build **in the same CI job or against the same migrated database**; separate jobs do not share their ephemeral Postgres. Do not treat a cached `.reylo/` result as authoritative CI verification.
+The `Quality` workflow also has a `backend` job that provisions the same
+disposable database with a loopback port, runs all Flyway migrations in
+version order, then runs the Reylo-aware typecheck, the full test suite
+(unit + PostgreSQL integration + HTTP + rate-limit), and the production
+build against that migrated database. A green `backend` job proves schema
+compatibility, query typing, and runtime behavior together; the standalone
+`migration` job continues to verify Compose wiring independently.
 
 See `docs/development/database-testing.md`, `docs/infra/migrations.md` and `docs/architecture/persistence.md` for acceptance scenarios.
