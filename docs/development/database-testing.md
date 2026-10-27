@@ -25,9 +25,14 @@
 
 ## CI sequencing
 
-The `Quality` workflow initially checks static formatting/lint/types without a database because the feature SQL is not yet implemented. The separate database job can prove the Flyway/PG migration pipeline.
-
-**Before the first module SQL import merges:** CI must run a migrated PostgreSQL instance and configure `DATABASE_URL` (direct connection) for Reylo's type checker and production build. It must fail if the DB is unavailable or the migration isn't applied. Disallow green builds based solely on `.reylo/` cache.
+The `Quality` workflow's `backend` job provisions a fresh, disposable
+PostgreSQL 18 instance, runs **all** migrations in version order, runs Flyway
+`validate`, then type-checks Reylo `.sql` imports, runs unit and integration
+tests, and builds the production bundle — all against the same migrated
+database. It fails when the database is unavailable or a migration is
+unapplied. Green builds based solely on a stale `.reylo/` cache are
+disallowed: Reylo re-analyzes changed statements against the live schema and
+fails closed without it.
 
 Keep database test fixtures synthetic and disposable; never use user photographs, real account tokens or production credentials. Use PostgreSQL for query tests rather than mocking SQL semantics.
 

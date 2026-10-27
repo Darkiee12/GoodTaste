@@ -1,0 +1,3 @@
+INSERT INTO feastjourney.dishes (slug, parent_dish_id, status)
+VALUES (:slug::text, :parent_dish_id::nullable(bigint), :status::text)
+RETURNING id, slug, parent_dish_id, status, created_at, updated_at

@@ -29,6 +29,10 @@
   },
   "rules": {
     "eqeqeq": "error",
+    "eslint/no-underscore-dangle": [
+      "error",
+      { "allow": ["_tag"] }
+    ],
     "no-console": "error",
     "no-debugger": "error",
     "no-eval": "error",
@@ -95,6 +99,26 @@
       ],
       "rules": {
         "no-console": "off"
+      }
+    },
+    // Reylo infers .sql result types via the TypeScript 7.1 content mapper
+    // against the migrated development database (tsc --runExternalCode).
+    // Oxlint does not execute content mappers, so Reylo-derived row types
+    // appear as error/any to its type engine and every row access warns.
+    // tsc remains the authority for SQL typing: any schema/query drift is a
+    // compile error there. These rules stay on everywhere else.
+    {
+      "files": [
+        "src/modules/food-discovery/server/repository/**/*.ts",
+        "src/modules/food-discovery/server/operations/*.ts"
+      ],
+      "rules": {
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-redundant-type-constituents": "off"
       }
     },
     {

@@ -30,7 +30,7 @@ docker compose --env-file infra/.env -f infra/compose.yaml ps
 
 For official PostgreSQL 18 images, the named volume is mounted at `/var/lib/postgresql`, **not** `/var/lib/postgresql/data` (the PostgreSQL 17-and-earlier convention). Existing volumes from the old layout must be backed up and reviewed before manual migration. Never drop or recreate a volume as a quick fix.
 
-The first command waits for the Postgres health check, the second runs pending Flyway migrations and **must exit 0** before running app code, and the third validates the applied history. `run --rm` removes the transient migrator container. The migration files currently contain only the directory README until schema work is approved. Do not infer that a successful no-op migration means a user/dish/restaurant table exists.
+The first command waits for the Postgres health check, the second runs pending Flyway migrations and **must exit 0** before running app code, and the third validates the applied history. `run --rm` removes the transient migrator container. Migrations are listed in `db/migrations/README.md`. Do not infer that a successful no-op migration means the expected schema is installed: always check `migrator info` output.
 
 For a full local dependency startup:
 
@@ -48,9 +48,72 @@ Follow [object storage setup](object-storage.md) to generate credentials, start 
 
 Before enabling real uploads test CORS, object type/size verification, presign semantics and deletion with synthetic data.
 
-## App + Reylo connection caveat
+## App + Reylo connection
 
-No application container is currently defined in `infra/compose.yaml`. TypeScript's Reylo analysis uses a direct connection to the **migrated** database. Because Postgres has no published port, a host-side Bun process cannot automatically reach it. Decide on a network-local typecheck runner or a loopback-only local mapping when integrating the first `.sql` import; document the arrangement rather than silently using a public port.
+The API runs as part of the TanStack Start server (no separate HTTP process).
+Host-side tooling reaches the Compose database through a loopback-only port
+mapping declared in `infra/compose.ports.yaml`. This file is additive and
+local-only: it never opens public ports and application containers keep using
+the internal `postgres:5432` address.
+
+```bash
+docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
+docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+```
+
+TypeScript's Reylo analysis uses a direct connection to the **migrated** database.
+Point it at the loopback endpoint (values must match `infra/.env`):
+
+```bash
+export DATABASE_URL="postgres://USER:PASSWORD@127.0.0.1:5433/feastjourney"
+export ADMIN_API_KEY="local-only-admin-key"
+bun run check-types
+bun test tests/
+bun run build
+bun run dev
+```
+
+Reylo typechecking fails closed without a migrated, reachable database; a stale
+`.reylo/` cache is never accepted as proof in CI (the cache directory
+self-ignores via its own `.gitignore`). Never commit real credentials or expose
+the loopback mapping beyond `127.0.0.1`.
+
+## Catalog administration (local)
+
+Administrative writes require `ADMIN_API_KEY` (never commit it, never ship it
+to browsers). The local API runs through `bun run dev` (port 3000) once the
+database is migrated and `DATABASE_URL` is exported.
+
+Publication policy is enforced server-side: publishing requires a preferred
+English name, at least one category, and a description or summary, plus a
+canonical slug. Drafts may be incomplete; they are never served publicly.
+
+```bash
+BASE=http://localhost:3000 ADMIN_KEY=local-only-admin-key
+
+curl -s -X POST "$BASE/api/v1/dishes" -H "x-admin-key: $ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"draft","names":[{"language_tag":"en","name":"Test Dish","name_kind":"localized"}]}'
+
+curl -s "$BASE/api/v1/dishes/test-dish?locale=en"
+
+curl -s -X POST "$BASE/api/v1/admin/imports/validate" -H "x-admin-key: $ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source_name":"curated-batch-1","records":[{...validated authoring records...}]}'
+
+curl -s -X POST "$BASE/api/v1/admin/imports/apply" -H "x-admin-key: $ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"job_id":"<id-from-validate-step>"}'
+
+curl -s "$BASE/api/v1/admin/review-queue?limit=20" -H "x-admin-key: $ADMIN_KEY"
+```
+
+Validation (`imports/validate`) stages the job and per-record results without
+applying anything; `imports/apply` runs each valid record in its own
+transaction and records revisions, curation notes for possible duplicates, and
+the final job outcome. Imports never overwrite curated rows and never merge
+distinct dishes on name similarity alone.
 
 ## Stop and investigate
 

@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   static:
-    name: Format, lint and types
+    name: Format and lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -24,13 +24,14 @@ jobs:
         run: bun run format
       - name: Type-aware lint
         run: bun run lint
-      - name: TypeScript
-        run: bun run check-types
 
-  test:
-    name: Unit tests and build
+  backend:
+    name: PostgreSQL-backed typecheck, tests and build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
+      ADMIN_API_KEY: ci-only-admin-key
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -38,10 +39,23 @@ jobs:
           bun-version: 1.4.4
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Unit tests
-        run: bun run test
+      - name: Start disposable PostgreSQL with loopback access
+        run: |
+          cp infra/.env.example infra/.env
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+      - name: Run Flyway migrations
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
+      - name: Validate Flyway migration history
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+      - name: Reylo-aware TypeScript
+        run: bun run check-types
+      - name: Unit and integration tests
+        run: bun test tests/
       - name: Production build
         run: bun run build
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml down --remove-orphans
 
   audit:
     name: Dependency and code audits
