@@ -1,10 +1,10 @@
 # Local operations and infra verification
 
-This runbook covers **local-only** Docker Compose, not production deployment or Docker Swarm. MinIO's legacy CE image is unsupported and remains restricted to local development.
+This runbook covers **local-only** Docker Compose, not production deployment or Docker Swarm. Garage runs as a single node without redundancy.
 
 ## Prerequisites
 
-Docker Engine + recent Compose plugin, repository checkout, adequate local disk and ability to pull `postgis/postgis:18-3.6-alpine`, `flyway/flyway:13.11.1`, and any intentionally approved legacy MinIO image. Bun/Node is needed only for application development after the app is scaffolded.
+Docker Engine + recent Compose plugin, repository checkout, adequate local disk and ability to pull `postgis/postgis:18-3.6-alpine`, `flyway/flyway:13.11.1`, and `dxflrs/garage:v2.5.0`. Bun/Node is needed for application development.
 
 ## Safe local setup
 
@@ -12,7 +12,7 @@ Run from repository root. On Windows, copy `.env.example` manually if a POSIX `c
 
 ```bash
 cp infra/.env.example infra/.env
-# Edit infra/.env to use fresh local-only values. Do not print the file to public logs.
+# Set fresh local-only values, including Garage credentials (see object-storage.md).
 docker compose --env-file infra/.env -f infra/compose.yaml config --quiet
 ```
 
@@ -38,13 +38,13 @@ For a full local dependency startup:
 docker compose --env-file infra/.env -f infra/compose.yaml up -d
 ```
 
-This also starts MinIO and the one-shot `migrator`. Check its exit status/logs rather than assuming `up -d` proves migration success. When the app container is introduced it **must** use `depends_on: migrator: {condition: service_completed_successfully}`. Until that app exists, the foreground `run --rm migrator` command is the clearer gate.
+This also starts Garage and the one-shot `migrator`. Check its exit status/logs rather than assuming `up -d` proves migration success. When the app container is introduced it **must** use `depends_on: migrator: {condition: service_completed_successfully}`. Until that app exists, the foreground `run --rm migrator` command is the clearer gate.
 
 If an image cannot be downloaded or credentials are wrong, investigate **without deleting volumes**. To change a migration file already applied, add a new migration instead of editing the original.
 
-## MinIO and private bucket
+## Garage and private bucket
 
-Do not start MinIO without accepting the legacy image risk described in [object storage](object-storage.md). No host ports are published. Create a private `goodtaste-private` bucket using reviewed CLI/UI provisioning via the Compose network. Check anonymous GET is denied and signed URLs use a browser-reachable endpoint; `minio:9000` resolves only within the Compose network.
+Follow [object storage setup](object-storage.md) to generate credentials, start only Garage, and inspect its cluster/bucket. Startup creates the private `goodtaste-private` bucket using Garage's single-node bootstrap flags. No host ports are published; `http://garage:3900` is reachable only within the Compose network. The landing page does not use storage yet.
 
 Before enabling real uploads test CORS, object type/size verification, presign semantics and deletion with synthetic data.
 
@@ -64,7 +64,7 @@ docker compose --env-file infra/.env -f infra/compose.yaml ps -a
 - PostgreSQL down: inspect health check, local disk and DB logs; use read-only diagnostics.
 - Migrator failed: check its exit code, schema-history state, SQL filename and errors; **block app deployment** until resolved. `flyway repair` is not normal recovery.
 - Reylo check fails: verify migrated schema, direct connection and SQL import; no silent cache-only success in CI.
-- MinIO unavailable: inspect internal DNS, credentials, volume; never expose public ACL/ports as an emergency workaround.
+- Garage unavailable: inspect health, internal DNS, RPC secret, S3 credentials, and both volumes; never enable public website access or expose administration ports as an emergency workaround.
 
 ## Production and CI
 

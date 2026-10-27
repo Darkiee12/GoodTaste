@@ -9,7 +9,8 @@ Copy `infra/.env.example` to `infra/.env`. Required local-only variables:
 | `POSTGRES_USER` | PostgreSQL initialization + Flyway | Local bootstrap account; do **not** assume this role is suitable for production app queries |
 | `POSTGRES_PASSWORD` | PostgreSQL initialization + Flyway | Local-only, never publish/log |
 | `POSTGRES_DB` | PostgreSQL initialization + Flyway | Injected into Flyway JDBC URL; must match initialized database |
-| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_IMAGE` | Legacy local object store | MinIO example is local-only and unmaintained |
+| `GARAGE_RPC_SECRET` | Garage node/CLI | 32 random bytes encoded as 64 hex characters; server-only |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Garage local bucket bootstrap / future app | Fresh local S3 credentials; distinct from the RPC secret |
 
 Flyway image is pinned to `flyway/flyway:13.11.1` in `infra/compose.yaml`. It reads:
 
@@ -30,7 +31,8 @@ The application must not receive `FLYWAY_PASSWORD` or DDL credentials; the migra
 
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
 - For Reylo analysis, the URL must point **directly** to a migrated Postgres schema; avoid transaction-mode PgBouncer. A distinct development/CI connection may be used instead of the runtime pool URL.
-- `S3_ENDPOINT_INTERNAL`, `S3_ENDPOINT_PUBLIC` (browser-valid presigned hostname), `S3_REGION`, `S3_BUCKET_PRIVATE`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=goodtaste-private`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose network.
+- `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL`.
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.

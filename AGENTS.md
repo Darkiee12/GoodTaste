@@ -6,7 +6,7 @@ This file is the mandatory repository entry point for coding agents. It is not a
 GoodTaste is a mobile-first full-stack application that helps travellers (1) discover culturally relevant dishes, (2) find verified places that serve them, and (3) understand unfamiliar menus and prepare bilingual orders. Dietary requirements and uncertainty are first-class concerns. Read `docs/product/vision.md` and `docs/product/mvp.md` for acceptance criteria.
 
 ## Stack and architectural decisions
-- Modular monolith: TanStack Start (React) with server functions; Effect for application operations; PostgreSQL for relational truth; an S3-compatible object store, using MinIO in local development. No separate HTTP backend in the MVP.
+- Modular monolith: TanStack Start (React) with server functions; Effect for application operations; PostgreSQL for relational truth; an S3-compatible object store, using Garage in local development. No separate HTTP backend in the MVP.
 - Bun is the initial package manager and proposed runtime; validate build/production compatibility before making it mandatory. See `docs/decisions/0004-bun.md`.
 - Treat `docs/decisions/` as the source of recorded architecture decisions, and `docs/architecture/` as their living implementation contracts.
 - Database entities and object metadata are not interchangeable: Postgres owns metadata/permissions; object storage holds binary files.

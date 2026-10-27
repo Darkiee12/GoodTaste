@@ -68,7 +68,7 @@ docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator val
 docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator info
 ```
 
-The `run --rm migrator` command uses Compose's declared `migrate` command; `validate` and `info` override it. `up -d` without selecting services also starts MinIO and triggers the migrator; the example uses an explicit invocation to make migration status unambiguous. A zero exit code is required. Re-running `migrate` without new versioned files should be idempotent.
+The `run --rm migrator` command uses Compose's declared `migrate` command; `validate` and `info` override it. `up -d` without selecting services also starts Garage and triggers the migrator; the example uses an explicit invocation to make migration status unambiguous. A zero exit code is required. Re-running `migrate` without new versioned files should be idempotent.
 
 To inspect problems, use `docker compose ... logs migrator` for the normal `up` lifecycle or run the one-shot command in the foreground. Mask credentials and connection strings in shared logs. Do not remove the Postgres volume to recover a failed migration.
 

@@ -15,6 +15,8 @@ These links are research references, **not** permission to copy repository conve
 - Bun + TanStack Start — https://bun.com/guides/ecosystem/tanstack-start
 - TanStack Router AGENTS.md — https://github.com/TanStack/router/blob/main/AGENTS.md
 - TanStack Query AGENTS.md (minimal example) — https://github.com/TanStack/query/blob/main/AGENTS.md
-- MinIO archived community repository — https://github.com/minio/minio
+- Garage configuration — https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/
+- Garage quick start — https://garagehq.deuxfleurs.fr/documentation/quick-start/
+- Garage S3 compatibility — https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/
 - Docker Compose environment variables — https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/
 - RustFS S3 compatibility coverage (alternative evaluation only) — https://docs.rustfs.com/en/reference/s3-compatibility
