@@ -1,17 +1,28 @@
-import { HeadContent, Link, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
+import {
+  HeadContent,
+  Link,
+  Outlet,
+  Scripts,
+  createRootRoute,
+  stripSearchParams,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
+
+import { localeNames, locales, localeSearchSchema, messages } from "../shared/i18n";
 
 import stylesheet from "../styles.css?url";
 
 export const Route = createRootRoute({
-  head: () => ({
+  validateSearch: localeSearchSchema,
+  search: { middlewares: [stripSearchParams({ lang: "en" })] },
+  head: ({ match }) => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "GoodTaste — A little local knowledge" },
+      { title: messages[match.search.lang].title },
       {
         name: "description",
-        content: "A little local knowledge for your next food adventure. GoodTaste is coming soon.",
+        content: messages[match.search.lang].description,
       },
     ],
     links: [
@@ -24,8 +35,10 @@ export const Route = createRootRoute({
 });
 
 function Document({ children }: { children: ReactNode }) {
+  const { lang } = Route.useSearch();
+
   return (
-    <html lang="en">
+    <html lang={lang}>
       <head>
         <HeadContent />
       </head>
@@ -38,23 +51,44 @@ function Document({ children }: { children: ReactNode }) {
 }
 
 function AppLayout() {
+  const { lang } = Route.useSearch();
+  const copy = messages[lang];
+
   return (
     <>
       <a className="skip-link" href="#main">
-        Skip to content
+        {copy.skipContent}
       </a>
       <header className="site-header">
-        <Link className="wordmark" to="/" aria-label="GoodTaste home">
+        <Link className="wordmark" to="/" search={{ lang }} aria-label={copy.homeLabel}>
           GoodTaste<span aria-hidden="true">✳</span>
         </Link>
-        <span className="site-status">Coming soon</span>
+        <div className="header-actions">
+          <span className="site-status">{copy.comingSoon}</span>
+          <nav className="language-switcher" aria-label={copy.languageLabel}>
+            {locales.map((locale) => (
+              <Link
+                key={locale}
+                to="/"
+                search={(previous) => ({ ...previous, lang: locale })}
+                hash={true}
+                resetScroll={false}
+                lang={locale}
+                hrefLang={locale}
+                activeOptions={{ exact: true }}
+              >
+                {localeNames[locale]}
+              </Link>
+            ))}
+          </nav>
+        </div>
       </header>
       <main id="main" tabIndex={-1}>
         <Outlet />
       </main>
       <footer className="site-footer">
-        <span>A little local knowledge.</span>
-        <span>Stay curious. Ask before you order.</span>
+        <span>{copy.footerTagline}</span>
+        <span>{copy.footerAdvice}</span>
       </footer>
     </>
   );
