@@ -6,7 +6,7 @@ import { SQL } from "bun";
 import { Effect } from "effect";
 import { z } from "zod";
 
-import { RoleId, UserId } from "@/modules/user/server/domain/identifiers";
+import { RoleId, SessionId, UserId } from "@/modules/user/server/domain/identifiers";
 import { UserAdminService } from "@/modules/user/server/operations/admin-service";
 import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleService } from "@/modules/user/server/operations/role-service";
@@ -310,7 +310,7 @@ describe("session lifecycle", () => {
 
     await run(
       Effect.flatMap(SessionService, (service) =>
-        service.revokeSession(new Headers(withCookies(first.cookies)), other.id),
+        service.revokeSession(new Headers(withCookies(first.cookies)), SessionId.parse(other.id)),
       ),
     );
 
@@ -353,7 +353,7 @@ describe("session lifecycle", () => {
 
     const exit = await appRuntime.runPromiseExit(
       Effect.flatMap(SessionService, (service) =>
-        service.revokeSession(new Headers(withCookies(second.cookies)), victim.id),
+        service.revokeSession(new Headers(withCookies(second.cookies)), SessionId.parse(victim.id)),
       ),
     );
 
