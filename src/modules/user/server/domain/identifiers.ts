@@ -30,3 +30,19 @@ export const RoleId = {
     return roleIdBrand(roleIdSchema.parse(value));
   },
 } as const;
+
+/**
+ * Non-authenticating session record reference. The bearer token never
+ * crosses into application code, so revocation takes this branded id and
+ * resolves the token server-side after an ownership check.
+ */
+export type SessionId = string & Brand.Brand<"SessionId">;
+
+const sessionIdBrand = Brand.nominal<SessionId>();
+const sessionIdSchema = z.string().min(1).max(255);
+
+export const SessionId = {
+  parse(value: string): SessionId {
+    return sessionIdBrand(sessionIdSchema.parse(value));
+  },
+} as const;
