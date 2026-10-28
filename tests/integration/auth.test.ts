@@ -243,6 +243,12 @@ describe("session lifecycle", () => {
     expect(listed.length).toBe(2);
     expect(listed.filter((entry) => entry.current).length).toBe(1);
 
+    // Bearer tokens must never reach browser application data.
+    for (const entry of listed) {
+      expect("token" in entry).toBe(false);
+      expect(entry.id.length).toBeGreaterThan(0);
+    }
+
     const other = listed.find((entry) => !entry.current);
 
     if (other === undefined) {
@@ -251,7 +257,7 @@ describe("session lifecycle", () => {
 
     await run(
       Effect.flatMap(SessionService, (service) =>
-        service.revokeSession(new Headers(withCookies(first.cookies)), other.token),
+        service.revokeSession(new Headers(withCookies(first.cookies)), other.id),
       ),
     );
 
@@ -274,6 +280,37 @@ describe("session lifecycle", () => {
     const gone = await call("/api/auth/get-session", { headers: withCookies(first.cookies) });
 
     await expectNoSession(gone);
+  });
+
+  test("a user cannot revoke another user's session by id", async () => {
+    const first = await signupVerifySignin("session-owner");
+    const second = await signupVerifySignin("session-attacker");
+
+    const victimSessions = await run(
+      Effect.flatMap(SessionService, (service) =>
+        service.listSessions(new Headers(withCookies(first.cookies))),
+      ),
+    );
+
+    const victim = victimSessions.find((entry) => entry.current);
+
+    if (victim === undefined) {
+      throw new Error("expected the victim session");
+    }
+
+    const exit = await appRuntime.runPromiseExit(
+      Effect.flatMap(SessionService, (service) =>
+        service.revokeSession(new Headers(withCookies(second.cookies)), victim.id),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+
+    const stillValid = await call("/api/auth/get-session", {
+      headers: withCookies(first.cookies),
+    });
+
+    expect(stillValid.status).toBe(200);
   });
 
   test("expired sessions are rejected", async () => {

@@ -56,7 +56,7 @@ function SecuritySettings() {
   });
 
   const revokeOne = useMutation({
-    mutationFn: (token: string) => revokeSessionFn({ data: { session_token: token } }),
+    mutationFn: (sessionId: string) => revokeSessionFn({ data: { session_id: sessionId } }),
     onSuccess: () => {
       refreshSessions.mutate();
     },
@@ -127,15 +127,15 @@ function SecuritySettings() {
         <h2>{copy.authSessions}</h2>
         <ul>
           {sessions.map((entry) => (
-            <li key={entry.token}>
-              {entry.userAgent ?? entry.token.slice(0, 8)}
+            <li key={entry.id}>
+              {entry.userAgent ?? entry.id.slice(0, 8)}
               {entry.current ? ` (${copy.authCurrentSession})` : null}
               {entry.current ? null : (
                 <button
                   type="button"
                   disabled={revokeOne.isPending}
                   onClick={() => {
-                    revokeOne.mutate(entry.token);
+                    revokeOne.mutate(entry.id);
                   }}
                 >
                   {copy.authRevoke}

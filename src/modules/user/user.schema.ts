@@ -23,7 +23,7 @@ export const favoritesQuerySchema = z.object({
 });
 
 export const sessionRevokeSchema = z.object({
-  session_token: z.string().min(1).max(512),
+  session_id: z.string().min(1).max(255),
 });
 
 export const unlinkAccountSchema = z.object({
