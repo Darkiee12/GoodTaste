@@ -58,8 +58,9 @@ afterAll(async () => {
 
 describe("dynamic authorization", () => {
   test("new users receive member access and nothing else", async () => {
+    // The database trigger assigns Member on user creation; the test must
+    // not manufacture the invariant it verifies, so no manual grant here.
     const userId = await makeUser("plain");
-    await grant("member", userId);
 
     expect(await has(userId, "food", ["read"])).toBe(true);
     expect(await has(userId, "favorite", ["create", "delete"])).toBe(true);
