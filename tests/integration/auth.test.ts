@@ -117,6 +117,8 @@ const expectNoSession = async (response: Response): Promise<void> => {
 
 const createdUserIds: Array<string> = [];
 
+const testAudit = { requestId: "test-request", sessionId: null };
+
 const grantRole = async (userId: string, roleId: string): Promise<void> => {
   const sql = new SQL(process.env.DATABASE_URL ?? "");
 
@@ -528,13 +530,23 @@ describe("administration", () => {
 
     await run(
       Effect.flatMap(RoleService, (service) =>
-        service.assignRole(adminActor, UserId.parse(member.userId), RoleId.parse("support")),
+        service.assignRole(
+          adminActor,
+          UserId.parse(member.userId),
+          RoleId.parse("support"),
+          testAudit,
+        ),
       ),
     );
 
     const escalate = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.assignRole(memberActor, UserId.parse(admin.userId), RoleId.parse("admin")),
+        service.assignRole(
+          memberActor,
+          UserId.parse(admin.userId),
+          RoleId.parse("admin"),
+          testAudit,
+        ),
       ),
     );
 
@@ -548,7 +560,12 @@ describe("administration", () => {
 
     await run(
       Effect.flatMap(RoleService, (service) =>
-        service.removeRole(adminActor, UserId.parse(member.userId), RoleId.parse("support")),
+        service.removeRole(
+          adminActor,
+          UserId.parse(member.userId),
+          RoleId.parse("support"),
+          testAudit,
+        ),
       ),
     );
   });
@@ -563,7 +580,7 @@ describe("administration", () => {
 
     await run(
       Effect.flatMap(UserAdminService, (service) =>
-        service.banUser(adminActor, UserId.parse(target.userId), "test ban"),
+        service.banUser(adminActor, UserId.parse(target.userId), "test ban", testAudit),
       ),
     );
 
@@ -573,7 +590,7 @@ describe("administration", () => {
 
     await run(
       Effect.flatMap(UserAdminService, (service) =>
-        service.unbanUser(adminActor, UserId.parse(target.userId)),
+        service.unbanUser(adminActor, UserId.parse(target.userId), testAudit),
       ),
     );
   });
@@ -612,5 +629,37 @@ describe("social sign-in", () => {
     const response = await call("/api/auth/callback/google?code=invalid&state=invalid");
 
     expect(response.status).not.toBe(200);
+  });
+});
+
+describe("plugin administration boundary", () => {
+  test("better Auth plugin admin endpoints cannot bypass dynamic RBAC", async () => {
+    const { userId, cookies } = await signupVerifySignin("plugin-owner");
+    await grantRole(userId, "owner");
+
+    // Even a full Owner gets nothing through the plugin: every plugin role
+    // carries zero grants by construction.
+    const listed = await call("/api/auth/admin/list-users?limit=5", {
+      headers: withCookies(cookies),
+    });
+
+    expect(listed.status).not.toBe(200);
+
+    const banned = await call(
+      "/api/auth/admin/ban-user",
+      json({ userId, banReason: "plugin probe" }, { cookie: cookies }),
+    );
+
+    expect(banned.status).not.toBe(200);
+
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+    const rows = await sql<
+      Array<{ banned: boolean | null }>
+    >`SELECT banned FROM "feastjourney"."user" WHERE id = ${userId}`;
+
+    await sql.end();
+
+    expect(rows[0]?.banned ?? false).toBe(false);
   });
 });

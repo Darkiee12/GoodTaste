@@ -1,9 +1,11 @@
 import { Context, Effect, Layer } from "effect";
 
 import type { UserId } from "@/modules/user/server/domain/identifiers";
+import { recordAuditEvent, type AuditContext } from "@/modules/user/server/operations/audit";
 import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleRepository } from "@/modules/user/server/repository/role-repository";
-import type { Actor } from "@/server/auth/actor";
+import type { UserRepository } from "@/modules/user/server/repository/user-repository";
+import { Actor } from "@/server/auth/actor";
 import { type InsufficientPermissions, LastOwnerRemovalDenied } from "@/server/auth/errors";
 import { SYSTEM_ROLES } from "@/server/auth/permissions";
 import type { Database } from "@/server/database/client";
@@ -26,11 +28,20 @@ type AdminFailure =
   | TransactionFailed
   | DatabaseError;
 
+const actorUserId = (actor: Actor): string | null =>
+  Actor.$match(actor, {
+    Guest: () => null,
+    Member: ({ userId }) => userId,
+    Admin: () => null,
+  });
+
 /**
  * User account administration behind dynamic RBAC. All reads and writes go
  * through application-owned Reylo queries; Better Auth's plugin admin
  * endpoints are locked down to empty grants and never called, so no static
  * role check can bypass these guards.
+ *
+ * Every mutation and its mandatory audit record commit in one transaction.
  */
 export class UserAdminService extends Context.Service<
   UserAdminService,
@@ -48,15 +59,30 @@ export class UserAdminService extends Context.Service<
       actor: Actor,
       userId: UserId,
       reason: string,
-    ) => Effect.Effect<void, AdminFailure, Database | RoleRepository | Authorization>;
+      audit: AuditContext,
+    ) => Effect.Effect<
+      void,
+      AdminFailure,
+      Database | RoleRepository | UserRepository | Authorization
+    >;
     readonly unbanUser: (
       actor: Actor,
       userId: UserId,
-    ) => Effect.Effect<void, AdminFailure, Database | RoleRepository | Authorization>;
+      audit: AuditContext,
+    ) => Effect.Effect<
+      void,
+      AdminFailure,
+      Database | RoleRepository | UserRepository | Authorization
+    >;
     readonly revokeUserSessions: (
       actor: Actor,
       userId: UserId,
-    ) => Effect.Effect<void, AdminFailure, Database | RoleRepository | Authorization>;
+      audit: AuditContext,
+    ) => Effect.Effect<
+      void,
+      AdminFailure,
+      Database | RoleRepository | UserRepository | Authorization
+    >;
   }
 >()("feastjourney/user/UserAdminService") {}
 
@@ -80,7 +106,7 @@ export const UserAdminServiceLive = Layer.succeed(UserAdminService, {
       }));
     }),
 
-  banUser: (actor, userId, reason) =>
+  banUser: (actor, userId, reason, audit) =>
     Effect.gen(function* () {
       const authorization = yield* Authorization;
       const repository = yield* RoleRepository;
@@ -119,27 +145,78 @@ export const UserAdminServiceLive = Layer.succeed(UserAdminService, {
           }
 
           yield* repository.banUser(userId, reason);
+          yield* repository.deleteSessionsOfUser(userId);
 
-          return yield* repository.deleteSessionsOfUser(userId);
+          return yield* recordAuditEvent({
+            actorUserId: actorUserId(actor),
+            sessionId: audit.sessionId,
+            requestId: audit.requestId,
+            event: "auth.user.banned",
+            outcome: "succeeded",
+            resource: `user:${userId}`,
+            metadata: { reason },
+          });
         }),
       );
     }),
 
-  unbanUser: (actor, userId) =>
+  unbanUser: (actor, userId, audit) =>
     Effect.gen(function* () {
       const authorization = yield* Authorization;
       const repository = yield* RoleRepository;
 
       yield* authorization.require(actor, { resource: "user", actions: ["ban"] });
-      yield* repository.unbanUser(userId);
+
+      return yield* withTransaction(
+        "user/unban",
+        Effect.gen(function* () {
+          yield* repository.unbanUser(userId);
+
+          return yield* recordAuditEvent({
+            actorUserId: actorUserId(actor),
+            sessionId: audit.sessionId,
+            requestId: audit.requestId,
+            event: "auth.user.unbanned",
+            outcome: "succeeded",
+            resource: `user:${userId}`,
+          });
+        }),
+      );
     }),
 
-  revokeUserSessions: (actor, userId) =>
+  revokeUserSessions: (actor, userId, audit) =>
     Effect.gen(function* () {
       const authorization = yield* Authorization;
       const repository = yield* RoleRepository;
 
       yield* authorization.require(actor, { resource: "session", actions: ["revoke-any"] });
-      yield* repository.deleteSessionsOfUser(userId);
+
+      return yield* withTransaction(
+        "user/sessions-revoke",
+        Effect.gen(function* () {
+          // Target protection: revoking a protected account's sessions also
+          // needs `role:manage-protected`. No liveness lock: sessions can be
+          // re-established, so this is an authority check, not an invariant.
+          const assignments = yield* repository.rolesOfUser(userId);
+
+          if (assignments.some((entry) => entry.role_id === SYSTEM_ROLES.owner)) {
+            yield* authorization.require(actor, {
+              resource: "role",
+              actions: ["manage-protected"],
+            });
+          }
+
+          yield* repository.deleteSessionsOfUser(userId);
+
+          return yield* recordAuditEvent({
+            actorUserId: actorUserId(actor),
+            sessionId: audit.sessionId,
+            requestId: audit.requestId,
+            event: "auth.user.sessions_revoked",
+            outcome: "succeeded",
+            resource: `user:${userId}`,
+          });
+        }),
+      );
     }),
 });
