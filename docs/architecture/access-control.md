@@ -56,7 +56,7 @@ This avoids two competing authorization systems: the plugin can never grant what
 
 ## Effect integration
 
-- `Actor` is a `Data.TaggedEnum` (`Guest` | `Member` | `Admin`); human actors are constructed only from verified sessions (members). Guests are the public-read actor. Pattern-match with `$match`, never by reading `_tag`.
+- `Actor` is a `Data.TaggedEnum` (`Guest` | `Member`); human actors are constructed only from verified sessions (members). Guests are the public-read actor. Pattern-match with `$match`, never by reading `_tag`.
 - `Authorization` is a `Context.Service` resolved per request; checks return typed failures (`InsufficientPermissions`, `ProtectedRole`, `RoleNotManageable`, `UnknownPermission`, `LastOwnerRemovalDenied`, ...), mapped to HTTP statuses in `api-error.ts`. `requireManageableRole` answers only whether the target may be touched; every operation enforces its own permission (`role:create/read/update/delete/assign/manage-permissions`) independently at its boundary.
 - Branded `UserId`/`RoleId`/`SessionId` (`Brand.nominal` + Zod parsing at the boundary) make swapped identifiers a compile error.
 

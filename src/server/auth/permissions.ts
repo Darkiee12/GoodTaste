@@ -45,10 +45,19 @@ export type Permission = {
   ]: `${Resource & string}:${(typeof statements)[Resource][number]}`;
 }[keyof typeof statements];
 
+/**
+ * A single resource-scoped permission check. The union is derived from the
+ * static vocabulary above, so a misspelled resource or action in
+ * application code fails typecheck instead of silently denying at
+ * runtime. HTTP input arrives as plain strings and is validated with
+ * `isPermissionRequest` before it can become one of these.
+ */
 export type PermissionRequest = {
-  readonly resource: string;
-  readonly actions: ReadonlyArray<string>;
-};
+  [Resource in keyof typeof statements]: {
+    readonly resource: Resource;
+    readonly actions: ReadonlyArray<(typeof statements)[Resource][number]>;
+  };
+}[keyof typeof statements];
 
 const collectKeys = (): ReadonlyArray<string> => {
   const keys: Array<string> = [];
@@ -67,6 +76,18 @@ export const PERMISSION_KEYS: ReadonlyArray<string> = collectKeys();
 
 export const isPermissionKey = (value: string): value is Permission =>
   PERMISSION_KEYS.includes(value);
+
+/**
+ * Validates untrusted HTTP input as a `PermissionRequest`. A request is
+ * valid exactly when every `resource:action` pair names a known permission
+ * key — the same condition `Authorization.require` enforces — so anything
+ * else fails closed before it can become a typed request.
+ */
+export const isPermissionRequest = (value: {
+  readonly resource: string;
+  readonly actions: ReadonlyArray<string>;
+}): value is PermissionRequest =>
+  value.actions.every((action) => isPermissionKey(`${value.resource}:${action}`));
 
 // Validated at module load: the catalog only ever contains vocabulary keys.
 export const SYSTEM_PERMISSIONS: ReadonlyArray<Permission> = collectKeys().filter(isPermissionKey);

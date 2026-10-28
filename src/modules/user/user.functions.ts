@@ -14,7 +14,7 @@ import {
   sessionRevokeSchema,
   unlinkAccountSchema,
 } from "@/modules/user/user.schema";
-import { AuthProviderError } from "@/server/auth/errors";
+import { AuthProviderError, InsufficientPermissions } from "@/server/auth/errors";
 
 /**
  * Server-only dependency loader. Dynamic imports keep browser bundles free
@@ -33,6 +33,7 @@ const loadServer = async () => {
     audit,
     authorization,
     errors,
+    permissions,
     session,
     betterAuth,
     actor,
@@ -49,6 +50,7 @@ const loadServer = async () => {
     import("@/modules/user/server/operations/audit"),
     import("@/modules/user/server/operations/authorization"),
     import("@/modules/user/server/domain/errors"),
+    import("@/server/auth/permissions"),
     import("@/server/auth/session"),
     import("@/server/auth/better-auth"),
     import("@/server/auth/actor"),
@@ -67,6 +69,7 @@ const loadServer = async () => {
     audit,
     authorization,
     errors,
+    permissions,
     session,
     betterAuth,
     actor,
@@ -674,7 +677,8 @@ export const authorizeFn = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const { effects, server, authorization, session, actor, runtime } = await loadServer();
+    const { effects, server, authorization, session, actor, runtime, permissions } =
+      await loadServer();
 
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
@@ -682,11 +686,22 @@ export const authorizeFn = createServerFn({ method: "POST" })
     return runtime
       .runApp(
         effects.Effect.flatMap(session.requireAuthenticatedActor(headers), (trusted) =>
-          effects.Effect.forEach(data.checks, (check) =>
-            effects.Effect.flatMap(authorization.Authorization, (authz) =>
+          effects.Effect.forEach(data.checks, (check) => {
+            // Unknown resource:action pairs can never be granted; fail the
+            // check here so unvalidated HTTP input cannot become a typed
+            // PermissionRequest downstream.
+            if (!permissions.isPermissionRequest(check)) {
+              return effects.Effect.fail(
+                new InsufficientPermissions({
+                  reason: `Unknown permission request: ${check.resource}.`,
+                }),
+              );
+            }
+
+            return effects.Effect.flatMap(authorization.Authorization, (authz) =>
               authz.require(actor.Actor.Member({ userId: trusted.userId }), check),
-            ),
-          ),
+            );
+          }),
         ),
         "fn/user/authorize",
         15000,
