@@ -67,7 +67,6 @@ Point it at the loopback endpoint (values must match `infra/.env`):
 
 ```bash
 export DATABASE_URL="postgres://USER:PASSWORD@127.0.0.1:5433/feastjourney"
-export ADMIN_API_KEY="local-only-admin-key"
 bun run check-types
 bun test tests/
 bun run build
@@ -106,32 +105,36 @@ Every use is recorded in `security_audit_events` (`auth.role.changed`,
 
 ## Catalog administration (local)
 
-Administrative writes require `ADMIN_API_KEY` (never commit it, never ship it
-to browsers). The local API runs through `bun run dev` (port 3000) once the
-database is migrated and `DATABASE_URL` is exported.
+Administrative writes require a verified session with the matching database
+grants (curator role or above; see `docs/architecture/access-control.md` for
+the permission map). Sign in through the browser first, then call the API
+with the session cookie. The local API runs through `bun run dev` (port
+3000) once the database is migrated and `DATABASE_URL` is exported.
 
 Publication policy is enforced server-side: publishing requires a preferred
 English name, at least one category, and a description or summary, plus a
 canonical slug. Drafts may be incomplete; they are never served publicly.
 
 ```bash
-BASE=http://localhost:3000 ADMIN_KEY=local-only-admin-key
+BASE=http://localhost:3000
+# Authenticate once in the browser as a curator, then export the session cookie:
+# SESSION_COOKIE="better-auth.session_token=<value from browser devtools>"
 
-curl -s -X POST "$BASE/api/v1/dishes" -H "x-admin-key: $ADMIN_KEY" \
+curl -s -X POST "$BASE/api/v1/admin/dishes" -H "Cookie: $SESSION_COOKIE" \
   -H 'Content-Type: application/json' \
   -d '{"status":"draft","names":[{"language_tag":"en","name":"Test Dish","name_kind":"localized"}]}'
 
 curl -s "$BASE/api/v1/dishes/test-dish?locale=en"
 
-curl -s -X POST "$BASE/api/v1/admin/imports/validate" -H "x-admin-key: $ADMIN_KEY" \
+curl -s -X POST "$BASE/api/v1/admin/imports/validate" -H "Cookie: $SESSION_COOKIE" \
   -H 'Content-Type: application/json' \
   -d '{"source_name":"curated-batch-1","records":[{...validated authoring records...}]}'
 
-curl -s -X POST "$BASE/api/v1/admin/imports/apply" -H "x-admin-key: $ADMIN_KEY" \
+curl -s -X POST "$BASE/api/v1/admin/imports/apply" -H "Cookie: $SESSION_COOKIE" \
   -H 'Content-Type: application/json' \
   -d '{"job_id":"<id-from-validate-step>"}'
 
-curl -s "$BASE/api/v1/admin/review-queue?limit=20" -H "x-admin-key: $ADMIN_KEY"
+curl -s "$BASE/api/v1/admin/review-queue?limit=20" -H "Cookie: $SESSION_COOKIE"
 ```
 
 Validation (`imports/validate`) stages the job and per-record results without

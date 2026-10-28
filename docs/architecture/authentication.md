@@ -27,7 +27,10 @@ session; `CurrentActor` is provided per request, never stored globally.
 ## Token categories (kept separate)
 
 - **Browser session token**: opaque, in a secure cookie, resolved server-side
-  against the `session` table. Never a permission carrier.
+  against the `session` table. Never a permission carrier. The bearer token
+  never reaches browser application data: the session list API returns the
+  non-authenticating session record `id`, and revocation resolves the token
+  server-side after verifying the record belongs to the caller.
 - **Google/Facebook provider tokens**: belong to the identity provider, stored
   in the `account` table by Better Auth for its own refresh handling. Never
   returned to application responses, never treated as FeastJourney
@@ -49,6 +52,11 @@ matching only (`allowDifferentEmails: false`), trusted providers
 
 Email verification is mandatory (`requireEmailVerification`); sign-in before
 verification fails. Verification and reset links expire in 1 hour.
+
+Every new account receives the `member` role atomically: an `AFTER INSERT`
+trigger on the user table assigns it in the same transaction that creates
+the row (migration `V009`), covering email/password, OAuth, and
+administrative creation paths without trusting any second write.
 
 ## Authorization (dynamic RBAC)
 
@@ -78,11 +86,13 @@ so limits hold across replicas: sign-in 10/min, sign-up 10/5min, reset 5/5min,
 verification resend 10/5min, OAuth callbacks 30/min, 100/min default.
 
 Security audit events (`auth.sign_in.*`, `auth.password.*`,
-`auth.session.revoked*`, `auth.role.changed`, `auth.permission.denied`, ...)
+`auth.session.revoked*`, `auth.role.*`, `auth.user.*`, `auth.permission.denied`, ...)
 append to `security_audit_events`. Never logged: cookies, passwords, OAuth or
-API tokens, reset tokens, client secrets. Audit writes run after the
-authorization decision they record, so an audit failure cannot turn a denial
-into an allowance.
+API tokens, reset tokens, client secrets. Event audit is best-effort and
+runs after the decision it records, so an audit failure cannot turn a denial
+into an allowance. Privileged database mutations are the exception: their
+mandatory record commits in the same transaction, so a missing record rolls
+the mutation back (see `access-control.md`).
 
 ## Environment and operations
 

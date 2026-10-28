@@ -25,10 +25,28 @@ Roles, grants, and assignments live in PostgreSQL (`roles`, `permissions`, `role
 
 Seeded roles: `member`, `curator`, `moderator`, `support`, `admin` (system, editable metadata only) and `owner` (protected). Rules:
 
-- Protected roles (`owner`) require `role:manage-protected` to touch, and the last owner assignment cannot be removed (`LastOwnerRemovalDenied`).
+- Protected roles (`owner`) require `role:manage-protected` to touch, and the last active owner cannot be removed or banned (`LastOwnerRemovalDenied`).
+- An active owner holds the `owner` role and is not banned. Owner-membership changes serialize on a guard row (`SELECT ... FOR UPDATE` on the owner role) with the count and the mutation in one transaction, so concurrent removals cannot strand the system without an owner. Unrelated role changes take no lock.
+- Banning any owner requires `role:manage-protected`, and revoking an owner's sessions does too. Ordinary administrators hold neither path to a protected account.
 - System roles cannot be deleted, only unassigned.
 - Nobody grants what they do not hold: attaching a permission requires holding it yourself (`requireDelegatable`), and assigning a role requires `role:assign` plus the target being manageable.
+- Every new account receives `member` automatically via a database trigger in the user-insert transaction (migration `V009`); no second write, no hook race.
 - The bootstrap script creates the first owner out of band; there is no public path to ownership.
+
+## Catalog administration authorization
+
+All catalog administration endpoints resolve the actor from the verified Better Auth session and enforce per-operation database grants (`src/modules/food-discovery/server/api-adapter.ts`, `withAuthorized`). There is no API-key path and no machine identity: every administrative request is a human session or it is rejected.
+
+| Operation | Required permission |
+| --- | --- |
+| Create draft dish | `food:create` (+ `food:publish` when the request publishes immediately) |
+| Update dish metadata | `food:update` (+ `food:publish` when `status` changes) |
+| Status-only transitions | `food:publish` |
+| Names, descriptions, ingredient/place/category/cuisine links, notes | `food:update` |
+| Review queue | `moderation:read` |
+| Import validate / apply | `food:import` (explicit bulk-write grant; seeded to curator, admin, owner) |
+
+`admin:access` guards the administration surface only; it never authorizes a resource mutation by itself.
 
 ## Better Auth's place in the picture
 
@@ -38,10 +56,14 @@ This avoids two competing authorization systems: the plugin can never grant what
 
 ## Effect integration
 
-- `Actor` is a `Data.TaggedEnum` (`Guest` | `Member` | `Admin`); construction happens only from verified sessions (members) or the admin-key path (admin). Pattern-match with `$match`, never by reading `_tag`.
-- `Authorization` is a `Context.Service` resolved per request; checks return typed failures (`InsufficientPermissions`, `ProtectedRole`, `RoleNotManageable`, `UnknownPermission`, `LastOwnerRemovalDenied`, ...), mapped to HTTP statuses in `api-error.ts`.
-- Branded `UserId`/`RoleId` (`Brand.nominal` + Zod parsing at the boundary) make swapped identifiers a compile error.
+- `Actor` is a `Data.TaggedEnum` (`Guest` | `Member` | `Admin`); human actors are constructed only from verified sessions (members). Guests are the public-read actor. Pattern-match with `$match`, never by reading `_tag`.
+- `Authorization` is a `Context.Service` resolved per request; checks return typed failures (`InsufficientPermissions`, `ProtectedRole`, `RoleNotManageable`, `UnknownPermission`, `LastOwnerRemovalDenied`, ...), mapped to HTTP statuses in `api-error.ts`. `requireManageableRole` answers only whether the target may be touched; every operation enforces its own permission (`role:create/read/update/delete/assign/manage-permissions`) independently at its boundary.
+- Branded `UserId`/`RoleId`/`SessionId` (`Brand.nominal` + Zod parsing at the boundary) make swapped identifiers a compile error.
+
+## Audit atomicity
+
+Privileged mutations (role create/update/delete, grant replacement, assignments, ban/unban, session revocation) write their mandatory audit record in the same PostgreSQL transaction as the mutation: an audit-insert failure rolls the mutation back. Best-effort event audit (profile edits, favorites, provider-owned session flows) is recorded after the decision and never gates access. See `src/modules/user/server/operations/audit.ts` for the category contract.
 
 ## Future work
 
-Catalog curation still uses the admin key while its operations migrate to `food:*` role grants (the permissions already exist). API access/refresh tokens, if ever needed, must go through Better Auth's OAuth 2.1 provider capabilities — never a homemade JWT layer.
+API access/refresh tokens, if ever needed, must go through Better Auth's OAuth 2.1 provider capabilities — never a homemade JWT layer. There is no machine-identity model today: no service clients, no shared secrets, no credential rotation to document.
