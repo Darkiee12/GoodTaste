@@ -1,6 +1,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 
 import { UnlinkDenied } from "@/modules/user/server/domain/errors";
+import type { SessionId } from "@/modules/user/server/domain/identifiers";
 import { auth } from "@/server/auth/better-auth";
 import type { DatabaseError } from "@/server/database/query";
 
@@ -70,7 +71,7 @@ export class SessionService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<SessionSummary>, SessionLookupError>;
     readonly revokeSession: (
       headers: Headers,
-      sessionId: string,
+      sessionId: SessionId,
     ) => Effect.Effect<void, SessionLookupError>;
     readonly revokeOtherSessions: (headers: Headers) => Effect.Effect<void, SessionLookupError>;
     readonly revokeAllSessions: (headers: Headers) => Effect.Effect<void, SessionLookupError>;
