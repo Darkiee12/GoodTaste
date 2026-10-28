@@ -216,12 +216,52 @@ const splitList = (value: string): Array<string> =>
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
 
+const PLACE_ASSOCIATIONS: ReadonlySet<string> = new Set(["origin", "associated", "popular"]);
+
+/** One parsed `places` cell entry: an ISO code plus its place association. */
+interface CsvPlaceEntry {
+  readonly iso: string;
+  readonly association: string;
+}
+
+/**
+ * One `places` cell entry: `ISO[:association]`. A bare ISO code claims no
+ * origin — it defaults to `associated`; only an explicit `:origin` suffix
+ * records an origin claim. The association match is case-insensitive and
+ * surrounding whitespace is ignored. `sheetRow` is the 1-based spreadsheet
+ * row (header is row 1) so errors point at the offending line.
+ */
+const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
+  const separator = entry.indexOf(":");
+
+  if (separator === -1) {
+    return { iso: entry, association: "associated" };
+  }
+
+  const iso = entry.slice(0, separator).trim();
+  const rawAssociation = entry.slice(separator + 1).trim();
+  const association = rawAssociation.toLowerCase();
+
+  if (iso.length === 0) {
+    throw new Error(`row ${sheetRow}: invalid place entry "${entry}"`);
+  }
+
+  if (!PLACE_ASSOCIATIONS.has(association)) {
+    throw new Error(`row ${sheetRow}: unsupported place association "${rawAssociation}"`);
+  }
+
+  return { iso, association };
+};
+
 /**
  * Documented CSV shape: one row per dish, one name per dish.
  * Columns: slug,status,parent_slug,name,language_tag,name_kind,
  * description,ingredients,places,cuisines,categories,editorial_note.
- * Multi-value cells use `;` separators (ingredient names, place ISO codes,
- * cuisine/category slugs). Unknown ingredients, places, cuisines, or
+ * Multi-value cells use `;` separators (ingredient names, place entries,
+ * cuisine/category slugs). Each `places` entry is `ISO[:association]`
+ * where association is one of `origin`, `associated`, or `popular`;
+ * a bare ISO code means `associated`, never `origin`.
+ * Unknown ingredients, places, cuisines, or
  * categories are reported as review issues by validation, not silently
  * dropped.
  */
@@ -303,7 +343,7 @@ export const csvToRecords = (text: string): Array<unknown> => {
     const places = splitList(cell("places"));
 
     if (places.length > 0) {
-      record.places = places.map((iso) => ({ iso, association: "origin" }));
+      record.places = places.map((entry) => parsePlaceEntry(entry, rowNumber + 2));
     }
 
     const cuisines = splitList(cell("cuisines"));

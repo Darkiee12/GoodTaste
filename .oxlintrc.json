@@ -129,6 +129,7 @@
         "tests/integration/database-boundary.test.ts",
         "tests/integration/auth.test.ts",
         "tests/integration/admin-dashboard.test.ts",
+        "tests/integration/admin-import-journey.test.ts",
         "src/modules/user/*.functions.ts",
         "src/modules/food-discovery/*.functions.ts",
         "src/routes/settings.account.tsx",
