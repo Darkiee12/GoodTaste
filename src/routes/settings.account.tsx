@@ -2,14 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
-import {
-  getProfileFn,
-  getSessionFn,
-  listAccountsFn,
-  signOutFn,
-  unlinkAccountFn,
-  updateProfileFn,
-} from "@/modules/user/user.functions";
+import { signOutFn } from "@/modules/user/auth.functions";
+import { getProfileFn, updateProfileFn } from "@/modules/user/profile.functions";
+import { getSessionFn, listAccountsFn, unlinkAccountFn } from "@/modules/user/session.functions";
 import { messagesFor, locales } from "@/shared/i18n";
 import type { Locale } from "@/shared/i18n";
 
@@ -46,7 +41,8 @@ function AccountSettings() {
   const { profile, accounts: initialAccounts } = Route.useLoaderData();
   const copy = messagesFor(lang);
   const [displayName, setDisplayName] = useState(profile?.display_name ?? user.name);
-  const [locale, setLocale] = useState<Locale>(profile?.locale ?? lang);
+  const initialLocale = profile?.locale ?? "";
+  const [locale, setLocale] = useState<Locale>(isLocale(initialLocale) ? initialLocale : lang);
   const [accounts, setAccounts] = useState(initialAccounts);
 
   const saveProfile = useMutation({

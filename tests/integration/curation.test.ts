@@ -185,17 +185,25 @@ describe("curated authoring workflow", () => {
     expect(operations).toContain("status_changed");
   });
 
-  test("stores and lists curation notes", async () => {
+  test("moderators can view the review queue", async () => {
     const noted = await run(
       handleAdminReviewQueue(api("/api/v1/admin/review-queue?limit=5", { headers: moderator })),
     );
 
+    const body = await expectJson(
+      noted,
+      z.object({ items: z.array(z.unknown()), next_cursor: z.string().nullable() }),
+    );
+
     expect(noted.status).toBe(200);
+    expect(Array.isArray(body.items)).toBe(true);
   });
 });
 
 describe("curation notes", () => {
   test("notes round-trip through the admin API", async () => {
+    const note = `Verify native name spelling (${Date.now().toString(36)}).`;
+
     const response = await run(
       handleAdminAddNote(
         api("/api/v1/admin/dishes/1/notes", {
@@ -204,12 +212,14 @@ describe("curation notes", () => {
           body: JSON.stringify({
             author: "test-curator",
             note_kind: "review",
-            note: "Verify native name spelling with a second source.",
+            note,
           }),
         }),
         { id: "1" },
       ),
     );
+
+    const created = await expectJson(response, z.object({ noteId: z.string() }));
 
     expect(response.status).toBe(201);
 
@@ -219,6 +229,18 @@ describe("curation notes", () => {
       }),
     );
 
+    const notes = await expectJson(
+      listed,
+      z.object({
+        items: z.array(z.object({ id: z.string(), author: z.string(), note: z.string() })),
+      }),
+    );
+
     expect(listed.status).toBe(200);
+
+    const roundTripped = notes.items.find((entry) => entry.id === created.noteId);
+
+    expect(roundTripped?.author).toBe("test-curator");
+    expect(roundTripped?.note).toBe(note);
   });
 });

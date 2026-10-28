@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { signInFn, signUpFn, socialSignInFn } from "@/modules/user/user.functions";
+import { signInFn, signUpFn, socialSignInFn } from "@/modules/user/auth.functions";
 import type { Messages } from "@/shared/i18n";
 
 interface AuthFormCopy {

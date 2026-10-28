@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
 import {
@@ -10,8 +10,11 @@ import {
   adminSetRoleGrantsFn,
   adminUpdateRoleFn,
   authorizeFn,
-  getSessionFn,
-} from "@/modules/user/user.functions";
+} from "@/modules/user/admin.functions";
+import { getSessionFn } from "@/modules/user/session.functions";
+import { messagesFor } from "@/shared/i18n";
+
+const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/admin/roles")({
   beforeLoad: async ({ search }) => {
@@ -66,6 +69,8 @@ const draftOf = (role: {
 
 function AdminRoles() {
   const initial = Route.useLoaderData();
+  const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
   const [roles, setRoles] = useState(initial.roles);
   const [vocabulary] = useState(initial.vocabulary);
   const [drafts, setDrafts] = useState<Record<string, RoleDraft>>({});
@@ -159,11 +164,11 @@ function AdminRoles() {
 
   return (
     <div className="settings">
-      <h1>Roles</h1>
+      <h1>{copy.authRoles}</h1>
       <section>
-        <h2>Create role</h2>
+        <h2>{copy.authRoleCreate}</h2>
         <label>
-          Slug
+          {copy.authRoleSlug}
           <input
             value={newSlug}
             onChange={(event) => {
@@ -172,7 +177,7 @@ function AdminRoles() {
           />
         </label>
         <label>
-          Name
+          {copy.authRoleName}
           <input
             value={newName}
             onChange={(event) => {
@@ -187,7 +192,7 @@ function AdminRoles() {
             createRole.mutate();
           }}
         >
-          Create
+          {copy.authCreate}
         </button>
       </section>
       <ul>
@@ -201,12 +206,12 @@ function AdminRoles() {
                 {role.name} <span>({role.slug})</span>
               </h3>
               <p>
-                {role.isSystem ? "system" : "custom"}
-                {role.isProtected ? ", protected" : null} · {memberCount(role.id)} members ·{" "}
-                {role.permissions.length} grants
+                {role.isSystem ? copy.authRoleSystem : copy.authRoleCustom}
+                {role.isProtected ? `, ${copy.authRoleProtected}` : null} · {memberCount(role.id)}{" "}
+                {copy.authRoleMembers} · {role.permissions.length} {copy.authRoleGrants}
               </p>
               <label>
-                Name
+                {copy.authRoleName}
                 <input
                   value={draft.name}
                   onChange={(event) => {
@@ -215,7 +220,7 @@ function AdminRoles() {
                 />
               </label>
               <label>
-                Description
+                {copy.authRoleDescription}
                 <input
                   value={draft.description}
                   onChange={(event) => {
@@ -227,7 +232,7 @@ function AdminRoles() {
                 />
               </label>
               <label>
-                Color
+                {copy.authRoleColor}
                 <input
                   value={draft.color}
                   onChange={(event) => {
@@ -236,7 +241,7 @@ function AdminRoles() {
                 />
               </label>
               <label>
-                Position
+                {copy.authRolePosition}
                 <input
                   value={draft.position}
                   inputMode="numeric"
@@ -255,7 +260,7 @@ function AdminRoles() {
                   updateRole.mutate({ roleId: role.id, draft, slug: role.slug });
                 }}
               >
-                Save
+                {copy.authRoleSave}
               </button>
               {Object.entries(groups).map(([domain, keys]) => (
                 <fieldset key={domain}>
@@ -281,19 +286,17 @@ function AdminRoles() {
                   setGrants.mutate({ roleId: role.id, permissions: selected });
                 }}
               >
-                Save grants
+                {copy.authRoleSaveGrants}
               </button>
               <button
                 type="button"
                 disabled={deleteRole.isPending || role.isSystem}
-                title={
-                  role.isSystem ? "System roles cannot be deleted, only unassigned" : undefined
-                }
+                title={role.isSystem ? copy.authRoleDeleteForbidden : undefined}
                 onClick={() => {
                   deleteRole.mutate(role.id);
                 }}
               >
-                Delete
+                {copy.authRoleDelete}
               </button>
             </li>
           );

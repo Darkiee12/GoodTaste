@@ -552,11 +552,21 @@ describe("administration", () => {
 
     expect(escalate._tag).toBe("Failure");
 
-    const supportDenied = await appRuntime.runPromiseExit(
+    // Support keeps a read-only user view (user:list) but cannot escalate
+    // to writes: banning requires user:ban, which support does not hold.
+    const supportUsers = await run(
       Effect.flatMap(UserAdminService, (service) => service.listUsers(memberActor, 20, 0)),
     );
 
-    expect(supportDenied._tag).toBe("Failure");
+    expect(supportUsers.length).toBeGreaterThan(1);
+
+    const supportBanDenied = await appRuntime.runPromiseExit(
+      Effect.flatMap(UserAdminService, (service) =>
+        service.banUser(memberActor, UserId.parse(admin.userId), "probe", testAudit),
+      ),
+    );
+
+    expect(supportBanDenied._tag).toBe("Failure");
 
     await run(
       Effect.flatMap(RoleService, (service) =>
@@ -629,6 +639,43 @@ describe("social sign-in", () => {
     const response = await call("/api/auth/callback/google?code=invalid&state=invalid");
 
     expect(response.status).not.toBe(200);
+  });
+
+  test("oauth-created users receive member access automatically", async () => {
+    // No manual grant: simulate exactly the rows Better Auth writes on a
+    // first OAuth sign-in (user row, then linked provider account) and let
+    // the database trigger establish membership in the same transaction.
+    const userId = `oauth-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
+    const email = `${userId}@example.com`;
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+    await sql`INSERT INTO "feastjourney"."user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (${userId}, ${userId}, ${email}, true, now(), now())`;
+    await sql`INSERT INTO "feastjourney"."account" (id, "accountId", "providerId", "userId") VALUES (${`acc-${userId}`}, ${userId}, 'google', ${userId})`;
+
+    const rows = await sql<
+      Array<{ role_id: string }>
+    >`SELECT role_id FROM feastjourney.user_roles WHERE user_id = ${userId}`;
+
+    await sql.end();
+
+    expect(rows.map((row) => row.role_id)).toEqual(["member"]);
+
+    const member = await run(
+      Effect.flatMap(Authorization, (authorization) =>
+        authorization.has(Actor.Member({ userId }), { resource: "food", actions: ["read"] }),
+      ),
+    );
+
+    expect(member).toBe(true);
+
+    const privileged = await run(
+      Effect.flatMap(Authorization, (authorization) =>
+        authorization.has(Actor.Member({ userId }), { resource: "role", actions: ["assign"] }),
+      ),
+    );
+
+    expect(privileged).toBe(false);
+    createdUserIds.push(userId);
   });
 });
 

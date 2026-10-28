@@ -2,14 +2,14 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { changePasswordFn } from "@/modules/user/auth.functions";
 import {
-  changePasswordFn,
   getSessionFn,
   listSessionsFn,
   revokeAllSessionsFn,
   revokeOtherSessionsFn,
   revokeSessionFn,
-} from "@/modules/user/user.functions";
+} from "@/modules/user/session.functions";
 import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -114,7 +114,7 @@ function SecuritySettings() {
           </label>
           {changePassword.isError ? (
             <p role="alert" className="auth-error">
-              change failed
+              {copy.authChangeFailed}
             </p>
           ) : null}
           <button type="submit" disabled={changePassword.isPending}>
