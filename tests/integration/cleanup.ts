@@ -4,6 +4,35 @@
 // runtime; these values only keep unrelated integration tests independent.
 process.env.DATABASE_URL ||= "postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney";
 
+// Integration tests delete only owned fixtures, but they run destructive
+// statements (DELETE, DROP of test-owned tables) against this database, so
+// refuse to run against anything that is not an explicitly disposable
+// loopback test database. Production and shared databases are never an
+// acceptable target: point DATABASE_URL at the disposable database
+// described in docs/development/database-testing.md instead.
+const databaseUrl = process.env.DATABASE_URL;
+
+const isDisposableTestDatabase = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+
+    return (
+      (parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "::1") &&
+      parsed.pathname.replace(/^\//, "").split("/")[0] === "feastjourney"
+    );
+  } catch {
+    return false;
+  }
+};
+
+if (!isDisposableTestDatabase(databaseUrl)) {
+  throw new Error(
+    "Refusing to run integration tests: DATABASE_URL does not point at the disposable loopback feastjourney test database",
+  );
+}
+
 process.env.RATE_LIMIT_PUBLIC ||= "1000";
 
 process.env.RATE_LIMIT_SEARCH ||= "1000";

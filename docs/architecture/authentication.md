@@ -108,6 +108,13 @@ Local email: point SMTP at Mailpit. First admin: `bun scripts/create-admin.ts
 Tests use stub OAuth credentials and an in-memory mail sender; no real
 secrets are committed.
 
+Connection lifecycle: the Better Auth pool (`authPool`) and the
+application pool (`DatabaseLive`) are process-scoped singletons — one per
+process, never per request. Tests and the migration-codegen script close
+their own isolated pools; production relies on platform process teardown
+(`closeAuthPool` is exported for explicit shutdown wiring if a supported
+runtime hook is ever adopted — do not invent process-signal handlers).
+
 ## What is intentionally not built
 
 - TOTP two-factor: the step-up mechanism is session freshness (15 min) for
