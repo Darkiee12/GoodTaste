@@ -278,20 +278,28 @@ export const sessionFailureSchema = z.object({ _tag: z.string() });
 
 const outageTagSchema = z.enum(["DatabaseUnavailable", "RequestTimeout"]);
 
+const signedOutTagSchema = z.enum(["SignInRequired", "UserSuspended"]);
+
 export type SessionFailureParse = ReturnType<typeof sessionFailureSchema.safeParse>;
 
 /**
  * Pure mapping behind {@link getSessionStateFn}: store outages and request
- * timeouts mean "unavailable" (the visitor may or may not be signed in);
- * every other failure — no session, expired session, suspended account —
- * means "signed-out". Exported for server-testable verification.
+ * timeouts mean "unavailable" (the visitor may or may not be signed in).
+ * Only genuine authentication outcomes — no session, or a suspended account —
+ * mean "signed-out". Every other failure (unexpected shapes, defects) is
+ * "unavailable": an unknown infrastructure failure must never masquerade as
+ * proof that the visitor signed out. Exported for server-testable verification.
  */
 export const classifySessionFailure = (parsed: SessionFailureParse): SessionState => {
   if (parsed.success && outageTagSchema.safeParse(parsed.data._tag).success) {
     return { status: "unavailable" };
   }
 
-  return { status: "signed-out" };
+  if (parsed.success && signedOutTagSchema.safeParse(parsed.data._tag).success) {
+    return { status: "signed-out" };
+  }
+
+  return { status: "unavailable" };
 };
 
 export const getSessionStateFn = createServerFn({ method: "GET" }).handler(

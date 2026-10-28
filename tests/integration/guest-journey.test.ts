@@ -68,6 +68,33 @@ describe("guest journey: public catalog discovery", () => {
       expect(entry.iso3166).toMatch(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/);
     }
   });
+
+  test("batch summaries resolve many saved ids in one call, skipping unknown rows", async () => {
+    const found = await run(
+      Effect.flatMap(DishService, (service) => service.searchDishes({ locale: "en", limit: 3 })),
+    );
+
+    expect(found.items.length).toBeGreaterThan(0);
+
+    const ids = found.items.map((item) => item.id);
+
+    const summaries = await run(
+      Effect.flatMap(DishService, (service) => service.getDishSummaries(ids, "en")),
+    );
+
+    expect(summaries.map((dish) => dish.id)).toEqual(ids);
+
+    const partial = await run(
+      Effect.flatMap(DishService, (service) =>
+        service.getDishSummaries(
+          [...ids.slice(0, 1), "999999999", "not-an-id", ...ids.slice(0, 1)],
+          "en",
+        ),
+      ),
+    );
+
+    expect(partial.map((dish) => dish.id)).toEqual(ids.slice(0, 1));
+  });
 });
 
 describe("guest journey: surprise keeps restrictions", () => {
@@ -161,7 +188,9 @@ describe("guest journey: sessions and member-only mutations", () => {
     });
 
     expect(classified(new UserSuspended({ reason: "test" }))).toEqual({ status: "signed-out" });
-    expect(classified(new Error("boom"))).toEqual({ status: "signed-out" });
+
+    // Unknown failures are infrastructure ambiguity, never proof of logout.
+    expect(classified(new Error("boom"))).toEqual({ status: "unavailable" });
   });
 
   test("favorites gate allows members, denies guests (server-enforced)", async () => {

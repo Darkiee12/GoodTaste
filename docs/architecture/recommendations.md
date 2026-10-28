@@ -47,8 +47,9 @@ LIMIT param)
   v
 deterministic rank (cuisine +2, meal category +1; mood has no catalog
 signal and only reaches the Muse prompt) with cap 10, then Surprise
-rotation when `surpriseSeed > 0` (stable order at seed 0; nonzero seeds
-rotate the ranked slice — same eligible pool, varied order, honest note)
+windowing when `surpriseSeed > 0` (stable head at seed 0; nonzero seeds
+offset into the ranked pool so different eligible dishes surface, with an
+honest note and no provider call)
   |
   +--> deterministic / no key -> ReadyDeterministic
   |

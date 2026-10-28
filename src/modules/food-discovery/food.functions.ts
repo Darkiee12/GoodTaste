@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
+  dishBatchQuerySchema,
   dishDetailParamsSchema,
   dishSearchQuerySchema,
   localeSchema,
@@ -85,6 +86,30 @@ export const getDishFn = createServerFn({ method: "GET" })
         effects.Effect.flatMap(DishService, (service) => service.getDish(data.id, data.locale)),
       ),
       "fn/dishes/detail",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
+ * Batch card projection for member-owned lists. One server round-trip for up
+ * to 50 ids; unpublished or unknown ids are omitted and the caller renders
+ * an explicit unavailable row for them.
+ */
+export const getDishSummariesFn = createServerFn({ method: "GET" })
+  .validator(dishBatchQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, { DishService }, _catalog, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(DishService, (service) =>
+          service.getDishSummaries(data.ids, data.locale),
+        ),
+      ),
+      "fn/dishes/summaries",
       15000,
       "server-fn",
     );

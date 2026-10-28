@@ -64,7 +64,7 @@ const english = {
   previewClosed: "Dish details closed.",
   discoverHeading: "A whole world of yum.",
   discoverIntro:
-    "Sixteen dishes from six continents to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
+    "Browse the public catalog to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
   discoverAll: "All",
   categoryLocalFavorites: "Local favorites",
   categoryStreetFood: "Street-food discoveries",
@@ -478,7 +478,7 @@ const vietnamese: Messages = {
   previewClosed: "Đã đóng chi tiết món ăn.",
   discoverHeading: "Cả thế giới món ngon.",
   discoverIntro:
-    "Mười sáu món ăn từ sáu châu lục để bắt đầu hành trình. Mỗi gian bếp đều khác nhau — hãy xác nhận nguyên liệu với người chuẩn bị món ăn.",
+    "Duyệt danh mục công khai để bắt đầu hành trình. Mỗi gian bếp đều khác nhau — hãy xác nhận nguyên liệu với người chuẩn bị món ăn.",
   discoverAll: "Tất cả",
   categoryLocalFavorites: "Món được yêu thích",
   categoryStreetFood: "Khám phá ẩm thực đường phố",
@@ -889,7 +889,7 @@ const hindi: Messages = {
   previewClosed: "व्यंजन विवरण बंद हो गया।",
   discoverHeading: "स्वाद से भरी पूरी दुनिया।",
   discoverIntro:
-    "अपनी यात्रा शुरू करने के लिए छह महाद्वीपों के सोलह व्यंजन। हर रसोई अलग होती है — खाना बनाने वालों से सामग्री ज़रूर पूछें।",
+    "Browse the public catalog to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
   discoverAll: "सभी",
   categoryLocalFavorites: "स्थानीय पसंदीदा",
   categoryStreetFood: "स्ट्रीट फ़ूड की खोज",
@@ -1308,7 +1308,7 @@ const spanish: Messages = {
   previewClosed: "Detalles del plato cerrados.",
   discoverHeading: "Un mundo entero de sabor.",
   discoverIntro:
-    "Dieciséis platos de seis continentes para empezar tu viaje. Cada cocina es distinta: confirma los ingredientes con quienes preparan tu comida.",
+    "Browse the public catalog to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
   discoverAll: "Todo",
   categoryLocalFavorites: "Favoritos locales",
   categoryStreetFood: "Descubrimientos callejeros",
@@ -1725,7 +1725,8 @@ const chinese: Messages = {
   previewOpened: "已展开菜品详情。",
   previewClosed: "已关闭菜品详情。",
   discoverHeading: "美味遍布全世界。",
-  discoverIntro: "来自六大洲的十六道菜，开启你的美食之旅。每家厨房各不相同——请向制作者确认食材。",
+  discoverIntro:
+    "Browse the public catalog to start your journey. Every kitchen is different — confirm ingredients with the people making your food.",
   discoverAll: "全部",
   categoryLocalFavorites: "当地人气美食",
   categoryStreetFood: "街头美食发现",

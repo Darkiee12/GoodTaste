@@ -3,14 +3,18 @@ import { createFileRoute, getRouteApi, Link, redirect } from "@tanstack/react-ro
 import { useState } from "react";
 import { z } from "zod";
 
-import { getDishFn } from "@/modules/food-discovery/food.functions";
-import { addFavoriteFn, listFavoritesFn, removeFavoriteFn } from "@/modules/user/profile.functions";
+import { getDishSummariesFn } from "@/modules/food-discovery/food.functions";
+import {
+  favoriteIdsQueryKey,
+  SaveDishButton,
+  useFavoriteIds,
+} from "@/modules/user/components/save-dish-button";
+import { listFavoritesFn, removeFavoriteFn } from "@/modules/user/profile.functions";
+import type { SessionState } from "@/modules/user/session.functions";
 import { localeSearchSchema, messagesFor } from "@/shared/i18n";
 import type { Locale } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
-
-const favoriteExistsSchema = z.object({ _tag: z.literal("FavoriteExists") });
 
 /**
  * Loader boundary for favorite rows: keep only the decimal dish id the UI
@@ -57,122 +61,6 @@ export const Route = createFileRoute("/saved")({
   component: SavedDishes,
 });
 
-type SaveVisualState = "unknown" | "saved" | "not-saved" | "pending" | "failed";
-
-const initialSaveState = (initialSaved: boolean | undefined): SaveVisualState => {
-  if (initialSaved === undefined) {
-    return "unknown";
-  }
-
-  if (initialSaved) {
-    return "saved";
-  }
-
-  return "not-saved";
-};
-
-const saveLabel = (state: SaveVisualState): string => {
-  if (state === "saved") {
-    return "Saved";
-  }
-
-  if (state === "pending") {
-    return "Saving…";
-  }
-
-  if (state === "failed") {
-    return "Retry save";
-  }
-
-  return "Save dish";
-};
-
-/**
- * Member-only save toggle. Guests are sent to sign-in with a returnTo (never
- * an auth wall on discovery itself); every other state is explicit — no
- * optimistic label flips. Reused by dish cards, dish detail, and /saved rows.
- */
-export function SaveDishButton({
-  dishId,
-  lang,
-  returnTo,
-  initialSaved,
-}: {
-  readonly dishId: string;
-  readonly lang: Locale;
-  readonly returnTo: string;
-  readonly initialSaved?: boolean;
-}) {
-  const { session } = rootRoute.useRouteContext();
-  const navigate = Route.useNavigate();
-
-  const [state, setState] = useState<SaveVisualState>(() => initialSaveState(initialSaved));
-
-  const save = useMutation({
-    mutationFn: () => addFavoriteFn({ data: { dish_id: dishId } }),
-    onSuccess: () => {
-      setState("saved");
-    },
-    onError: (error) => {
-      setState(favoriteExistsSchema.safeParse(error).success ? "saved" : "failed");
-    },
-  });
-
-  const unsave = useMutation({
-    mutationFn: () => removeFavoriteFn({ data: { dish_id: dishId } }),
-    onSuccess: () => {
-      setState("not-saved");
-    },
-    onError: () => {
-      setState("failed");
-    },
-  });
-
-  const pending = save.isPending || unsave.isPending;
-
-  const onToggle = (): void => {
-    if (pending) {
-      return;
-    }
-
-    if (session.status !== "signed-in") {
-      void navigate({ to: "/sign-in", search: { returnTo, lang } });
-
-      return;
-    }
-
-    setState("pending");
-
-    if (state === "saved") {
-      unsave.mutate();
-    } else {
-      save.mutate();
-    }
-  };
-
-  if (session.status === "unavailable") {
-    return (
-      <p role="note" className="text-sm font-semibold text-muted">
-        Sign-in status is unavailable — saving is paused, discovery still works.
-      </p>
-    );
-  }
-
-  const label = saveLabel(state);
-
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={pending}
-      aria-pressed={state === "saved"}
-      className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
-    >
-      {label}
-    </button>
-  );
-}
-
 function SavedPending() {
   return (
     <div className="mx-auto w-full max-w-2xl px-5 pt-10">
@@ -216,9 +104,10 @@ function SavedMissing() {
 
 function SavedDishes() {
   const { lang } = rootRoute.useSearch();
-  const { dishIds, unavailable } = Route.useLoaderData();
+  const { session } = rootRoute.useRouteContext();
+  const loaderData = Route.useLoaderData();
 
-  if (unavailable) {
+  if ("unavailable" in loaderData && loaderData.unavailable) {
     return (
       <div
         className="mx-auto w-full max-w-2xl px-5 pt-10"
@@ -234,6 +123,36 @@ function SavedDishes() {
       </div>
     );
   }
+
+  return <SavedList initialIds={loaderData.dishIds} lang={lang} session={session} />;
+}
+
+function SavedList({
+  initialIds,
+  lang,
+  session,
+}: {
+  readonly initialIds: ReadonlyArray<string>;
+  readonly lang: Locale;
+  readonly session: SessionState;
+}) {
+  // Authoritative ids: the loader paints first, then this shared query owns
+  // updates — removals invalidate the same key every SaveDishButton writes,
+  // so the list, cards, and detail pages can never disagree.
+  const idsQuery = useFavoriteIds(session);
+
+  const dishIds = idsQuery.data ?? [...initialIds];
+
+  const summaries = useQuery({
+    queryKey: ["favorites", "summaries", lang, dishIds.join(",")],
+    queryFn: () =>
+      getDishSummariesFn({ data: { ids: [...dishIds], locale: lang } }).then((rows) => [...rows]),
+    enabled: dishIds.length > 0,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const byId = new Map((summaries.data ?? []).map((entry) => [entry.id, entry] as const));
 
   return (
     <div
@@ -254,80 +173,149 @@ function SavedDishes() {
         Saved dishes
       </h1>
 
-      {dishIds.length === 0 ? (
+      {idsQuery.isPending ? (
+        <output className="mt-4 block text-base text-muted">Loading saved dishes…</output>
+      ) : null}
+
+      {idsQuery.isError ? (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+        >
+          Could not refresh your saved dishes. Showing the last loaded list.
+        </p>
+      ) : null}
+
+      {dishIds.length === 0 && !idsQuery.isPending ? (
         <p className="mt-4 max-w-[60ch] text-base text-muted">
           No saved dishes yet. Open any dish and choose Save dish to keep it here.
         </p>
-      ) : (
-        <ul className="mt-6 grid gap-4">
-          {dishIds.map((dishId) => (
-            <FavoriteRow key={dishId} dishId={dishId} lang={lang} />
-          ))}
-        </ul>
-      )}
+      ) : null}
+
+      {summaries.isPending && dishIds.length > 0 ? (
+        <output className="mt-6 block text-base text-muted">Loading dish details…</output>
+      ) : null}
+
+      {summaries.isError ? (
+        <p
+          role="alert"
+          className="mt-6 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+        >
+          Could not load details for your saved dishes. Try again shortly.
+        </p>
+      ) : null}
+
+      <ul className="mt-6 grid gap-4">
+        {dishIds.map((dishId) => {
+          const summary = byId.get(dishId);
+
+          if (summary === undefined) {
+            if (summaries.isPending || summaries.isError) {
+              return null;
+            }
+
+            return <UnavailableRow key={dishId} dishId={dishId} lang={lang} />;
+          }
+
+          return (
+            <FavoriteRow
+              key={dishId}
+              dishId={dishId}
+              slug={summary.slug}
+              title={summary.name ?? summary.englishName ?? summary.slug}
+              lang={lang}
+            />
+          );
+        })}
+      </ul>
     </div>
   );
 }
 
-function FavoriteRow({ dishId, lang }: { readonly dishId: string; readonly lang: Locale }) {
-  const queryClient = useQueryClient();
+function UnavailableRow({ dishId, lang }: { readonly dishId: string; readonly lang: Locale }) {
+  const { session } = rootRoute.useRouteContext();
 
-  const dish = useQuery({
-    queryKey: ["dish", dishId, lang],
-    queryFn: () => getDishFn({ data: { id: dishId, locale: lang } }),
-    staleTime: 5 * 60_000,
-    retry: 1,
-  });
+  return (
+    <li className="rounded-2xl border border-border-soft bg-white p-6">
+      <h2 className="text-lg leading-tight font-extrabold">Dish {dishId}</h2>
+      <p role="note" className="mt-2 text-sm text-muted">
+        This dish is no longer in the public catalog, so its details are unavailable.
+      </p>
+      <div className="mt-3">
+        <SaveDishButton dishId={dishId} lang={lang} returnTo="/saved" session={session} />
+      </div>
+    </li>
+  );
+}
+
+function FavoriteRow({
+  dishId,
+  slug,
+  title,
+  lang,
+}: {
+  readonly dishId: string;
+  readonly slug: string;
+  readonly title: string;
+  readonly lang: Locale;
+}) {
+  const queryClient = useQueryClient();
+  const [failed, setFailed] = useState(false);
 
   const remove = useMutation({
     mutationFn: () => removeFavoriteFn({ data: { dish_id: dishId } }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dish", dishId] });
+      setFailed(false);
+      void queryClient.invalidateQueries({ queryKey: [...favoriteIdsQueryKey] });
+    },
+    onError: () => {
+      setFailed(true);
     },
   });
-
-  const title = dish.data
-    ? (dish.data.name ?? dish.data.englishName ?? dish.data.slug)
-    : `Dish ${dishId}`;
 
   return (
     <li className="rounded-2xl border border-border-soft bg-white p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg leading-tight font-extrabold">
-          {dish.data ? (
-            <Link
-              to="/dishes/$dishId"
-              params={{ dishId: dish.data.slug }}
-              search={{ lang }}
-              className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
-            >
-              {title}
-            </Link>
-          ) : (
-            title
-          )}
+          <Link
+            to="/dishes/$dishId"
+            params={{ dishId: slug }}
+            search={{ lang }}
+            className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
+          >
+            {title}
+          </Link>
         </h2>
         <button
           type="button"
           onClick={() => {
+            setFailed(false);
             remove.mutate();
           }}
           disabled={remove.isPending}
+          aria-busy={remove.isPending}
           className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-danger hover:text-danger disabled:cursor-wait disabled:opacity-70"
         >
           {remove.isPending ? "Removing…" : "Remove"}
         </button>
       </div>
 
-      {dish.isPending ? <p className="mt-2 text-sm text-muted">Loading dish…</p> : null}
-      {dish.isError ? (
-        <p role="alert" className="mt-2 text-sm font-bold text-danger">
-          Could not load this dish. It may have been unpublished.
-        </p>
-      ) : null}
-      {remove.isError ? (
-        <p role="alert" className="mt-2 text-sm font-bold text-danger">
-          Could not remove this dish. Try again.
+      {failed && !remove.isPending ? (
+        <p
+          role="alert"
+          className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold text-danger"
+        >
+          Could not remove this dish. It is still saved.
+          <button
+            type="button"
+            onClick={() => {
+              setFailed(false);
+              remove.mutate();
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-danger bg-white px-4 text-sm font-bold text-danger transition hover:bg-danger hover:text-white"
+          >
+            Retry
+          </button>
         </p>
       ) : null}
     </li>

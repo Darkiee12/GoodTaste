@@ -94,13 +94,26 @@ function Document({ children }: { children: ReactNode }) {
 function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
   const copy = messagesFor(lang);
   const navigate = useNavigate();
+  const [signOutFailed, setSignOutFailed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const signOut = (): void => {
-    void signOutFn()
-      .catch(() => undefined)
-      .finally(() => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
+    setSignOutFailed(false);
+
+    void signOutFn().then(
+      () => {
         void navigate({ to: "/", search: { lang } });
-      });
+      },
+      () => {
+        setSigningOut(false);
+        setSignOutFailed(true);
+      },
+    );
   };
 
   return (
@@ -134,10 +147,27 @@ function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
       <button
         type="button"
         onClick={signOut}
-        className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white"
+        disabled={signingOut}
+        aria-busy={signingOut}
+        className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-70"
       >
-        {copy.authSignOut}
+        {signingOut ? copy.settingsSigningOut : copy.authSignOut}
       </button>
+      {signOutFailed && !signingOut ? (
+        <span
+          role="alert"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-mango"
+        >
+          {copy.settingsSignOutFailed}
+          <button
+            type="button"
+            onClick={signOut}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-mango/60 px-3 text-xs font-bold text-mango hover:bg-white/10"
+          >
+            {copy.commonRetry}
+          </button>
+        </span>
+      ) : null}
     </>
   );
 }
