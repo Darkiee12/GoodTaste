@@ -26,13 +26,17 @@ import {
 } from "@/modules/food-discovery/server/operations/cursor";
 import type { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import type { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
-import type { Actor } from "@/server/auth/actor";
-import { describeActor } from "@/server/auth/actor";
+import type { Authorization } from "@/modules/user/server/operations/authorization";
+import type { RoleRepository } from "@/modules/user/server/repository/role-repository";
+import { type Actor, Actor as ActorConstructors, describeActor } from "@/server/auth/actor";
 import { withActor } from "@/server/auth/current-actor";
-import { AdminRequired } from "@/server/auth/errors";
+import type { InsufficientPermissions, SignInRequired, UserSuspended } from "@/server/auth/errors";
+import type { PermissionRequest } from "@/server/auth/permissions";
+import { requirePermission } from "@/server/auth/session";
 import type { AppConfig } from "@/server/config";
 import { appConfig } from "@/server/config";
 import type { Database } from "@/server/database/client";
+import type { DatabaseError } from "@/server/database/query";
 import { apiErrorBody, troubleByTag } from "@/server/http/api-error";
 import type { TroubleTag } from "@/server/http/api-error";
 import { RateLimitPolicy } from "@/server/http/rate-limit";
@@ -41,8 +45,6 @@ import {
   errorResponse,
   rateLimitHeaders,
   requestIdFromHeaders,
-  resolveActor,
-  resolveAdmin,
   resolveClientIdentity,
   responseHeaders,
 } from "@/server/http/request";
@@ -52,6 +54,8 @@ type ApiRequirements =
   | PersistenceRateLimiter.RateLimiter
   | RateLimitPolicy
   | Database
+  | RoleRepository
+  | Authorization
   | DishService
   | CatalogService
   | PlaceRepository
@@ -125,7 +129,9 @@ type ApiFailure =
   | CatalogConflict
   | PersistenceConflict
   | TransactionConflict
-  | AdminRequired
+  | SignInRequired
+  | InsufficientPermissions
+  | UserSuspended
   | DatabaseUnavailable
   | PersistenceError
   | TransactionFailed;
@@ -444,7 +450,7 @@ export const handleDishSearch = (
         async () => import("@/modules/food-discovery/server/operations/dish-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -499,7 +505,7 @@ export const handleDishDetail = (
         async () => import("@/modules/food-discovery/server/operations/dish-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -535,7 +541,7 @@ export const handleDishRelated = (
         async () => import("@/modules/food-discovery/server/operations/dish-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -571,7 +577,7 @@ export const handleIngredientSearch = (
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -604,7 +610,7 @@ export const handleIngredientDetail = (
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -639,7 +645,7 @@ export const handlePlaceList = (
           async () => import("@/modules/food-discovery/server/operations/catalog-service"),
         );
 
-        const actor = resolveActor(request, guard.config);
+        const actor = ActorConstructors.Guest();
 
         return yield* runOperation(
           guard,
@@ -665,7 +671,7 @@ export const handlePlaceList = (
         ]),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -709,7 +715,7 @@ export const handlePlaceSearch = (
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -743,7 +749,7 @@ export const handlePlaceDishes = (
         async () => import("@/modules/food-discovery/server/operations/dish-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -780,7 +786,7 @@ export const handlePlaceDetail = (
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
 
       return yield* runOperation(
         guard,
@@ -803,7 +809,7 @@ export const handleCategories = (
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
       const locale = new URL(request.url).searchParams.get("locale") ?? "en";
 
       return yield* runOperation(
@@ -823,7 +829,7 @@ export const handleCuisines = (request: Request): Effect.Effect<Response, never,
         async () => import("@/modules/food-discovery/server/operations/catalog-service"),
       );
 
-      const actor = resolveActor(request, guard.config);
+      const actor = ActorConstructors.Guest();
       const locale = new URL(request.url).searchParams.get("locale") ?? "en";
 
       return yield* runOperation(
@@ -836,25 +842,43 @@ export const handleCuisines = (request: Request): Effect.Effect<Response, never,
     }),
   );
 
-const requireAdmin = (request: Request, guard: Guard): Effect.Effect<Actor, AdminRequired> => {
-  if (!resolveAdmin(request, guard.config)) {
-    return Effect.fail(new AdminRequired({ reason: "Administrative credentials are required." }));
-  }
-
-  return Effect.succeed(resolveActor(request, guard.config));
-};
-
-const withAdmin = <E, R>(
+/**
+ * Session-first authorization gate for catalog administration. The actor is
+ * built from the verified Better Auth session and checked against current
+ * database grants; no shared secret can mint an administrator identity.
+ *
+ * Permission mapping (least privilege, documented per handler):
+ * - create draft dish ......... `food:create` (+ `food:publish` when the
+ *   request publishes immediately via `status: "published"`)
+ * - update dish metadata ....... `food:update` (+ `food:publish` when the
+ *   request changes `status`, which governs publication visibility)
+ * - status-only transitions .... `food:publish`
+ * - names/descriptions/links ... `food:update`
+ * - curation notes/revisions ... `food:update` (content working history)
+ * - review queue ............... `moderation:read` (reviewer surface)
+ * - import validate/apply ...... `food:import` (explicit bulk-write grant)
+ *
+ * `admin:access` is intentionally NOT required: it guards the administration
+ * surface, not individual resource mutations.
+ */
+const withAuthorized = <E, R>(
   request: Request,
   guard: Guard,
   operation: string,
+  permissions: PermissionRequest | ReadonlyArray<PermissionRequest>,
   use: (actorLabel: string, actor: Actor) => Effect.Effect<Response, E, R>,
-): Effect.Effect<Response, E | AdminRequired, R> =>
-  Effect.flatMap(requireAdmin(request, guard), (actor) =>
-    use(describeActor(actor), actor).pipe(
+): Effect.Effect<
+  Response,
+  E | SignInRequired | UserSuspended | InsufficientPermissions | DatabaseError,
+  R | Database | RoleRepository | Authorization
+> =>
+  Effect.flatMap(requirePermission(request.headers, permissions), (trusted) => {
+    const actor = ActorConstructors.Member({ userId: trusted.userId });
+
+    return use(describeActor(actor), actor).pipe(
       Effect.annotateLogs({ requestId: guard.requestId, operation }),
-    ),
-  );
+    );
+  });
 
 export const handleAdminCreateDish = (
   request: Request,
@@ -865,29 +889,42 @@ export const handleAdminCreateDish = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/create", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminCreateDishSchema);
+      const body = yield* parseJsonBody(request, adminCreateDishSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/create",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.createDish(actorLabel, {
-                slug: body.slug,
-                status: body.status,
-                parentSlug: body.parent_slug,
-                names: body.names.map((entry) => ({
-                  languageTag: entry.language_tag,
-                  name: entry.name,
-                  nameKind: entry.name_kind,
-                })),
-              }),
-            ),
-            (created) => okResponse(request, guard, created, 201),
-          );
-        }),
+      const checks: ReadonlyArray<PermissionRequest> =
+        body.status === "published"
+          ? [
+              { resource: "food", actions: ["create"] },
+              { resource: "food", actions: ["publish"] },
+            ]
+          : [{ resource: "food", actions: ["create"] }];
+
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/create",
+        checks,
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            return yield* runOperation(
+              guard,
+              "admin/dishes/create",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.createDish(actorLabel, {
+                  slug: body.slug,
+                  status: body.status,
+                  parentSlug: body.parent_slug,
+                  names: body.names.map((entry) => ({
+                    languageTag: entry.language_tag,
+                    name: entry.name,
+                    nameKind: entry.name_kind,
+                  })),
+                }),
+              ),
+              (created) => okResponse(request, guard, created, 201),
+            );
+          }),
       );
     }),
   );
@@ -902,20 +939,25 @@ export const handleAdminUpdateDishStatus = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/status", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminStatusSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/status",
+        { resource: "food", actions: ["publish"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminStatusSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/status",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.updateDishStatus(actorLabel, params.id, body.status),
-            ),
-            (updated) => okResponse(request, guard, updated),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/status",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.updateDishStatus(actorLabel, params.id, body.status),
+              ),
+              (updated) => okResponse(request, guard, updated),
+            );
+          }),
       );
     }),
   );
@@ -930,24 +972,29 @@ export const handleAdminAddDishName = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/names", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminNameSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/names",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminNameSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/names",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.addDishName(actorLabel, params.id, {
-                languageTag: body.language_tag,
-                name: body.name,
-                nameKind: body.name_kind,
-              }),
-            ),
-            (created) => okResponse(request, guard, created, 201),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/names",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.addDishName(actorLabel, params.id, {
+                  languageTag: body.language_tag,
+                  name: body.name,
+                  nameKind: body.name_kind,
+                }),
+              ),
+              (created) => okResponse(request, guard, created, 201),
+            );
+          }),
       );
     }),
   );
@@ -962,24 +1009,37 @@ export const handleAdminUpdateDish = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/update", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminUpdateDishSchema);
+      const body = yield* parseJsonBody(request, adminUpdateDishSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/update",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.updateDish(actorLabel, params.id, {
-                slug: body.slug,
-                status: body.status,
-                parentSlug: body.parent_slug ?? undefined,
-              }),
-            ),
-            (updated) => okResponse(request, guard, updated),
-          );
-        }),
+      const checks: ReadonlyArray<PermissionRequest> =
+        body.status === undefined
+          ? [{ resource: "food", actions: ["update"] }]
+          : [
+              { resource: "food", actions: ["update"] },
+              { resource: "food", actions: ["publish"] },
+            ];
+
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/update",
+        checks,
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            return yield* runOperation(
+              guard,
+              "admin/dishes/update",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.updateDish(actorLabel, params.id, {
+                  slug: body.slug,
+                  status: body.status,
+                  parentSlug: body.parent_slug ?? undefined,
+                }),
+              ),
+              (updated) => okResponse(request, guard, updated),
+            );
+          }),
       );
     }),
   );
@@ -994,26 +1054,31 @@ export const handleAdminUpsertDishDescription = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/descriptions", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminDescriptionSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/descriptions",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminDescriptionSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/descriptions",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.upsertDishDescription(
-                actorLabel,
-                params.id,
-                body.language_tag,
-                body.description,
-                body.summary,
+            return yield* runOperation(
+              guard,
+              "admin/dishes/descriptions",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.upsertDishDescription(
+                  actorLabel,
+                  params.id,
+                  body.language_tag,
+                  body.description,
+                  body.summary,
+                ),
               ),
-            ),
-            () => okResponse(request, guard, { updated: true }),
-          );
-        }),
+              () => okResponse(request, guard, { updated: true }),
+            );
+          }),
       );
     }),
   );
@@ -1028,20 +1093,25 @@ export const handleAdminLinkDishIngredient = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/ingredients", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminIngredientLinkSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/ingredients",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminIngredientLinkSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/ingredients",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.linkDishIngredient(actorLabel, params.id, body.ingredient_id, body.role),
-            ),
-            () => okResponse(request, guard, { linked: true }),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/ingredients",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.linkDishIngredient(actorLabel, params.id, body.ingredient_id, body.role),
+              ),
+              () => okResponse(request, guard, { linked: true }),
+            );
+          }),
       );
     }),
   );
@@ -1056,26 +1126,31 @@ export const handleAdminLinkDishPlace = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/places", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminPlaceLinkSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/places",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminPlaceLinkSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/places",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.linkDishPlace(
-                actorLabel,
-                params.id,
-                body.place_id,
-                body.association,
-                body.is_disputed,
+            return yield* runOperation(
+              guard,
+              "admin/dishes/places",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.linkDishPlace(
+                  actorLabel,
+                  params.id,
+                  body.place_id,
+                  body.association,
+                  body.is_disputed,
+                ),
               ),
-            ),
-            () => okResponse(request, guard, { linked: true }),
-          );
-        }),
+              () => okResponse(request, guard, { linked: true }),
+            );
+          }),
       );
     }),
   );
@@ -1090,20 +1165,25 @@ export const handleAdminLinkDishCategory = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/categories", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminCategoryLinkSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/categories",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminCategoryLinkSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/categories",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.linkDishCategory(actorLabel, params.id, body.category_slug),
-            ),
-            () => okResponse(request, guard, { linked: true }),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/categories",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.linkDishCategory(actorLabel, params.id, body.category_slug),
+              ),
+              () => okResponse(request, guard, { linked: true }),
+            );
+          }),
       );
     }),
   );
@@ -1118,20 +1198,25 @@ export const handleAdminLinkDishCuisine = (
         async () => import("@/modules/food-discovery/server/operations/admin-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/cuisines", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminCuisineLinkSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/cuisines",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminCuisineLinkSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/cuisines",
-            actor,
-            Effect.flatMap(AdminService, (service) =>
-              service.linkDishCuisine(actorLabel, params.id, body.cuisine_slug),
-            ),
-            () => okResponse(request, guard, { linked: true }),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/cuisines",
+              actor,
+              Effect.flatMap(AdminService, (service) =>
+                service.linkDishCuisine(actorLabel, params.id, body.cuisine_slug),
+              ),
+              () => okResponse(request, guard, { linked: true }),
+            );
+          }),
       );
     }),
   );
@@ -1146,20 +1231,25 @@ export const handleAdminAddNote = (
         async () => import("@/modules/food-discovery/server/operations/curation-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/notes", (actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminNoteSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/notes",
+        { resource: "food", actions: ["update"] },
+        (actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminNoteSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/dishes/notes",
-            actor,
-            Effect.flatMap(CurationService, (service) =>
-              service.addNote(params.id, body.author, body.note_kind, body.note),
-            ),
-            (created) => okResponse(request, guard, created, 201),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/dishes/notes",
+              actor,
+              Effect.flatMap(CurationService, (service) =>
+                service.addNote(params.id, body.author, body.note_kind, body.note),
+              ),
+              (created) => okResponse(request, guard, created, 201),
+            );
+          }),
       );
     }),
   );
@@ -1174,14 +1264,19 @@ export const handleAdminListNotes = (
         async () => import("@/modules/food-discovery/server/operations/curation-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/notes-list", (_actorLabel, actor) =>
-        runOperation(
-          guard,
-          "admin/dishes/notes-list",
-          actor,
-          Effect.flatMap(CurationService, (service) => service.listNotes(params.id, 50)),
-          (items) => okResponse(request, guard, { items }),
-        ),
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/notes-list",
+        { resource: "food", actions: ["update"] },
+        (_actorLabel, actor) =>
+          runOperation(
+            guard,
+            "admin/dishes/notes-list",
+            actor,
+            Effect.flatMap(CurationService, (service) => service.listNotes(params.id, 50)),
+            (items) => okResponse(request, guard, { items }),
+          ),
       );
     }),
   );
@@ -1196,14 +1291,19 @@ export const handleAdminListRevisions = (
         async () => import("@/modules/food-discovery/server/operations/curation-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/dishes/revisions", (_actorLabel, actor) =>
-        runOperation(
-          guard,
-          "admin/dishes/revisions",
-          actor,
-          Effect.flatMap(CurationService, (service) => service.listRevisions(params.id, 50)),
-          (items) => okResponse(request, guard, { items }),
-        ),
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/dishes/revisions",
+        { resource: "food", actions: ["update"] },
+        (_actorLabel, actor) =>
+          runOperation(
+            guard,
+            "admin/dishes/revisions",
+            actor,
+            Effect.flatMap(CurationService, (service) => service.listRevisions(params.id, 50)),
+            (items) => okResponse(request, guard, { items }),
+          ),
       );
     }),
   );
@@ -1229,25 +1329,30 @@ export const handleAdminReviewQueue = (
         async () => import("@/modules/food-discovery/server/operations/curation-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/review-queue", (actorLabel, actor) =>
-        runOperation(
-          guard,
-          "admin/review-queue",
-          actor,
-          Effect.flatMap(CurationService, (service) =>
-            service.reviewQueue(parsed.data.limit, BigInt(cursor?.id ?? "0")),
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/review-queue",
+        { resource: "moderation", actions: ["read"] },
+        (actorLabel, actor) =>
+          runOperation(
+            guard,
+            "admin/review-queue",
+            actor,
+            Effect.flatMap(CurationService, (service) =>
+              service.reviewQueue(parsed.data.limit, BigInt(cursor?.id ?? "0")),
+            ),
+            (items) => {
+              const last = items[items.length - 1];
+
+              const nextCursor =
+                items.length >= parsed.data.limit && last !== undefined
+                  ? encodeCursor({ id: last.id })
+                  : null;
+
+              return okResponse(request, guard, { items, next_cursor: nextCursor });
+            },
           ),
-          (items) => {
-            const last = items[items.length - 1];
-
-            const nextCursor =
-              items.length >= parsed.data.limit && last !== undefined
-                ? encodeCursor({ id: last.id })
-                : null;
-
-            return okResponse(request, guard, { items, next_cursor: nextCursor });
-          },
-        ),
       );
     }),
   );
@@ -1261,20 +1366,25 @@ export const handleAdminImportValidate = (
         async () => import("@/modules/food-discovery/server/operations/catalog-import-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/imports/validate", (_actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminImportValidateSchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/imports/validate",
+        { resource: "food", actions: ["import"] },
+        (_actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminImportValidateSchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/imports/validate",
-            actor,
-            Effect.flatMap(CatalogImportService, (service) =>
-              service.validateImport({ sourceName: body.source_name, payload: body }),
-            ),
-            (report) => okResponse(request, guard, report, 202),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/imports/validate",
+              actor,
+              Effect.flatMap(CatalogImportService, (service) =>
+                service.validateImport({ sourceName: body.source_name, payload: body }),
+              ),
+              (report) => okResponse(request, guard, report, 202),
+            );
+          }),
       );
     }),
   );
@@ -1288,18 +1398,23 @@ export const handleAdminImportApply = (
         async () => import("@/modules/food-discovery/server/operations/catalog-import-service"),
       );
 
-      return yield* withAdmin(request, guard, "admin/imports/apply", (_actorLabel, actor) =>
-        Effect.gen(function* () {
-          const body = yield* parseJsonBody(request, adminImportApplySchema);
+      return yield* withAuthorized(
+        request,
+        guard,
+        "admin/imports/apply",
+        { resource: "food", actions: ["import"] },
+        (_actorLabel, actor) =>
+          Effect.gen(function* () {
+            const body = yield* parseJsonBody(request, adminImportApplySchema);
 
-          return yield* runOperation(
-            guard,
-            "admin/imports/apply",
-            actor,
-            Effect.flatMap(CatalogImportService, (service) => service.applyImport(body.job_id)),
-            (report) => okResponse(request, guard, report),
-          );
-        }),
+            return yield* runOperation(
+              guard,
+              "admin/imports/apply",
+              actor,
+              Effect.flatMap(CatalogImportService, (service) => service.applyImport(body.job_id)),
+              (report) => okResponse(request, guard, report),
+            );
+          }),
       );
     }),
   );
