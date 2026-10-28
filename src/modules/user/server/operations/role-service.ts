@@ -16,7 +16,7 @@ import {
   RoleNotManageable,
   UnknownPermission,
 } from "@/server/auth/errors";
-import { isPermissionKey, SYSTEM_ROLES } from "@/server/auth/permissions";
+import { isPermissionKey, PERMISSION_KEYS, SYSTEM_ROLES } from "@/server/auth/permissions";
 import type { Database } from "@/server/database/client";
 import { withTransaction } from "@/server/database/client";
 import type { TransactionFailed } from "@/server/database/errors";
@@ -89,10 +89,13 @@ const generateRoleId = Effect.sync(
 export class RoleService extends Context.Service<
   RoleService,
   {
-    readonly listRoles: (
-      actor: Actor,
-    ) => Effect.Effect<
-      ReadonlyArray<RoleSummary & { readonly permissions: ReadonlyArray<string> }>,
+    readonly listRoles: (actor: Actor) => Effect.Effect<
+      {
+        readonly roles: ReadonlyArray<
+          RoleSummary & { readonly permissions: ReadonlyArray<string> }
+        >;
+        readonly vocabulary: ReadonlyArray<string>;
+      },
       InsufficientPermissions | DatabaseError,
       Database | RoleRepository | Authorization
     >;
@@ -199,11 +202,14 @@ export const RoleServiceLive = Layer.succeed(RoleService, {
         concurrency: 1,
       });
 
-      return roles.map((role, index) =>
-        Object.assign(toRoleSummary(role), {
-          permissions: (grants[index] ?? []).map((entry) => entry.permission_key),
-        }),
-      );
+      return {
+        roles: roles.map((role, index) =>
+          Object.assign(toRoleSummary(role), {
+            permissions: (grants[index] ?? []).map((entry) => entry.permission_key),
+          }),
+        ),
+        vocabulary: PERMISSION_KEYS,
+      };
     }),
 
   createRole: (actor, input, audit) =>

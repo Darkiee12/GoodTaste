@@ -35,12 +35,12 @@ export const Route = createFileRoute("/admin/users")({
     return {};
   },
   loader: async () => {
-    const [users, roles] = await Promise.all([
+    const [users, roleCatalog] = await Promise.all([
       adminListUsersFn({ data: { limit: 50, offset: 0 } }),
       adminListRolesFn(),
     ]);
 
-    return { users, roles };
+    return { users, roles: roleCatalog.roles };
   },
   component: AdminUsers,
 });

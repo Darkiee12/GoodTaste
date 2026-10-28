@@ -8,6 +8,9 @@ import {
   favoriteLinkSchema,
   favoritesQuerySchema,
   profileUpdateSchema,
+  roleGrantsSchema,
+  roleIdSchema,
+  roleMutationSchema,
   sessionRevokeSchema,
   unlinkAccountSchema,
 } from "@/modules/user/user.schema";
@@ -888,12 +891,7 @@ export const adminListRolesFn = createServerFn({ method: "GET" }).handler(async 
 });
 
 export const adminSetRoleGrantsFn = createServerFn({ method: "POST" })
-  .validator(
-    z.object({
-      role_id: z.string().min(1).max(120),
-      permissions: z.array(z.string().min(1).max(80)).max(100),
-    }),
-  )
+  .validator(roleGrantsSchema)
   .handler(async ({ data }) => {
     const { effects, server, session, actor, currentActor, runtime, roleService, identifiers } =
       await loadServer();
@@ -1012,6 +1010,184 @@ export const adminUnbanUserFn = createServerFn({ method: "POST" })
         ).pipe(effects.Effect.as({ ok: true as const })),
       ),
       "fn/admin/unban-user",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminCreateRoleFn = createServerFn({ method: "POST" })
+  .validator(roleMutationSchema)
+  .handler(async ({ data }) => {
+    const { effects, server, session, actor, currentActor, runtime, roleService } =
+      await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      effects.Effect.gen(function* () {
+        const verified = yield* session.requireAuthenticatedActor(headers);
+
+        yield* session.requireRecentAuthentication(verified);
+        yield* session.requirePermission(headers, [
+          { resource: "role", actions: ["create"] },
+          { resource: "admin", actions: ["access"] },
+        ]);
+
+        return verified;
+      }),
+      "fn/admin/create-role",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(roleService.RoleService, (service) =>
+          service.createRole(
+            actor.Actor.Member({ userId: trusted.userId }),
+            {
+              slug: data.slug,
+              name: data.name,
+              description: data.description,
+              color: data.color,
+              position: data.position,
+            },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ),
+      ),
+      "fn/admin/create-role",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminUpdateRoleFn = createServerFn({ method: "POST" })
+  .validator(roleMutationSchema.extend(roleIdSchema.shape))
+  .handler(async ({ data }) => {
+    const { effects, server, session, actor, currentActor, runtime, roleService, identifiers } =
+      await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      effects.Effect.gen(function* () {
+        const verified = yield* session.requireAuthenticatedActor(headers);
+
+        yield* session.requireRecentAuthentication(verified);
+        yield* session.requirePermission(headers, [
+          { resource: "role", actions: ["update"] },
+          { resource: "admin", actions: ["access"] },
+        ]);
+
+        return verified;
+      }),
+      "fn/admin/update-role",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(roleService.RoleService, (service) =>
+          service.updateRole(
+            actor.Actor.Member({ userId: trusted.userId }),
+            identifiers.RoleId.parse(data.role_id),
+            {
+              slug: data.slug,
+              name: data.name,
+              description: data.description,
+              color: data.color,
+              position: data.position,
+            },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ),
+      ),
+      "fn/admin/update-role",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminDeleteRoleFn = createServerFn({ method: "POST" })
+  .validator(roleIdSchema)
+  .handler(async ({ data }) => {
+    const { effects, server, session, actor, currentActor, runtime, roleService, identifiers } =
+      await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      effects.Effect.gen(function* () {
+        const verified = yield* session.requireAuthenticatedActor(headers);
+
+        yield* session.requireRecentAuthentication(verified);
+        yield* session.requirePermission(headers, [
+          { resource: "role", actions: ["delete"] },
+          { resource: "admin", actions: ["access"] },
+        ]);
+
+        return verified;
+      }),
+      "fn/admin/delete-role",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(roleService.RoleService, (service) =>
+          service.deleteRole(
+            actor.Actor.Member({ userId: trusted.userId }),
+            identifiers.RoleId.parse(data.role_id),
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.as({ ok: true as const })),
+      ),
+      "fn/admin/delete-role",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminRevokeUserSessionsFn = createServerFn({ method: "POST" })
+  .validator(z.object({ user_id: z.string().min(1).max(255) }))
+  .handler(async ({ data }) => {
+    const { effects, server, session, actor, currentActor, runtime, admin, identifiers } =
+      await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, [
+        { resource: "session", actions: ["revoke-any"] },
+        { resource: "admin", actions: ["access"] },
+      ]),
+      "fn/admin/revoke-user-sessions",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(admin.UserAdminService, (service) =>
+          service.revokeUserSessions(
+            actor.Actor.Member({ userId: trusted.userId }),
+            identifiers.UserId.parse(data.user_id),
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.as({ ok: true as const })),
+      ),
+      "fn/admin/revoke-user-sessions",
       15000,
       requestId,
     );
