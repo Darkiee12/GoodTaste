@@ -38,7 +38,7 @@
 
 ## Development quality
 - [Quality gates](development/quality-gates.md): Oxlint, Oxfmt, type checks, UI verification and CI behavior.
-- [Code style](development/code-style.md): clarity patterns with before/after examples (Reylo cardinality, `runQuery` boundary, code-based error taxonomy, bounded retry).
+- [Code style](development/code-style.md): enforced clarity patterns (Reylo cardinality, query-owned result types, no mechanical DTO mapping, SQL-first projections, companion-object APIs, `runQuery`, errors and retry).
 - [Database testing](development/database-testing.md): PostgreSQL/Flyway checks and Reylo test prerequisites.
 
 ## Reference material
