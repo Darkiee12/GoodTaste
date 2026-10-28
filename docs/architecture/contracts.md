@@ -25,7 +25,10 @@ Public read operations (`DishService`, `CatalogService`) serve guests and member
 - `listPlaces` returns places plus parent edges (hierarchy built client-side);
   `searchPlaces` resolves names in supported languages.
 
-Administrative writes (`AdminService`, requires the `x-admin-key` credential):
+Administrative writes (`AdminService`) require a verified session whose
+database grants cover the operation (see `access-control.md` for the
+permission map); the legacy `x-admin-key` path was removed and there is no
+machine identity:
 
 - `createDish`: slug optional (generated from the display name with collision
   suffixes); duplicate slugs conflict instead of merging.

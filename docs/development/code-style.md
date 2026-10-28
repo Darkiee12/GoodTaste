@@ -241,3 +241,41 @@ against the installed types and the official docs:
 `typescript/no-non-null-assertion`, plus the local `anti-slop` rules. Verified
 against the installed version — `bunx oxlint` has no `--rules` flag, so rule
 existence is proven by a clean `bun run lint` with `--max-warnings 0`.
+
+## 10. Security invariants are implementation rules, not aspirations
+
+The following are mandatory engineering constraints. A passing test or a
+documented guarantee is meaningless if the setup or the handler bypasses
+the invariant it claims.
+
+- Authentication and authorization have one authoritative boundary each:
+  the session resolver builds the request-scoped Actor from the verified
+  session, and the authorization service evaluates current database grants.
+  Never promote a credential (API key, header, cookie) into an identity
+  without an explicit identity and permission policy.
+- Never serialize bearer credentials (session tokens, OAuth access/refresh
+  tokens, reset tokens) into browser application data. List and revoke
+  sessions by non-authenticating record references; resolve tokens
+  server-side after an ownership check.
+- Never verify a security invariant in a test by manually establishing that
+  invariant. Register through the real handler, then assert the persisted
+  state. A test that manufactures its own premise proves nothing.
+- Destructive tests operate only on proven disposable resources. Never
+  drop shared objects whose creation the test did not establish; record
+  pre-existence and clean up only owned fixtures.
+- Protect read-check-write invariants with transaction isolation or locks
+  (`SELECT ... FOR UPDATE`, advisory locks), counted and mutated inside one
+  transaction across every replica. A bare transaction without locking does
+  not fix a time-of-check/time-of-use race.
+- Use Effect's typed failure channels (`Effect.tryPromise` at adapter
+  boundaries, typed `Data.TaggedError`s, `acquireUseRelease` finalizers).
+  Never map an unavailable authorization database to an empty grant set,
+  never demote a provider outage to an anonymous guest on a protected path,
+  and never swallow audit-insert failures for mandatory records.
+- Audit privileged database mutations atomically with the mutation, in the
+  same transaction. Event/telemetry audit stays best-effort and never gates
+  access.
+- Prefer source-derived types (Reylo cardinality, vocabulary-derived
+  permission requests) and existing library contracts over wrappers. No
+  giant positional import tuples shared across unrelated handlers; each
+  handler destructures only the namespaces it uses.

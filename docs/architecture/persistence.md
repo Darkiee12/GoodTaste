@@ -98,6 +98,15 @@ operations (resolved via `currentSql`). With an Effect implementation, bracket
 the resource (acquire/use/release) with the **current** Effect v4 API in
 `repos/effect/LLMS.md` and current package source; do not handwrite an unverified v3 tutorial pattern.
 
+- A failed `BEGIN` releases the reservation before the attempt fails; a
+  failed `COMMIT` still releases; a failed `ROLLBACK` can never mask the
+  original failure and the release is still attempted; a failed release on
+  the success path surfaces instead of a silent success. Release runs as an
+  uninterruptible finalizer.
+- Owner-membership changes serialize on a guard row (`SELECT ... FOR UPDATE`
+  on the owner role) taken inside the transaction before counting; see
+  `access-control.md`. Every new account receives `member` through an
+  `AFTER INSERT` trigger in the user-insert transaction (migration `V009`).
 - A coordinator in `src/server/workflows/` owns cross-domain atomic changes; a participating repository must use the supplied transaction client, not borrow a new pool connection.
 - Only serialization conflicts and deadlocks retry, and only at the transaction boundary with a bounded budget (see the [code style guide](../development/code-style.md)). Do not retry non-idempotent writes, constraint violations, or connection loss, and do not repeat a failed transaction without understanding whether it committed.
 - Do not run unrelated external AI/network effects while holding a DB transaction open. Obtain outside-DB inputs first, then perform short, well-bounded updates with conflict/idempotency checks.
