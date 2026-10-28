@@ -6,8 +6,12 @@ import { recommendationQuerySchema } from "@/modules/food-discovery/food.schema"
 import {
   MEAL_OCCASIONS,
   RECOMMENDATION_MOODS,
-} from "@/modules/food-discovery/server/domain/recommendation";
-import { RANKING_SCHEMA, decodeRankingPayload } from "@/server/integrations/meta-client";
+} from "@/modules/food-discovery/recommendation.constants";
+import {
+  RANKING_RESPONSE_FORMAT,
+  RANKING_SCHEMA,
+  decodeRankingPayload,
+} from "@/server/integrations/meta-client";
 
 describe("recommendation transport/domain parity", () => {
   test("transport accepts exactly the domain meal and mood vocabularies", () => {
@@ -34,12 +38,20 @@ describe("recommendation transport/domain parity", () => {
 
 describe("provider schema parity", () => {
   test("provider schema pins the exact ranking contract", () => {
+    expect(RANKING_SCHEMA.type).toBe("object");
     expect(RANKING_SCHEMA.required).toEqual(["ranked_candidate_ids"]);
     expect(RANKING_SCHEMA.additionalProperties).toBe(false);
     expect(RANKING_SCHEMA.properties.ranked_candidate_ids).toEqual({
       type: "array",
       items: { type: "string" },
     });
+  });
+
+  test("request envelope pins strict structured output", () => {
+    expect(RANKING_RESPONSE_FORMAT.type).toBe("json_schema");
+    expect(RANKING_RESPONSE_FORMAT.json_schema.name).toBe("dish_ranking");
+    expect(RANKING_RESPONSE_FORMAT.json_schema.strict).toBe(true);
+    expect(RANKING_RESPONSE_FORMAT.json_schema.schema).toBe(RANKING_SCHEMA);
   });
 
   test("canonical codec accepts provider-shaped payloads and rejects the rest", () => {

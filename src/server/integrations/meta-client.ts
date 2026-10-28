@@ -1,18 +1,38 @@
-import { Context, Data, Effect, Layer, Option, Schema } from "effect";
+import { Context, Data, Effect, Layer, Match, Option, Schema } from "effect";
 
 import type {
   MealOccasion,
   RecommendationMood,
-} from "@/modules/food-discovery/server/domain/recommendation";
-import { type ModelConfig, modelConfig } from "@/server/env";
+} from "@/modules/food-discovery/recommendation.constants";
+import type { RankingConfig } from "@/server/env";
 
 /**
- * Typed failures for the Muse ranking integration. Transport problems
- * (network, timeouts, non-2xx status) surface as MetaRequestError; a
+ * Typed failures for the Muse ranking integration. HTTP status drives the
+ * disposition (see dispositionForMetaError): 401/403 and malformed requests
+ * are caller/operator problems that must surface loudly, while 429, 5xx,
+ * timeouts, and network failures degrade to deterministic order. A
  * well-formed HTTP response whose body is not the expected ranking envelope
- * surfaces as MetaInvalidOutput. The client never retries 401/400 or
- * schema-invalid responses: the caller falls back to deterministic order.
+ * surfaces as MetaInvalidOutput (fallback + warning). The client never
+ * retries 401/403 or schema-invalid responses.
+ *
+ * Never log keys, headers, or prompts: observability carries backend, model
+ * id, counts, duration, and fallback reason only.
  */
+export class MetaAuthError extends Data.TaggedError("MetaAuthError")<{
+  readonly reason: string;
+  readonly status: 401 | 403;
+}> {}
+
+export class MetaPermanentError extends Data.TaggedError("MetaPermanentError")<{
+  readonly reason: string;
+  readonly status: number;
+}> {}
+
+export class MetaRateLimited extends Data.TaggedError("MetaRateLimited")<{
+  readonly reason: string;
+  readonly retryAfterSeconds: number | undefined;
+}> {}
+
 export class MetaRequestError extends Data.TaggedError("MetaRequestError")<{
   readonly reason: string;
   readonly status?: number | undefined;
@@ -22,7 +42,42 @@ export class MetaInvalidOutput extends Data.TaggedError("MetaInvalidOutput")<{
   readonly reason: string;
 }> {}
 
-export type MetaError = MetaRequestError | MetaInvalidOutput;
+export type MetaError =
+  | MetaAuthError
+  | MetaPermanentError
+  | MetaRateLimited
+  | MetaRequestError
+  | MetaInvalidOutput;
+
+/**
+ * Pure failure-disposition table: which provider failures fail the request
+ * loudly (auth/permanent/config problems are observable as HTTP 500) and
+ * which degrade to deterministic order with a client-visible warning.
+ * Unit-tested without a database in tests/unit/recommendation-config.test.ts.
+ */
+export type RankingFailureDisposition = Data.TaggedEnum<{
+  Fail: {};
+  Fallback: { readonly warning: string };
+}>;
+
+export const RankingFailureDisposition = Data.taggedEnum<RankingFailureDisposition>();
+
+const RATE_LIMIT_WARNING = "AI ranking was rate-limited; used deterministic order instead.";
+
+const TRANSIENT_FALLBACK_WARNING = "AI ranking was unavailable; used deterministic order instead.";
+
+export const dispositionForMetaError = (error: MetaError): RankingFailureDisposition =>
+  Match.value(error).pipe(
+    Match.tagsExhaustive({
+      MetaAuthError: () => RankingFailureDisposition.Fail(),
+      MetaPermanentError: () => RankingFailureDisposition.Fail(),
+      MetaRateLimited: () => RankingFailureDisposition.Fallback({ warning: RATE_LIMIT_WARNING }),
+      MetaRequestError: () =>
+        RankingFailureDisposition.Fallback({ warning: TRANSIENT_FALLBACK_WARNING }),
+      MetaInvalidOutput: () =>
+        RankingFailureDisposition.Fallback({ warning: TRANSIENT_FALLBACK_WARNING }),
+    }),
+  );
 
 export interface MetaRankCandidate {
   readonly id: string;
@@ -38,12 +93,15 @@ export interface MetaRankContext {
   readonly cuisineOrRegion: string | null;
 }
 
+export type MuseRankingConfig = Extract<RankingConfig, { readonly _tag: "Muse" }>;
+
 export class MetaClient extends Context.Service<
   MetaClient,
   {
     readonly rank: (
       candidates: ReadonlyArray<MetaRankCandidate>,
       context: MetaRankContext,
+      config: MuseRankingConfig,
     ) => Effect.Effect<ReadonlyArray<string>, MetaError>;
   }
 >()("feastjourney/integrations/MetaClient") {}
@@ -70,6 +128,9 @@ export const decodeRankingPayload = Schema.decodeUnknownOption(RankingPayload);
  * smallest explicit schema the endpoint accepts; parity with
  * RankingPayload is enforced by tests/unit/meta-schema-parity.test.ts.
  * Never inject candidate IDs as enum values (schema size limits).
+ * The envelope below pins strict:true: the schema already satisfies the
+ * strict subset (plain object, additionalProperties false, every property
+ * listed in required).
  */
 export const RANKING_SCHEMA = {
   type: "object",
@@ -78,6 +139,12 @@ export const RANKING_SCHEMA = {
   },
   required: ["ranked_candidate_ids"],
   additionalProperties: false,
+} as const;
+
+/** Exact request envelope sent to the provider; strict pin asserted in tests. */
+export const RANKING_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: { name: "dish_ranking", strict: true, schema: RANKING_SCHEMA },
 } as const;
 
 const SYSTEM_PROMPT = [
@@ -104,18 +171,58 @@ const buildUserPrompt = (
   ].join("\n");
 };
 
-export const MetaClientLive = Layer.succeed(MetaClient, {
-  rank: (candidates, context) =>
-    Effect.gen(function* () {
-      const config: ModelConfig = yield* Effect.try({
-        try: () => modelConfig(),
-        catch: () => new MetaRequestError({ reason: "AI configuration is unavailable" }),
-      });
+const parseRetryAfterSeconds = (response: Response): number | undefined => {
+  const raw = response.headers.get("retry-after");
 
+  if (raw === null) {
+    return undefined;
+  }
+
+  const seconds = Number.parseInt(raw, 10);
+
+  return Number.isNaN(seconds) || seconds < 0 ? undefined : seconds;
+};
+
+/** Map a non-2xx provider status to its typed failure (status only, no body). */
+const classifyStatus = (status: number): MetaError => {
+  if (status === 401 || status === 403) {
+    return new MetaAuthError({
+      reason: `Meta ranking rejected credentials with status ${status}`,
+      status,
+    });
+  }
+
+  if (status === 429) {
+    return new MetaRateLimited({
+      reason: "Meta ranking was rate-limited",
+      retryAfterSeconds: undefined,
+    });
+  }
+
+  if (status === 400 || status === 404 || status === 422) {
+    return new MetaPermanentError({
+      reason: `Meta ranking rejected the request with status ${status}`,
+      status,
+    });
+  }
+
+  return new MetaRequestError({
+    reason: `Meta ranking request failed with status ${status}`,
+    status,
+  });
+};
+
+export const MetaClientLive = Layer.succeed(MetaClient, {
+  rank: (candidates, context, config) =>
+    Effect.gen(function* () {
+      const startedAt = Date.now();
       const apiKey = config.apiKey;
 
-      if (apiKey === undefined || apiKey.length === 0) {
-        return yield* new MetaRequestError({ reason: "MODEL_API_KEY is not configured" });
+      if (apiKey.length === 0) {
+        return yield* new MetaAuthError({
+          reason: "MODEL_API_KEY is not configured",
+          status: 401,
+        });
       }
 
       const response = yield* Effect.tryPromise({
@@ -132,21 +239,56 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: buildUserPrompt(candidates, context) },
               ],
-              response_format: {
-                type: "json_schema",
-                json_schema: { name: "dish_ranking", schema: RANKING_SCHEMA },
-              },
+              response_format: RANKING_RESPONSE_FORMAT,
             }),
             signal: AbortSignal.timeout(config.timeoutMs),
           }),
         catch: () => new MetaRequestError({ reason: "Meta ranking request failed" }),
-      });
+      }).pipe(
+        Effect.annotateLogs({
+          backend: "muse",
+          modelId: config.modelId,
+          candidateCount: candidates.length,
+        }),
+      );
 
       if (!response.ok) {
-        return yield* new MetaRequestError({
-          reason: `Meta ranking request failed with status ${response.status}`,
-          status: response.status,
+        if (response.status === 429) {
+          const retryAfterSeconds = parseRetryAfterSeconds(response);
+
+          // Retry-After is captured for observability only. The server-fn
+          // transport strips non-allowlisted headers (Retry-After is lost),
+          // so the service degrades to deterministic order with a
+          // rate-limit warning instead of pretending to propagate 429.
+          yield* Effect.logWarning("Meta ranking rate-limited").pipe(
+            Effect.annotateLogs({
+              backend: "muse",
+              modelId: config.modelId,
+              retryAfterSeconds: retryAfterSeconds ?? "absent",
+            }),
+          );
+
+          return yield* new MetaRateLimited({
+            reason: "Meta ranking was rate-limited",
+            retryAfterSeconds,
+          });
+        }
+
+        const failure = classifyStatus(response.status);
+
+        yield* RankingFailureDisposition.$match(dispositionForMetaError(failure), {
+          Fail: () =>
+            Effect.logError("Meta ranking failed permanently").pipe(
+              Effect.annotateLogs({
+                backend: "muse",
+                modelId: config.modelId,
+                status: response.status,
+              }),
+            ),
+          Fallback: () => Effect.void,
         });
+
+        return yield* failure;
       }
 
       const body: unknown = yield* Effect.tryPromise({
@@ -179,6 +321,16 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
       if (Option.isNone(payload)) {
         return yield* new MetaInvalidOutput({ reason: "Meta ranking shape was unexpected" });
       }
+
+      yield* Effect.logInfo("Meta ranking succeeded").pipe(
+        Effect.annotateLogs({
+          backend: "muse",
+          modelId: config.modelId,
+          candidateCount: candidates.length,
+          returnedCount: payload.value.ranked_candidate_ids.length,
+          durationMs: Date.now() - startedAt,
+        }),
+      );
 
       return payload.value.ranked_candidate_ids;
     }),
