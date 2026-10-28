@@ -58,7 +58,10 @@ const run = <A, E, R extends AppServices>(effect: Effect.Effect<A, E, R>): Promi
 const api = (path: string, init?: RequestInit): Request =>
   new Request(`http://localhost${path}`, init);
 
-const adminHeaders = { "x-admin-key": "test-admin-key", "content-type": "application/json" };
+const adminHeaders = {
+  "x-admin-key": process.env.ADMIN_API_KEY ?? "missing-admin-key",
+  "content-type": "application/json",
+};
 
 describe("public HTTP", () => {
   test("health endpoints report live and ready", async () => {
@@ -221,5 +224,5 @@ describe("bulk import", () => {
 });
 
 beforeAll(() => {
-  expect(process.env.ADMIN_API_KEY).toBe("test-admin-key");
+  expect(process.env.ADMIN_API_KEY).toBeTruthy();
 });
