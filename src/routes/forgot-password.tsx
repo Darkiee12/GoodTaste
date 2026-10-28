@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { forgetPasswordFn } from "@/modules/user/user.functions";
+import { forgetPasswordFn } from "@/modules/user/auth.functions";
 import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");

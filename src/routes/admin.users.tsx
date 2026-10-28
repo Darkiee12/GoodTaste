@@ -10,8 +10,8 @@ import {
   adminRemoveRoleFn,
   adminUnbanUserFn,
   authorizeFn,
-  getSessionFn,
-} from "@/modules/user/user.functions";
+} from "@/modules/user/admin.functions";
+import { getSessionFn } from "@/modules/user/session.functions";
 import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -97,7 +97,7 @@ function AdminUsers() {
           <li key={entry.id}>
             <span>
               {entry.email}
-              {entry.banned ? " [suspended]" : null}
+              {entry.banned ? ` [${copy.authSuspended}]` : null}
             </span>
             <ul>
               {entry.roles.map((roleId) => (
@@ -110,7 +110,7 @@ function AdminUsers() {
                       removeRole.mutate({ userId: entry.id, roleId });
                     }}
                   >
-                    Remove
+                    {copy.authRoleRemove}
                   </button>
                 </li>
               ))}
@@ -121,7 +121,7 @@ function AdminUsers() {
                 setAssignTarget({ ...assignTarget, [entry.id]: event.target.value });
               }}
             >
-              <option value="">Assign role…</option>
+              <option value="">{copy.authAssignRole}</option>
               {initial.roles.map((role) => (
                 <option key={role.id} value={role.id}>
                   {role.name}
@@ -139,7 +139,7 @@ function AdminUsers() {
                 }
               }}
             >
-              Assign
+              {copy.authAssign}
             </button>
             {entry.banned ? (
               <button
@@ -149,7 +149,7 @@ function AdminUsers() {
                   unbanUser.mutate(entry.id);
                 }}
               >
-                Restore
+                {copy.authUnban}
               </button>
             ) : (
               <button
@@ -159,7 +159,7 @@ function AdminUsers() {
                   banUser.mutate(entry.id);
                 }}
               >
-                Suspend
+                {copy.authBan}
               </button>
             )}
           </li>

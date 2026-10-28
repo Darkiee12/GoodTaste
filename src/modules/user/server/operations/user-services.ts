@@ -3,7 +3,6 @@ import { Context, Effect, Layer } from "effect";
 import type { DishServiceError } from "@/modules/food-discovery/server/operations/dish-service";
 import { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import { FavoriteExists, FavoriteNotFound } from "@/modules/user/server/domain/errors";
-import type { FavoriteRow, ProfileRow } from "@/modules/user/server/repository/user-repository";
 import { UserRepository } from "@/modules/user/server/repository/user-repository";
 import type { Database } from "@/server/database/client";
 import type { DatabaseError } from "@/server/database/query";
@@ -13,14 +12,21 @@ export class ProfileService extends Context.Service<
   {
     readonly getProfile: (
       userId: string,
-    ) => Effect.Effect<ProfileRow | null, DatabaseError, Database>;
+    ) => Effect.Effect<ProfileSummary | null, DatabaseError, Database>;
     readonly updateProfile: (input: {
       readonly userId: string;
       readonly displayName: string | null;
       readonly locale: string;
-    }) => Effect.Effect<ProfileRow, DatabaseError, Database>;
+    }) => Effect.Effect<ProfileSummary, DatabaseError, Database>;
   }
 >()("feastjourney/user/ProfileService") {}
+
+/** Client-safe profile shape. Field names match the settings UI contract. */
+export interface ProfileSummary {
+  readonly user_id: string;
+  readonly display_name: string | null;
+  readonly locale: string;
+}
 
 export const ProfileServiceLive = Layer.effect(
   ProfileService,
@@ -39,18 +45,24 @@ export const ProfileServiceLive = Layer.effect(
   }),
 );
 
+/** Client-safe favorite: string IDs for JSON serialization. */
+export interface FavoriteSummary {
+  readonly dish_id: string;
+  readonly created_at: string;
+}
+
 export class FavoritesService extends Context.Service<
   FavoritesService,
   {
     readonly listFavorites: (
       userId: string,
       limit: number,
-    ) => Effect.Effect<ReadonlyArray<FavoriteRow>, DatabaseError, Database>;
+    ) => Effect.Effect<ReadonlyArray<FavoriteSummary>, DatabaseError, Database>;
     readonly addFavorite: (
       userId: string,
       dishId: string,
     ) => Effect.Effect<
-      FavoriteRow,
+      FavoriteSummary,
       DishServiceError | DatabaseError | FavoriteExists,
       Database | DishService
     >;
