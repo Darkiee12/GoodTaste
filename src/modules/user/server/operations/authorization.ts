@@ -64,7 +64,6 @@ const memberUserId = (actor: Actor): Effect.Effect<Option.Option<UserId>> =>
   Actor.$match(actor, {
     Guest: () => Effect.succeed(Option.none()),
     Member: ({ userId }) => Effect.succeed(Option.some(UserId.parse(userId))),
-    Admin: () => Effect.succeed(Option.none()),
   });
 
 /** Rejects guests and service actors; members resolve to their database identity. */

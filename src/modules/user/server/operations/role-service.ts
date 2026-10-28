@@ -488,5 +488,4 @@ const actorLabel = (actor: Actor): string | null =>
   Actor.$match(actor, {
     Guest: () => null,
     Member: ({ userId }) => userId,
-    Admin: () => null,
   });

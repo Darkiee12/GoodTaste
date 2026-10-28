@@ -31,6 +31,13 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 - `V20261028_007__user_permission_catalog.sql` — completes the user-management
   permission catalog omitted from V006 (`user:list`, `user:create`,
   `user:delete`, legacy names) with least-privilege grants to admin/owner.
+- `V20261028_008__food_import_permission.sql` — adds the `food:import`
+  permission for bulk catalog import validate/apply, granted to
+  curator/admin/owner, replacing the legacy admin-key bypass with dynamic
+  RBAC checks.
+- `V20261028_009__default_member_role.sql` — AFTER INSERT trigger on `user`
+  assigning the `member` role in the same transaction (email/OAuth/admin
+  creation paths), idempotent via ON CONFLICT DO NOTHING.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

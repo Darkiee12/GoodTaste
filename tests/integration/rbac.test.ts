@@ -11,6 +11,7 @@ import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleService } from "@/modules/user/server/operations/role-service";
 import { RoleRepository } from "@/modules/user/server/repository/role-repository";
 import { Actor } from "@/server/auth/actor";
+import type { PermissionRequest } from "@/server/auth/permissions";
 import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
@@ -55,11 +56,9 @@ const grant = async (roleId: string, userId: string, by: string | null = null): 
   await sql.end();
 };
 
-const has = (userId: string, resource: string, actions: Array<string>): Promise<boolean> =>
+const has = (userId: string, request: PermissionRequest): Promise<boolean> =>
   appRuntime.runPromise(
-    Effect.flatMap(Authorization, (authorization) =>
-      authorization.has(actorOf(userId), { resource, actions }),
-    ),
+    Effect.flatMap(Authorization, (authorization) => authorization.has(actorOf(userId), request)),
   );
 
 afterAll(async () => {
@@ -78,11 +77,11 @@ describe("dynamic authorization", () => {
     // not manufacture the invariant it verifies, so no manual grant here.
     const userId = await makeUser("plain");
 
-    expect(await has(userId, "food", ["read"])).toBe(true);
-    expect(await has(userId, "favorite", ["create", "delete"])).toBe(true);
-    expect(await has(userId, "user", ["ban"])).toBe(false);
-    expect(await has(userId, "admin", ["access"])).toBe(false);
-    expect(await has(userId, "role", ["assign"])).toBe(false);
+    expect(await has(userId, { resource: "food", actions: ["read"] })).toBe(true);
+    expect(await has(userId, { resource: "favorite", actions: ["create", "delete"] })).toBe(true);
+    expect(await has(userId, { resource: "user", actions: ["ban"] })).toBe(false);
+    expect(await has(userId, { resource: "admin", actions: ["access"] })).toBe(false);
+    expect(await has(userId, { resource: "role", actions: ["assign"] })).toBe(false);
   });
 
   test("guests hold no permissions", async () => {
@@ -134,7 +133,7 @@ describe("dynamic authorization", () => {
       ),
     );
 
-    expect(await has(memberId, "food", ["update"])).toBe(false);
+    expect(await has(memberId, { resource: "food", actions: ["update"] })).toBe(false);
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
@@ -142,7 +141,7 @@ describe("dynamic authorization", () => {
       ),
     );
 
-    expect(await has(memberId, "food", ["update", "publish"])).toBe(true);
+    expect(await has(memberId, { resource: "food", actions: ["update", "publish"] })).toBe(true);
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
@@ -150,8 +149,8 @@ describe("dynamic authorization", () => {
       ),
     );
 
-    expect(await has(memberId, "food", ["publish"])).toBe(false);
-    expect(await has(memberId, "food", ["update"])).toBe(true);
+    expect(await has(memberId, { resource: "food", actions: ["publish"] })).toBe(false);
+    expect(await has(memberId, { resource: "food", actions: ["update"] })).toBe(true);
   });
 
   test("role permissions are enforced independently, never conflated", async () => {
@@ -406,9 +405,9 @@ describe("dynamic authorization", () => {
     await grant(first, userId);
     await grant(second, userId);
 
-    expect(await has(userId, "food", ["update"])).toBe(true);
-    expect(await has(userId, "restaurant", ["verify"])).toBe(true);
-    expect(await has(userId, "food", ["publish"])).toBe(false);
+    expect(await has(userId, { resource: "food", actions: ["update"] })).toBe(true);
+    expect(await has(userId, { resource: "restaurant", actions: ["verify"] })).toBe(true);
+    expect(await has(userId, { resource: "food", actions: ["publish"] })).toBe(false);
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
@@ -416,8 +415,8 @@ describe("dynamic authorization", () => {
       ),
     );
 
-    expect(await has(userId, "food", ["update"])).toBe(false);
-    expect(await has(userId, "restaurant", ["verify"])).toBe(true);
+    expect(await has(userId, { resource: "food", actions: ["update"] })).toBe(false);
+    expect(await has(userId, { resource: "restaurant", actions: ["verify"] })).toBe(true);
   });
 
   test("moderators cannot administer and support cannot escalate", async () => {
@@ -448,7 +447,7 @@ describe("dynamic authorization", () => {
 
     expect(supDenied._tag).toBe("Failure");
 
-    const supRead = await has(supportId, "user", ["read"]);
+    const supRead = await has(supportId, { resource: "user", actions: ["list"] });
 
     expect(supRead).toBe(true);
   });
@@ -929,7 +928,7 @@ describe("dynamic authorization", () => {
     await grant("member", userId);
     await grant(created.id, userId);
 
-    expect(await has(userId, "restaurant", ["verify"])).toBe(false);
+    expect(await has(userId, { resource: "restaurant", actions: ["verify"] })).toBe(false);
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
@@ -937,6 +936,6 @@ describe("dynamic authorization", () => {
       ),
     );
 
-    expect(await has(userId, "restaurant", ["verify"])).toBe(true);
+    expect(await has(userId, { resource: "restaurant", actions: ["verify"] })).toBe(true);
   });
 });
