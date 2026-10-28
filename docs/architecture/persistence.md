@@ -66,6 +66,8 @@ Here `db` is a Reylo-supported client or pool acquired from the server-only data
 
 - Parameterize **values**; never concatenate request-controlled SQL. Identifiers and dynamic ordering are not value parameters: use a reviewed allowlist / explicit query variants.
 - Select only needed columns; apply LIMIT and stable ordering for pagination; evaluate `EXPLAIN (ANALYZE, BUFFERS)` on representative non-sensitive development data when performance matters.
+- **Reylo is the authoritative source for query result shapes and cardinality.** Do not duplicate inferred rows as hand-written `Record`/`Summary`/DTO types or create mechanical `toX()` functions. Prefer separate purpose-specific SQL queries (including `::text` projections for JSON-facing `BIGINT` identifiers) to fetching broad records and removing fields later. SQL projection and authorization are the reviewed exposure controls; static TypeScript annotations do not strip properties at runtime.
+- A genuinely independent domain invariant or stable external response contract can justify its own type/codec, but not a redundant mirror of a Reylo result. Follow the concrete [code-style rules](../development/code-style.md#9-reylo-owns-query-result-types-reject-mirror-dtos-and-mechanical-mappers).
 - Indexes are part of Flyway DDL, not dynamically created by query code.
 - Database `NOT NULL`, `UNIQUE`, FKs and `CHECK` constraints enforce integrity. Typed SQL reduces manual type drift, but is **not** a runtime guarantee that an AI-derived food claim is accurate.
 - Distinguish “not found”/zero affected rows from connection errors. Use stable typed application errors, not driver-text matching.
