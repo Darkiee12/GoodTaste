@@ -2,8 +2,8 @@ import { betterAuth } from "better-auth";
 import type { BetterAuthOptions } from "better-auth";
 import { admin } from "better-auth/plugins/admin";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
+import type { Pool } from "pg";
 
-import { authDb } from "@/server/auth/kysely";
 import { pluginAccessControl, pluginRoles } from "@/server/auth/permissions";
 import type { OutboundEmail } from "@/server/email";
 import type { ServerEnv } from "@/server/env";
@@ -20,16 +20,12 @@ import type { ServerEnv } from "@/server/env";
 export const buildAuthOptions = (
   env: ServerEnv,
   send: (email: OutboundEmail) => Promise<void>,
+  database: Pool,
   frameworkCookies = true,
 ) => ({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
-  database: {
-    db: authDb,
-    type: "postgres" as const,
-    schemaName: "feastjourney",
-    transaction: true,
-  },
+  database,
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,

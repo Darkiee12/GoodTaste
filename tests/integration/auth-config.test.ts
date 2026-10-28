@@ -1,7 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "./cleanup";
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 
+import { createAuthPool } from "@/server/auth/database";
 import { buildAuthOptions } from "@/server/auth/options";
 import type { ServerEnv } from "@/server/env";
 
@@ -22,7 +23,13 @@ const env: ServerEnv = {
 };
 
 describe("production auth configuration", () => {
-  const options = buildAuthOptions(env, async () => {});
+  const configPool = createAuthPool("postgres://stub:stub@localhost:5432/stub");
+
+  afterAll(async () => {
+    await configPool.end();
+  });
+
+  const options = buildAuthOptions(env, async () => {}, configPool);
 
   test("sessions live 7 days with daily renewal and no cookie cache", () => {
     expect(options.session.expiresIn).toBe(60 * 60 * 24 * 7);

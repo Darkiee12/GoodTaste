@@ -209,7 +209,32 @@ not replace one unnecessary abstraction with another. Trivial stable
 duplication (`checkLocale` in two services) stays duplicated until a third
 use or a shared contract appears.
 
-## 8. What the linter enforces
+## 8. Never wrap a library's internals as an application dependency
+
+Do not introduce an application-owned client, instance, or wrapper merely
+because a library uses that mechanism internally. The test is the library's
+**public API**: if it accepts the simpler input directly, pass it directly.
+
+Removed from this repo: an application-owned `Kysely` instance built solely
+to hand to Better Auth. The official PostgreSQL integration accepts a plain
+`pg.Pool`, and the non-default schema is selected with the documented
+`search_path` connection option — so the application owns one small pool
+factory (`createAuthPool`) and no Kysely import, instance, or lifecycle.
+Better Auth still uses Kysely internally; that is the maintainer's concern,
+not ours.
+
+Before adding a database client, ORM, query builder, or wrapper, verify
+against the installed types and the official docs:
+
+1. Inspect the library's public configuration surface first.
+2. Use the smallest supported integration (a `pg.Pool`, not a Kysely
+   instance constructed just to wrap that pool).
+3. Check schema/namespace selection, connection limits, and shutdown behavior.
+4. Confirm codegen tooling still works against the chosen integration.
+5. Prove schema routing with a test (e.g. same-named decoy tables in
+   `public` that must stay untouched).
+
+## 9. What the linter enforces
 
 `.oxlintrc.json` (oxlint 1.85.0): `no-nested-ternary`,
 `typescript/no-unnecessary-condition`, `typescript/no-explicit-any`,

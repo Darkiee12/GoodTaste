@@ -19,8 +19,11 @@ Versioned, immutable schema history for the `feastjourney` app schema:
   `session`, `account`, `verification`, database `rateLimit`), generated from
   the installed better-auth version via `bun scripts/generate-auth-migration.ts`
   and reviewed before check-in, plus application-owned `user_profiles`,
-  `favorites`, and `security_audit_events`. Regenerate and diff after any
-  better-auth upgrade; never hand-edit the generated block.
+  `favorites`, and `security_audit_events`. The generator emits unqualified
+  table names (the connection's `search_path` selects the schema at runtime);
+  V005 pins the schema-qualified form. Regenerate against a fresh database
+  and compare semantically before writing any new migration — never hand-edit
+  an applied file.
 - `V20261028_006__dynamic_rbac.sql` — database-managed authorization: `roles`,
   `permissions`, `role_permissions`, `user_roles` with the static vocabulary
   seeded, system roles (member/curator/moderator/support/admin/owner), their

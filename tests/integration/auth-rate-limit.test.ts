@@ -1,7 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "./cleanup";
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 
+import { createAuthPool } from "@/server/auth/database";
 import { buildAuthOptions, createAuth } from "@/server/auth/options";
 import type { ServerEnv } from "@/server/env";
 
@@ -22,9 +23,15 @@ const env: ServerEnv = {
 };
 
 /** Memory storage keeps this test independent of the shared rateLimit table. */
+const limitedPool = createAuthPool(process.env.DATABASE_URL ?? "");
+
 const limitedAuth = createAuth({
-  ...buildAuthOptions(env, async () => {}, false),
+  ...buildAuthOptions(env, async () => {}, limitedPool, false),
   rateLimit: { enabled: true, window: 60, max: 2, storage: "memory", customRules: {} },
+});
+
+afterAll(async () => {
+  await limitedPool.end();
 });
 
 const attempt = (): Promise<number> =>
