@@ -13,7 +13,6 @@ export const currentActorLabel = Effect.gen(function* () {
   return ActorConstructors.$match(actor, {
     Guest: () => "guest",
     Member: ({ userId }) => `member:${userId}`,
-    Admin: ({ userId }) => `admin:${userId}`,
   });
 });
 

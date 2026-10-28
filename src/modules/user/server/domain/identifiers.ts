@@ -6,8 +6,9 @@ import { z } from "zod";
  * would otherwise let a user ID flow into a role ID argument unnoticed, so
  * every cross-entity reference uses a branded primitive.
  *
- * `parse` validates unknown input (transport boundary); `from` converts an
- * already-trusted database value without revalidating it.
+ * `parse` validates unknown input (transport boundary). Repositories take
+ * plain strings for database values; callers parse untrusted input once at
+ * the boundary instead of revalidating trusted values at every layer.
  */
 export type UserId = string & Brand.Brand<"UserId">;
 
