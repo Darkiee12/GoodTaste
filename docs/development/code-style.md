@@ -234,7 +234,155 @@ against the installed types and the official docs:
 5. Prove schema routing with a test (e.g. same-named decoy tables in
    `public` that must stay untouched).
 
-## 9. What the linter enforces
+## 9. Reylo owns query result types; reject mirror DTOs and mechanical mappers
+
+**MUST:** derive database result types from the particular Reylo `.sql` query,
+not a manually maintained `*Record`, `*Row`, `*Summary` or `*Dto`
+interface with the same fields. The migrated PostgreSQL schema, the SQL
+projection, and Reylo's inferred result/cardinality are the persistence
+contract. Query-specific inferred type aliases are fine when they clarify a
+public service signature:
+
+```ts
+import profileByUserId from "@/modules/user/server/repository/sql/profile-by-user-id.sql";
+
+export type ProfileRow = (typeof profileByUserId)["~reylo"]["element"];
+```
+
+The alias above refers to Reylo's inference; it does **not** copy columns into
+another structural declaration. A separately owned domain type is justified
+only for an actual invariant, semantic conversion, versioned external contract,
+or untrusted boundary, not because an ORM-style entity-to-DTO pipeline is
+familiar.
+
+Rejected pattern (these two declarations and the mapper add no behavior):
+
+```ts
+interface ProfileRecord {
+  readonly user_id: string;
+  readonly display_name: string | null;
+  readonly locale: string;
+}
+interface ProfileSummary {
+  readonly user_id: string;
+  readonly display_name: string | null;
+  readonly locale: string;
+}
+const toProfileSummary = (row: ProfileRecord): ProfileSummary => ({
+  user_id: row.user_id,
+  display_name: row.display_name,
+  locale: row.locale,
+});
+```
+
+**MUST NOT:** insert `toProfileSummary`, `toFavoriteSummary`, spreads,
+`Pick`/`Omit` or an identical interface solely to copy/rename a query result
+into a supposedly client-safe type. TypeScript structural assignability does
+not remove extra properties at runtime, so calling an identical type a
+"reviewed boundary" is not a security measure.
+
+Instead, select exactly the approved fields in SQL and return the inferred
+result through the authorized operation. Review the query and authorization
+predicates as the security boundary; do not serialize whole rows and assume a
+TypeScript annotation strips hidden columns.
+
+## 10. Shape the result in SQL rather than fetching and removing fields
+
+**MUST:** write purpose-specific SQL for the consumer. We can maintain multiple
+queries for the same tables. There is no requirement to fetch an entire entity
+or reuse a broad entity query and then project it in TypeScript merely because
+an ORM would do that. SQL owns column selection, joins, filtering, sorting,
+aggregation and pagination; Reylo owns the resulting TypeScript type.
+
+Example: the settings page needs only three profile fields:
+
+```sql
+SELECT user_id, display_name, locale
+FROM feastjourney.user_profiles
+WHERE user_id = :user_id;
+```
+
+No `ProfileRecord -> ProfileSummary` stage is needed. Similarly, when the
+**transport** needs a decimal-string dish ID rather than Reylo's inferred
+`bigint`, project that representation explicitly:
+
+```sql
+SELECT dish_id::text AS dish_id, created_at
+FROM feastjourney.favorites
+WHERE user_id = :user_id
+ORDER BY created_at DESC
+LIMIT :limit;
+```
+
+For insert responses, use `RETURNING dish_id::text AS dish_id, created_at`
+when the *same query's consumer* requires strings. This is a real
+representation change; prefer handling it once at the query/boundary rather
+than scattering `.toString()` mappers through handlers. Keep the stored
+column and predicates as their native types; a transport projection is not a
+reason to cast indexed `WHERE` columns. If the same operation is consumed
+internally and externally with different needs, keep those contracts explicit
+rather than forcing one lossy shape on every caller.
+
+These rules do **not** remove runtime validation of untrusted HTTP inputs,
+authorization, domain invariants, safe error encoding or deliberately versioned
+public API contracts. The current HTTP input validator is Zod 4.6; use Effect
+Schema for genuine Effect-native codecs where justified. If a response requires
+an explicit runtime encoder or redaction, do that intentionally, rather than
+claiming that a type alias provides runtime filtering. Do not create an N+1
+query pattern just to avoid an application-level transformation; query design
+still needs sound performance.
+
+## 11. Prefer same-name type/value companions for real domain operations
+
+TypeScript has separate **type** and **value** namespaces. A `type` (or an
+`interface`) and a `const` can intentionally share a name: we do not need a
+`ProfileSchema`/ `Profile` split or an identical interface solely to
+work around a nonexistent naming collision.
+
+For an Effect Schema that is itself the useful runtime API, keep it simple:
+
+```ts
+export const DishId = Schema.String.pipe(Schema.brand("DishId"));
+export type DishId = typeof DishId.Type;
+```
+
+When a **domain concept actually has meaningful behavior**, prefer a
+companion-value API (`Permission.from(value)`, `RoleId.parse(value)`,
+`AccessControl.create(input)`) instead of scattered
+`toPermission(value)`, `parseRoleId(value)`, or
+`createAccessControl(input)` standalone functions.
+
+An example of a meaningful branded-value companion:
+
+```ts
+import { Brand } from "effect";
+import { z } from "zod";
+
+export type Permission = string & Brand.Brand<"Permission">;
+
+const permissionBrand = Brand.nominal<Permission>();
+const permissionSchema = z.string().min(1);
+
+export const Permission = {
+  // For already-trusted or already-validated values only.
+  from: (value: string): Permission => permissionBrand(value),
+  // For untrusted boundary input.
+  parse: (value: unknown): Permission =>
+    permissionBrand(permissionSchema.parse(value)),
+} as const;
+```
+
+`from` is a semantic conversion, **not** a license to bypass validation at
+trust boundaries. `parse` validates unknown input; `create` establishes real
+construction invariants. Avoid adding these methods when no conversion or
+invariant exists. Do not attach arbitrary `.from()` methods to third-party
+Schema objects or invent a class/interface just to make the syntax work.
+
+An exception to the companion preference is a generic, cross-cutting utility
+whose operation does not naturally belong to one domain type. Keep those
+functions direct; eliminate ceremony, not useful functional composition.
+
+## 12. What the linter enforces
 
 `.oxlintrc.json` (oxlint 1.85.0): `no-nested-ternary`,
 `typescript/no-unnecessary-condition`, `typescript/no-explicit-any`,
