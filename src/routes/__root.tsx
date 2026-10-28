@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
@@ -8,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, GlobeIcon } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -74,9 +76,10 @@ function Document({ children }: { children: ReactNode }) {
 function AppLayout() {
   const { lang } = Route.useSearch();
   const copy = messagesFor(lang);
+  const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <>
+    <QueryClientProvider client={queryClient}>
       <a
         href="#main"
         className="fixed top-4 left-4 z-[60] -translate-y-[300%] rounded-md bg-white p-4 font-bold text-ink focus:translate-y-0"
@@ -157,6 +160,6 @@ function AppLayout() {
           <span>{copy.footerAdvice}</span>
         </div>
       </footer>
-    </>
+    </QueryClientProvider>
   );
 }

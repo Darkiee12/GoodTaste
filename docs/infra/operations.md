@@ -79,6 +79,31 @@ Reylo typechecking fails closed without a migrated, reachable database; a stale
 self-ignores via its own `.gitignore`). Never commit real credentials or expose
 the loopback mapping beyond `127.0.0.1`.
 
+## Authentication (local)
+
+Copy `.env.example` to `.env` and fill in secrets (never commit `.env`).
+`DATABASE_URL` must point at the migrated Compose database; `BETTER_AUTH_URL`
+is this deployment's public base URL (OAuth callbacks, email links).
+
+Local email delivery: run Mailpit and point SMTP at it —
+
+```bash
+docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
+```
+
+— then read mail at `http://localhost:8025`. Without reachable SMTP the
+server refuses to start; tests use an in-memory sender instead.
+
+Bootstrap the first administrator (shell + database access required; there is
+no HTTP path to admin):
+
+```bash
+bun scripts/create-admin.ts admin@example.com 'strong-password-here'
+```
+
+Every use is recorded in `security_audit_events` (`auth.role.changed`,
+`via: bootstrap-cli`); record it out-of-band as well.
+
 ## Catalog administration (local)
 
 Administrative writes require `ADMIN_API_KEY` (never commit it, never ship it

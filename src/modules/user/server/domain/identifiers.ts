@@ -1,0 +1,32 @@
+import { Brand } from "effect";
+import { z } from "zod";
+
+/**
+ * Nominal identifiers for the user domain. TypeScript's structural typing
+ * would otherwise let a user ID flow into a role ID argument unnoticed, so
+ * every cross-entity reference uses a branded primitive.
+ *
+ * `parse` validates unknown input (transport boundary); `from` converts an
+ * already-trusted database value without revalidating it.
+ */
+export type UserId = string & Brand.Brand<"UserId">;
+
+const userIdBrand = Brand.nominal<UserId>();
+const userIdSchema = z.string().min(1);
+
+export const UserId = {
+  parse(value: string): UserId {
+    return userIdBrand(userIdSchema.parse(value));
+  },
+} as const;
+
+export type RoleId = string & Brand.Brand<"RoleId">;
+
+const roleIdBrand = Brand.nominal<RoleId>();
+const roleIdSchema = z.string().min(1).max(120);
+
+export const RoleId = {
+  parse(value: string): RoleId {
+    return roleIdBrand(roleIdSchema.parse(value));
+  },
+} as const;

@@ -1,8 +1,17 @@
-import { Context, Effect, Exit, Layer, Option } from "effect";
+import { Context, Effect, Exit, Layer, Option, Schedule } from "effect";
 import postgres from "postgres";
 
 import { appConfig } from "@/server/config";
-import { DatabaseUnavailable, TransactionFailed } from "@/server/database/errors";
+import {
+  DatabaseUnavailable,
+  TransactionConflict,
+  TransactionFailed,
+  describeCause,
+  isConnectionFailure as isConnectionFailureShim,
+} from "@/server/database/errors";
+
+/** @deprecated Use `runQuery` instead; see `isConnectionFailure` in database/errors. */
+export const isConnectionFailure = isConnectionFailureShim;
 
 /**
  * Reylo-compatible PostgreSQL client. postgres.js pool clients and reserved
@@ -35,20 +44,6 @@ export const currentSql = Effect.gen(function* () {
 
   return db.sql;
 });
-
-export const isConnectionFailure = (cause: unknown): boolean => {
-  if (cause instanceof Error) {
-    return (
-      cause.message.includes("ECONNREFUSED") ||
-      cause.message.includes("ENOTFOUND") ||
-      cause.message.includes("ETIMEDOUT") ||
-      cause.message.includes("Connection terminated") ||
-      cause.message.includes("too many clients")
-    );
-  }
-
-  return false;
-};
 
 export const DatabaseLive = Layer.effect(
   Database,
@@ -83,19 +78,37 @@ export const DatabaseLive = Layer.effect(
 );
 
 /**
+ * Serialization/deadlock retry budget: at most two retries with exponential
+ * backoff (100ms, 200ms). Only TransactionConflict (40001/40P01) retries;
+ * constraint violations, invalid SQL, and connection loss fail immediately.
+ */
+const TRANSACTION_RETRY_ATTEMPTS = 2;
+
+const TRANSACTION_RETRY_SCHEDULE = Schedule.exponential("100 millis");
+
+/**
  * Runs `effect` inside a single postgres.js transaction on one reserved
  * connection. Participating repositories resolve the transaction client
  * through `currentSql`, so no statement silently uses the pool mid-transaction.
  * The connection is released on success, failure, or interruption; commit
  * failures surface as `TransactionFailed`, while rollback failures are logged
  * and swallowed so the original failure is preserved.
+ *
+ * A serialization conflict or deadlock aborts the whole transaction, so the
+ * retry wraps the full acquire/use/release attempt: each attempt reserves a
+ * fresh connection and issues a new BEGIN. Attempts are bounded
+ * (TRANSACTION_RETRY_ATTEMPTS with exponential backoff); an exhausted conflict
+ * propagates as `TransactionConflict`, which maps to 503 like other transient
+ * database failures. Only `TransactionConflict` retries — constraint
+ * violations, invalid SQL, and connection loss fail immediately, and
+ * interruptions never retry.
  */
 export const withTransaction = <A, E, R>(
   operation: string,
   effect: Effect.Effect<A, E, R | TxSql>,
 ): Effect.Effect<A, E | TransactionFailed, R | Database> =>
-  Effect.flatMap(Database, (db) =>
-    Effect.acquireUseRelease(
+  Effect.flatMap(Database, (db) => {
+    const attempt = Effect.acquireUseRelease(
       Effect.tryPromise({
         try: async () => {
           const tx = await db.sql.reserve();
@@ -106,7 +119,7 @@ export const withTransaction = <A, E, R>(
         catch: (cause) =>
           new TransactionFailed({
             operation,
-            cause: cause instanceof Error ? cause.message : String(cause),
+            cause: describeCause(cause),
           }),
       }),
       (tx) => Effect.provideService(effect, TxSql, tx),
@@ -117,7 +130,7 @@ export const withTransaction = <A, E, R>(
               catch: (cause) =>
                 new TransactionFailed({
                   operation,
-                  cause: cause instanceof Error ? cause.message : String(cause),
+                  cause: describeCause(cause),
                 }),
             })
           : Effect.tryPromise({
@@ -125,11 +138,17 @@ export const withTransaction = <A, E, R>(
               catch: (cause) =>
                 new TransactionFailed({
                   operation,
-                  cause: cause instanceof Error ? cause.message : String(cause),
+                  cause: describeCause(cause),
                 }),
             }).pipe(Effect.ignore, Effect.andThen(Effect.void)),
-    ),
-  );
+    );
+
+    return Effect.retry(attempt, {
+      while: (error) => error instanceof TransactionConflict,
+      times: TRANSACTION_RETRY_ATTEMPTS,
+      schedule: TRANSACTION_RETRY_SCHEDULE,
+    });
+  });
 
 export const checkDatabaseHealth = Effect.gen(function* () {
   const db = yield* Database;

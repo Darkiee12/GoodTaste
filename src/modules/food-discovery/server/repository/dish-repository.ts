@@ -1,6 +1,5 @@
 import { Context, Effect, Layer } from "effect";
 
-import { encodeDbId } from "@/modules/food-discovery/server/domain/ids";
 import dishBrowse from "@/modules/food-discovery/server/repository/sql/dish-browse.sql";
 import dishFindById from "@/modules/food-discovery/server/repository/sql/dish-find-by-id.sql";
 import dishFindByIds from "@/modules/food-discovery/server/repository/sql/dish-find-by-ids.sql";
@@ -14,29 +13,15 @@ import dishSearchRecent from "@/modules/food-discovery/server/repository/sql/dis
 import dishSearch from "@/modules/food-discovery/server/repository/sql/dish-search.sql";
 import dishUpdateStatus from "@/modules/food-discovery/server/repository/sql/dish-update-status.sql";
 import dishUpdate from "@/modules/food-discovery/server/repository/sql/dish-update.sql";
-import { currentSql, isConnectionFailure } from "@/server/database/client";
 import type { Database } from "@/server/database/client";
 import {
-  DatabaseUnavailable,
   PersistenceConflict,
   PersistenceError,
+  classifyDatabaseError,
 } from "@/server/database/errors";
+import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type DishRow = (typeof dishFindById)["~reylo"]["element"];
-
-const isReadonlyArray = <Row>(value: Row | ReadonlyArray<Row>): value is ReadonlyArray<Row> =>
-  Array.isArray(value);
-
-const toArray = <Row>(value: Row | ReadonlyArray<Row>): Array<Row> =>
-  isReadonlyArray(value) ? [...value] : [value];
-
-const readFailure = (operation: string, cause: unknown): DatabaseUnavailable | PersistenceError =>
-  isConnectionFailure(cause)
-    ? new DatabaseUnavailable({ operation })
-    : new PersistenceError({
-        operation,
-        cause: cause instanceof Error ? cause.message : String(cause),
-      });
 
 export interface DishRecord {
   readonly id: bigint;
@@ -56,28 +41,24 @@ const toRecord = (row: DishRow): DishRecord => ({
   updatedAt: row.updated_at,
 });
 
-export const dishRecordId = (record: DishRecord): string => encodeDbId(record.id);
-
 export class DishRepository extends Context.Service<
   DishRepository,
   {
-    readonly findById: (
-      id: bigint,
-    ) => Effect.Effect<DishRecord | null, DatabaseUnavailable | PersistenceError, Database>;
+    readonly findById: (id: bigint) => Effect.Effect<DishRecord | null, DatabaseError, Database>;
     readonly findBySlug: (
       slug: string,
-    ) => Effect.Effect<DishRecord | null, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<DishRecord | null, DatabaseError, Database>;
     readonly findByIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly recordsByIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
     readonly listByStatus: (
       status: string,
       cursor: bigint,
       limit: number,
-    ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
     readonly searchIds: (input: {
       readonly q: string;
       readonly prefix: string;
@@ -88,7 +69,7 @@ export class DishRepository extends Context.Service<
       readonly limit: number;
     }) => Effect.Effect<
       ReadonlyArray<{ readonly id: bigint; readonly tier: number }>,
-      DatabaseUnavailable | PersistenceError,
+      DatabaseError,
       Database
     >;
     readonly searchRecentIds: (input: {
@@ -99,49 +80,41 @@ export class DishRepository extends Context.Service<
       readonly updated: string;
       readonly cursor: bigint;
       readonly limit: number;
-    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly browseIds: (input: {
       readonly status: string;
       readonly updated: string;
       readonly cursor: bigint;
       readonly limit: number;
-    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly resolveByNameKey: (
       key: string,
       limit: number,
-    ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly relatedIds: (
       id: bigint,
       status: string,
       limit: number,
     ) => Effect.Effect<
       ReadonlyArray<{ readonly id: bigint; readonly shared: number }>,
-      DatabaseUnavailable | PersistenceError,
+      DatabaseError,
       Database
     >;
     readonly insert: (input: {
       readonly slug: string;
       readonly parentDishId: bigint | null;
       readonly status: string;
-    }) => Effect.Effect<
-      DishRecord,
-      DatabaseUnavailable | PersistenceError | PersistenceConflict,
-      Database
-    >;
+    }) => Effect.Effect<DishRecord, DatabaseError, Database>;
     readonly update: (input: {
       readonly id: bigint;
       readonly slug: string;
       readonly parentDishId: bigint | null;
       readonly status: string;
-    }) => Effect.Effect<
-      DishRecord | null,
-      DatabaseUnavailable | PersistenceError | PersistenceConflict,
-      Database
-    >;
+    }) => Effect.Effect<DishRecord | null, DatabaseError, Database>;
     readonly updateStatus: (
       id: bigint,
       status: string,
-    ) => Effect.Effect<DishRecord | null, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<DishRecord | null, DatabaseError, Database>;
   }
 >()("feastjourney/food-discovery/DishRepository") {}
 
@@ -154,7 +127,7 @@ const insertConflict = (
       readonly cause: unknown;
     };
   },
-): Effect.Effect<never, PersistenceConflict | DatabaseUnavailable | PersistenceError> =>
+): Effect.Effect<never, DatabaseError> =>
   Effect.gen(function* () {
     if (outcome.error !== undefined && outcome.error.condition === "unique_violation") {
       return yield* new PersistenceConflict({
@@ -164,7 +137,7 @@ const insertConflict = (
     }
 
     if (outcome.error !== undefined) {
-      return yield* readFailure(operation, outcome.error.cause);
+      return yield* classifyDatabaseError(operation, outcome.error.cause);
     }
 
     return yield* new PersistenceError({ operation, cause: "unexpected insert outcome" });
@@ -173,200 +146,133 @@ const insertConflict = (
 export const DishRepositoryLive = Layer.succeed(DishRepository, {
   findById: (id) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const row = yield* Effect.tryPromise({
-        try: () => dishFindById.run(sql, { id }),
-        catch: (cause) => readFailure("dish/find-by-id", cause),
-      });
+      const row = yield* runQuery("dish/find-by-id", (sql) => dishFindById.run(sql, { id }));
 
       return row === null ? null : toRecord(row);
     }),
   findBySlug: (slug) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const row = yield* Effect.tryPromise({
-        try: () => dishFindBySlug.run(sql, { slug }),
-        catch: (cause) => readFailure("dish/find-by-slug", cause),
-      });
+      const row = yield* runQuery("dish/find-by-slug", (sql) => dishFindBySlug.run(sql, { slug }));
 
       return row === null ? null : toRecord(row);
     }),
   findByIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/find-by-ids", (sql) =>
+        dishFindByIds.run(sql, { ids: [...ids] }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () => dishFindByIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/find-by-ids", cause),
-      });
-
-      return toArray(rows).map((row) => row.id);
+      return rows.map((row) => row.id);
     }),
   recordsByIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/records-by-ids", (sql) =>
+        dishRecordsByIds.run(sql, { ids: [...ids] }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () => dishRecordsByIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/records-by-ids", cause),
-      });
-
-      return toArray(rows).map(toRecord);
+      return rows.map(toRecord);
     }),
   listByStatus: (status, cursor, limit) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/list-by-status", (sql) =>
+        dishListByStatus.run(sql, { status, cursor, limit }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () => dishListByStatus.run(sql, { status, cursor, limit }),
-        catch: (cause) => readFailure("dish/list-by-status", cause),
-      });
-
-      return toArray(rows).map(toRecord);
+      return rows.map(toRecord);
     }),
   searchIds: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () =>
-          dishSearch.run(sql, {
-            q: input.q,
-            prefix: input.prefix,
-            contains: input.contains,
-            status: input.status,
-            tier: input.tier,
-            cursor: input.cursor,
-            limit: input.limit,
-          }),
-        catch: (cause) => readFailure("dish/search", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/search", (sql) =>
+        dishSearch.run(sql, {
+          q: input.q,
+          prefix: input.prefix,
+          contains: input.contains,
+          status: input.status,
+          tier: input.tier,
+          cursor: input.cursor,
+          limit: input.limit,
+        }),
+      );
     }),
   searchRecentIds: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/search-recent", (sql) =>
+        dishSearchRecent.run(sql, {
+          q: input.q,
+          prefix: input.prefix,
+          contains: input.contains,
+          status: input.status,
+          updated: input.updated,
+          cursor: input.cursor,
+          limit: input.limit,
+        }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () =>
-          dishSearchRecent.run(sql, {
-            q: input.q,
-            prefix: input.prefix,
-            contains: input.contains,
-            status: input.status,
-            updated: input.updated,
-            cursor: input.cursor,
-            limit: input.limit,
-          }),
-        catch: (cause) => readFailure("dish/search-recent", cause),
-      });
-
-      return toArray(rows).map((row) => row.id);
+      return rows.map((row) => row.id);
     }),
   browseIds: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/browse", (sql) =>
+        dishBrowse.run(sql, {
+          status: input.status,
+          updated: input.updated,
+          cursor: input.cursor,
+          limit: input.limit,
+        }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () =>
-          dishBrowse.run(sql, {
-            status: input.status,
-            updated: input.updated,
-            cursor: input.cursor,
-            limit: input.limit,
-          }),
-        catch: (cause) => readFailure("dish/browse", cause),
-      });
-
-      return toArray(rows).map((row) => row.id);
+      return rows.map((row) => row.id);
     }),
   resolveByNameKey: (key, limit) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/name-resolve", (sql) =>
+        dishNameResolve.run(sql, { key, limit }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () => dishNameResolve.run(sql, { key, limit }),
-        catch: (cause) => readFailure("dish/name-resolve", cause),
-      });
-
-      return toArray(rows).map((row) => row.dish_id);
+      return rows.map((row) => row.dish_id);
     }),
   relatedIds: (id, status, limit) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishRelated.run(sql, { id, status, limit }),
-        catch: (cause) => readFailure("dish/related", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/related", (sql) => dishRelated.run(sql, { id, status, limit }));
     }),
   insert: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const outcome = yield* Effect.tryPromise({
-        try: () =>
-          dishInsert.try(sql, {
-            slug: input.slug,
-            parent_dish_id: input.parentDishId,
-            status: input.status,
-          }),
-        catch: (cause) => readFailure("dish/insert", cause),
-      });
+      const outcome = yield* runQuery("dish/insert", (sql) =>
+        dishInsert.try(sql, {
+          slug: input.slug,
+          parent_dish_id: input.parentDishId,
+          status: input.status,
+        }),
+      );
 
       if (outcome.error !== undefined) {
         return yield* insertConflict("dish/insert", outcome);
       }
 
-      const created = toArray(outcome.value);
-      const first = created[0];
-
-      if (first === undefined) {
-        return yield* new PersistenceError({
-          operation: "dish/insert",
-          cause: "insert returned no row",
-        });
-      }
-
-      return toRecord(first);
+      return toRecord(outcome.value);
     }),
   update: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const outcome = yield* Effect.tryPromise({
-        try: () =>
-          dishUpdate.try(sql, {
-            id: input.id,
-            slug: input.slug,
-            parent_dish_id: input.parentDishId,
-            status: input.status,
-          }),
-        catch: (cause) => readFailure("dish/update", cause),
-      });
+      const outcome = yield* runQuery("dish/update", (sql) =>
+        dishUpdate.try(sql, {
+          id: input.id,
+          slug: input.slug,
+          parent_dish_id: input.parentDishId,
+          status: input.status,
+        }),
+      );
 
       if (outcome.error !== undefined) {
         return yield* insertConflict("dish/update", outcome);
       }
 
-      const updated = outcome.value === null ? [] : toArray(outcome.value);
-      const first = updated[0];
-
-      return first === undefined ? null : toRecord(first);
+      return outcome.value === null ? null : toRecord(outcome.value);
     }),
   updateStatus: (id, status) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const row = yield* Effect.tryPromise({
-        try: () => dishUpdateStatus.run(sql, { id, status }),
-        catch: (cause) => readFailure("dish/update-status", cause),
-      });
+      const row = yield* runQuery("dish/update-status", (sql) =>
+        dishUpdateStatus.run(sql, { id, status }),
+      );
 
       return row === null ? null : toRecord(row);
     }),

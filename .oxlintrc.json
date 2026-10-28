@@ -37,12 +37,14 @@
     "no-debugger": "error",
     "no-eval": "error",
     "no-implied-eval": "error",
+    "no-nested-ternary": "error",
     "prefer-const": "error",
     "import/no-duplicates": "error",
     "typescript/no-explicit-any": "error",
     "typescript/no-non-null-assertion": "error",
     "typescript/no-floating-promises": "error",
     "typescript/no-misused-promises": "error",
+    "typescript/no-unnecessary-condition": "error",
     "typescript/consistent-type-imports": [
       "error",
       {
@@ -106,11 +108,27 @@
     // Oxlint does not execute content mappers, so Reylo-derived row types
     // appear as error/any to its type engine and every row access warns.
     // tsc remains the authority for SQL typing: any schema/query drift is a
-    // compile error there. These rules stay on everywhere else.
+    // compile error there. These rules stay on everywhere else. The
+    // database-boundary integration test reads Reylo-derived rows for the
+    // same reason and is covered for the same rules. The user transport
+    // adapter projects Reylo-derived rows into client-safe shapes.
+    // The auth integration test asserts on profile/favorite rows.
+    // TanStack server-function client types do not resolve inside Oxlint's
+    // engine (route loaders calling user.functions); tsc checks them fully.
+    // Operational scripts
+    // (dynamic imports, raw postgres.js templates) are covered for the same
+    // engine-limitation reason; tsc checks them fully.
     {
       "files": [
         "src/modules/food-discovery/server/repository/**/*.ts",
-        "src/modules/food-discovery/server/operations/*.ts"
+        "src/modules/food-discovery/server/operations/*.ts",
+        "src/modules/user/server/repository/**/*.ts",
+        "src/modules/user/server/operations/*.ts",
+        "tests/integration/database-boundary.test.ts",
+        "tests/integration/auth.test.ts",
+        "src/modules/user/user.functions.ts",
+        "src/routes/settings.account.tsx",
+        "scripts/**/*.ts"
       ],
       "rules": {
         "typescript/no-unsafe-assignment": "off",
