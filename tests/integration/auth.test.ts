@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { RoleId, UserId } from "@/modules/user/server/domain/identifiers";
 import { UserAdminService } from "@/modules/user/server/operations/admin-service";
+import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleService } from "@/modules/user/server/operations/role-service";
 import { SessionService } from "@/modules/user/server/operations/session-service";
 import { FavoritesService, ProfileService } from "@/modules/user/server/operations/user-services";
@@ -220,6 +221,56 @@ describe("email registration and verification", () => {
     const bad = await call("/api/auth/sign-in/email", json({ email, password: "nope-nope-nope" }));
 
     expect(bad.status).not.toBe(200);
+  });
+
+  test("real registration assigns member access automatically", async () => {
+    // No manual grant: the database trigger must establish membership in
+    // the same transaction that creates the user row.
+    const { userId, email } = await signupVerifySignin("auto-member");
+
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+    const rows = await sql<
+      Array<{ role_id: string }>
+    >`SELECT role_id FROM feastjourney.user_roles WHERE user_id = ${userId}`;
+
+    await sql.end();
+
+    expect(rows.map((row) => row.role_id)).toEqual(["member"]);
+
+    const member = await run(
+      Effect.flatMap(Authorization, (authorization) =>
+        authorization.has(Actor.Member({ userId }), { resource: "food", actions: ["read"] }),
+      ),
+    );
+
+    expect(member).toBe(true);
+
+    const privileged = await run(
+      Effect.flatMap(Authorization, (authorization) =>
+        authorization.has(Actor.Member({ userId }), { resource: "user", actions: ["ban"] }),
+      ),
+    );
+
+    expect(privileged).toBe(false);
+
+    // Repeated login neither duplicates nor resets the assignment.
+    const again = await call(
+      "/api/auth/sign-in/email",
+      json({ email, password: "correct-horse-123" }),
+    );
+
+    expect([200, 302]).toContain(again.status);
+
+    const check = new SQL(process.env.DATABASE_URL ?? "");
+
+    const after = await check<
+      Array<{ count: string }>
+    >`SELECT COUNT(*) AS count FROM feastjourney.user_roles WHERE user_id = ${userId}`;
+
+    await check.end();
+
+    expect(Number(after[0]?.count ?? 0)).toBe(1);
   });
 });
 
