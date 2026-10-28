@@ -106,7 +106,25 @@ const clampOutputLimit = (value: number | undefined): number => {
   return Math.min(Math.max(Math.floor(value), 1), 10);
 };
 
+/**
+ * Bounded provider timeout: 1s floor avoids instant-abort loops, 60s
+ * ceiling avoids hung recommendation requests holding the 30s server-fn
+ * budget hostage. Out-of-range values clamp instead of failing startup
+ * (offline shape validation only; the provider is never contacted here).
+ */
+const clampTimeoutMs = (value: number | undefined): number => {
+  if (value === undefined || Number.isNaN(value)) {
+    return DEFAULT_MODEL_TIMEOUT_MS;
+  }
+
+  return Math.min(Math.max(Math.floor(value), 1000), 60000);
+};
+
 const isHttpsUrl = (value: string): boolean => {
+  // Operator-controlled endpoint: any https URL passes shape validation so
+  // self-hosted Meta-compatible gateways work; the API key is only ever sent
+  // to this operator-chosen host. There is no host allowlist by design —
+  // the trust boundary is the operator's own configuration, never client input.
   let parsed: URL;
 
   try {
@@ -148,7 +166,7 @@ export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
     apiKey,
     modelId,
     baseUrl,
-    timeoutMs: env.MODEL_TIMEOUT_MS ?? DEFAULT_MODEL_TIMEOUT_MS,
+    timeoutMs: clampTimeoutMs(env.MODEL_TIMEOUT_MS),
     candidateLimit,
     outputLimit,
   });

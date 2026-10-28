@@ -107,6 +107,7 @@ export interface RecommendDishesInput {
   readonly country?: string | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
+  readonly surpriseSeed: number;
 }
 
 export type RecommendationError =
@@ -339,6 +340,28 @@ interface RankingLimits {
   readonly outputLimit: number;
 }
 
+// Bounded Surprise rotation: stable order stays reproducible when the seed
+// is 0; a nonzero seed rotates the ranked slice so repeated Surprise clicks
+// vary without touching SQL eligibility, without ORDER BY random(), and
+// without fetching the catalog into JavaScript. Rotation applies after
+// ranking, so hard constraints (published, cuisine/region, ingredient
+// anti-joins) and allergy refusals are unaffected.
+const rotateForSurprise = <T>(items: ReadonlyArray<T>, seed: number): Array<T> => {
+  if (items.length < 2 || seed === 0) {
+    return [...items];
+  }
+
+  const offset = seed % items.length;
+
+  if (offset === 0) {
+    return [...items];
+  }
+
+  return [...items.slice(offset), ...items.slice(0, offset)];
+};
+
+const SURPRISE_NOTE = "Surprise variety applied: rotated the ranked dishes.";
+
 const serveRecommendations = (
   input: RecommendDishesInput,
   warnings: ReadonlyArray<string>,
@@ -376,9 +399,17 @@ const serveRecommendations = (
     );
 
     if (muse === null) {
+      const dishes = rotateForSurprise(
+        deterministicTop.map((candidate) => toSummary(candidate)),
+        input.surpriseSeed,
+      );
+
+      const surpriseWarnings =
+        input.surpriseSeed === 0 ? [...warnings] : [...warnings, SURPRISE_NOTE];
+
       return RecommendationOutcome.ReadyDeterministic({
-        dishes: deterministicTop.map((candidate) => toSummary(candidate)),
-        warnings: [...warnings, AI_NOT_CONFIGURED_NOTE],
+        dishes,
+        warnings: [...surpriseWarnings, AI_NOT_CONFIGURED_NOTE],
       });
     }
 
@@ -391,7 +422,7 @@ const serveRecommendations = (
     );
 
     const byId = new Map(candidates.map((candidate) => [candidate.id, candidate] as const));
-    const dishes: Array<DishSummary> = [];
+    const hydrated: Array<DishSummary> = [];
 
     const rankedIds = MuseRankResult.$match(ranked, {
       Ranked: ({ ids }) => ids,
@@ -402,14 +433,22 @@ const serveRecommendations = (
       const row = byId.get(id);
 
       if (row !== undefined) {
-        dishes.push(toSummary(row));
+        hydrated.push(toSummary(row));
       }
     }
 
+    const dishes = rotateForSurprise(hydrated, input.surpriseSeed);
+
+    const surpriseWarnings =
+      input.surpriseSeed === 0 ? [...warnings] : [...warnings, SURPRISE_NOTE];
+
     return MuseRankResult.$match(ranked, {
-      Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: [...warnings] }),
+      Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: surpriseWarnings }),
       Degraded: ({ warning }) =>
-        RecommendationOutcome.ReadyDeterministic({ dishes, warnings: [...warnings, warning] }),
+        RecommendationOutcome.ReadyDeterministic({
+          dishes,
+          warnings: [...surpriseWarnings, warning],
+        }),
     });
   });
 

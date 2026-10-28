@@ -1,8 +1,15 @@
-import { createFileRoute, getRouteApi, Link, notFound, useRouter } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  getRouteApi,
+  notFound,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
 import { z } from "zod";
 
 import { getDishFn } from "@/modules/food-discovery/food.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
+import { SaveDishButton } from "@/routes/saved";
 import { localeSearchSchema, messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -27,11 +34,7 @@ export const Route = createFileRoute("/dishes/$dishId")({
     try {
       return await getDishFn({ data: { id: parsed.data.dishId, locale: deps.locale } });
     } catch (error) {
-      const missing =
-        (error instanceof Error && /not.?found/i.test(error.message)) ||
-        dishNotFoundSchema.safeParse(error).success;
-
-      if (missing) {
+      if (dishNotFoundSchema.safeParse(error).success) {
         throw notFound();
       }
 
@@ -55,19 +58,33 @@ function DishShell({ children }: { readonly children: React.ReactNode }) {
   );
 }
 
+/** Back prefers router history (dish cards, recommendations, saved rows all
+ *  land here); only a direct load falls back to /recommend. */
 function BackLink() {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
+  const router = useRouter();
+  const navigate = useNavigate();
+
+  const goBack = (): void => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.history.back();
+
+      return;
+    }
+
+    void navigate({ to: "/recommend", search: { lang } });
+  };
 
   return (
     <p className="mb-4 text-sm font-semibold">
-      <Link
-        to="/recommend"
-        search={{ lang }}
-        className="inline-flex min-h-11 items-center text-brand-blue-hover underline underline-offset-4"
+      <button
+        type="button"
+        onClick={goBack}
+        className="inline-flex min-h-11 cursor-pointer items-center text-brand-blue-hover underline underline-offset-4"
       >
-        ← {copy.dishBack}
-      </Link>
+        ← {copy.recBack}
+      </button>
     </p>
   );
 }
@@ -144,6 +161,10 @@ function DishDetail() {
 
   const nativeNames = dish.nativeNames.filter((entry) => entry.name !== title);
 
+  const updatedLabel = new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(
+    new Date(dish.lastUpdate * 1000),
+  );
+
   return (
     <DishShell>
       <BackLink />
@@ -154,10 +175,11 @@ function DishDetail() {
         <p className="mt-2 text-lg font-semibold text-food-orange-strong">{dish.englishName}</p>
       ) : null}
       {nativeNames.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-2">
+        <ul className="mt-3 flex flex-wrap gap-2" lang="mul">
           {nativeNames.map((entry) => (
             <li
               key={`${entry.languageTag}:${entry.name}`}
+              lang={entry.languageTag}
               className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted"
             >
               {entry.name}
@@ -166,14 +188,54 @@ function DishDetail() {
         </ul>
       ) : null}
 
+      <p className="mt-3 text-xs font-semibold text-muted">
+        {copy.dishUpdated}:{" "}
+        <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>{updatedLabel}</time>
+      </p>
+
+      <div className="mt-5">
+        <SaveDishButton dishId={dish.id} lang={lang} returnTo={`/dishes/${dish.slug}`} />
+      </div>
+
       {dish.description !== null ? (
         <section aria-labelledby="dish-about" className="mt-6">
           <h2 id="dish-about" className="font-display text-2xl tracking-wide">
             {copy.dishAbout}
           </h2>
-          <p className="mt-2 max-w-[60ch] text-base leading-relaxed text-ink">{dish.description}</p>
+          <p
+            lang={dish.descriptionLanguage ?? undefined}
+            className="mt-2 max-w-[60ch] text-base leading-relaxed text-ink"
+          >
+            {dish.description}
+          </p>
         </section>
       ) : null}
+
+      <section aria-labelledby="dish-ingredients" className="mt-6">
+        <h2 id="dish-ingredients" className="font-display text-2xl tracking-wide">
+          {copy.dishIngredients}
+        </h2>
+        {dish.ingredients.length === 0 ? (
+          <p className="mt-2 max-w-[60ch] text-base text-muted">
+            No ingredient information is available for this dish yet — always confirm with the
+            people making your food.
+          </p>
+        ) : (
+          <ul className="mt-3 grid gap-2">
+            {dish.ingredients.map((entry) => (
+              <li
+                key={entry.id}
+                className="flex flex-wrap items-center gap-2 rounded-2xl border border-border-soft bg-white px-4 py-2 text-sm"
+              >
+                <span className="font-bold text-ink">{entry.name ?? "Unnamed ingredient"}</span>
+                <span className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted">
+                  {entry.role}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {dish.cuisines.length > 0 || dish.categories.length > 0 ? (
         <section aria-labelledby="dish-taxonomy" className="mt-6">
@@ -228,11 +290,59 @@ function DishDetail() {
                 {entry.iso3166 !== null && entry.name !== undefined ? (
                   <p className="mt-1 text-muted">{entry.iso3166}</p>
                 ) : null}
+                <p className="mt-1 text-xs font-semibold text-muted">
+                  {entry.association}
+                  {entry.kind.length > 0 ? ` · ${entry.kind}` : null}
+                  {entry.isDisputed ? " · disputed" : null}
+                </p>
               </li>
             ))}
           </ul>
         </section>
       ) : null}
+
+      <section aria-labelledby="dish-sources" className="mt-6">
+        <h2 id="dish-sources" className="font-display text-2xl tracking-wide">
+          {copy.dishSources}
+        </h2>
+        {dish.sources.length === 0 ? (
+          <p className="mt-2 max-w-[60ch] text-base text-muted">
+            No sources are listed for this dish yet.
+          </p>
+        ) : (
+          <ul className="mt-3 grid gap-3">
+            {dish.sources.map((entry) => (
+              <li
+                key={entry.recordId}
+                className="rounded-2xl border border-border-soft bg-white px-4 py-3 text-sm"
+              >
+                <p className="font-bold text-ink">
+                  {entry.provider}
+                  {entry.externalId.length > 0 ? ` · ${entry.externalId}` : null}
+                </p>
+                {entry.attribution !== null ? (
+                  <p className="mt-1 text-muted">{entry.attribution}</p>
+                ) : null}
+                {entry.license !== null ? (
+                  <p className="mt-1 text-xs font-bold text-muted">License: {entry.license}</p>
+                ) : null}
+                {entry.canonicalUrl !== null ? (
+                  <p className="mt-1">
+                    <a
+                      href={entry.canonicalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-bold text-brand-blue-hover underline underline-offset-4"
+                    >
+                      Source link
+                    </a>
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </DishShell>
   );
 }

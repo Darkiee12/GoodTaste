@@ -87,6 +87,7 @@ export const recommendationQuerySchema = z.object({
     .optional(),
   mood: recommendationMoodSchema,
   locale: localeSchema,
+  surpriseSeed: z.number().int().min(0).max(2147483647).default(0),
 });
 
 export type RecommendationQuery = z.infer<typeof recommendationQuerySchema>;
