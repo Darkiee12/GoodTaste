@@ -42,6 +42,13 @@ Four read-only audits complement oxlint. Tool versions are pinned in `package.js
 
 ## Required change review
 
+Restaurant SQL consumers extend the existing narrow Oxlint override for
+unresolved Reylo types: Oxlint cannot execute TypeScript content mappers. Only
+the already-documented SQL-derived unsafe-access diagnostics are excluded for
+those consumers; Effect rules, other lint rules and the live Reylo typecheck
+remain required. There are no manual SQL row declarations or type casts replacing
+query inference. Monetary/ISO helpers and boundary schemas keep the normal rules.
+
 PR description should state: behavior changed, contracts touched, quality commands run and their results, mobile/browser evidence for UI work, trust and provenance implications for AI/restaurant facts, and unverified risks.
 
 A green static check is necessary, not proof of correct food information, accessible UX, or safe dietary conclusions.

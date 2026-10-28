@@ -22,6 +22,11 @@ import type {
   SourceRepository,
   TaxonomyRepository,
 } from "@/modules/food-discovery/server/repository/taxonomy-repository";
+import {
+  FxRatesLive,
+  FxProviderLive,
+  type FxRates,
+} from "@/modules/restaurant-discovery/server/index";
 import { UserRepositoriesLive, UserServicesLive } from "@/modules/user/server/index";
 import type { UserAdminService } from "@/modules/user/server/operations/admin-service";
 import type { Authorization } from "@/modules/user/server/operations/authorization";
@@ -39,6 +44,7 @@ import { RateLimiterLive, RateLimitPolicyLive } from "@/server/http/rate-limit";
 import type { RateLimitPolicy } from "@/server/http/rate-limit";
 
 const CurationLive = Layer.provide(CurationServiceLive, RepositoriesLive);
+const FxLive = Layer.provide(FxRatesLive, FxProviderLive);
 
 const DomainLive = Layer.provide(
   Layer.mergeAll(CatalogServicesLive, CatalogImportServiceLive),
@@ -54,6 +60,7 @@ const DashboardLive = Layer.provide(
 
 export const AppLive = Layer.mergeAll(
   DatabaseLive,
+  FxLive,
   RateLimiterLive,
   RateLimitPolicyLive,
   RepositoriesLive,
@@ -65,6 +72,7 @@ export const AppLive = Layer.mergeAll(
 );
 
 export type AppServices =
+  | FxRates
   | Database
   | PersistenceRateLimiter.RateLimiter
   | RateLimitPolicy

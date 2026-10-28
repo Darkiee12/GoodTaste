@@ -58,6 +58,7 @@ const SURFACE_CHECKS = [
   { resource: "admin", actions: ["access"] },
   { resource: "food", actions: ["import"] },
   { resource: "moderation", actions: ["read"] },
+  { resource: "restaurant", actions: ["manage"] },
 ] as const;
 
 const requireSurface = async (

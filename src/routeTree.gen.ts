@@ -11,19 +11,26 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as DishesRouteImport } from './routes/dishes'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RestaurantsRouteImport } from './routes/restaurants'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminDishesRouteImport } from './routes/admin.dishes'
 import { Route as AdminImportsRouteImport } from './routes/admin.imports'
+import { Route as AdminRestaurantsRouteImport } from './routes/admin.restaurants'
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as DishesIndexRouteImport } from './routes/dishes.index'
+import { Route as DishesSlugRouteImport } from './routes/dishes.$slug'
 import { Route as HealthLiveRouteImport } from './routes/health.live'
 import { Route as HealthReadyRouteImport } from './routes/health.ready'
+import { Route as RestaurantsIndexRouteImport } from './routes/restaurants.index'
+import { Route as RestaurantsVenueIdRouteImport } from './routes/restaurants.$venueId'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as AdminDishesDishIdRouteImport } from './routes/admin.dishes.$dishId'
@@ -66,6 +73,11 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DishesRoute = DishesRouteImport.update({
+  id: '/dishes',
+  path: '/dishes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
@@ -74,6 +86,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RestaurantsRoute = RestaurantsRouteImport.update({
+  id: '/restaurants',
+  path: '/restaurants',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInRoute = SignInRouteImport.update({
@@ -106,6 +123,11 @@ const AdminImportsRoute = AdminImportsRouteImport.update({
   path: '/imports',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminRestaurantsRoute = AdminRestaurantsRouteImport.update({
+  id: '/restaurants',
+  path: '/restaurants',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminReviewsRoute = AdminReviewsRouteImport.update({
   id: '/reviews',
   path: '/reviews',
@@ -121,6 +143,16 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
+const DishesIndexRoute = DishesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DishesRoute,
+} as any)
+const DishesSlugRoute = DishesSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => DishesRoute,
+} as any)
 const HealthLiveRoute = HealthLiveRouteImport.update({
   id: '/health/live',
   path: '/health/live',
@@ -130,6 +162,16 @@ const HealthReadyRoute = HealthReadyRouteImport.update({
   id: '/health/ready',
   path: '/health/ready',
   getParentRoute: () => rootRouteImport,
+} as any)
+const RestaurantsIndexRoute = RestaurantsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => RestaurantsRoute,
+} as any)
+const RestaurantsVenueIdRoute = RestaurantsVenueIdRouteImport.update({
+  id: '/$venueId',
+  path: '/$venueId',
+  getParentRoute: () => RestaurantsRoute,
 } as any)
 const SettingsAccountRoute = SettingsAccountRouteImport.update({
   id: '/settings/account',
@@ -298,21 +340,28 @@ const ApiV1AdminDishesIdStatusRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/dishes': typeof DishesRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/restaurants': typeof RestaurantsRouteWithChildren
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$slug': typeof DishesSlugRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/restaurants/$venueId': typeof RestaurantsVenueIdRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/admin/': typeof AdminIndexRoute
+  '/dishes/': typeof DishesIndexRoute
+  '/restaurants/': typeof RestaurantsIndexRoute
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
@@ -352,14 +401,19 @@ export interface FileRoutesByTo {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$slug': typeof DishesSlugRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/restaurants/$venueId': typeof RestaurantsVenueIdRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/admin': typeof AdminIndexRoute
+  '/dishes': typeof DishesIndexRoute
+  '/restaurants': typeof RestaurantsIndexRoute
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
@@ -394,21 +448,28 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/dishes': typeof DishesRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/restaurants': typeof RestaurantsRouteWithChildren
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$slug': typeof DishesSlugRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/restaurants/$venueId': typeof RestaurantsVenueIdRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/admin/': typeof AdminIndexRoute
+  '/dishes/': typeof DishesIndexRoute
+  '/restaurants/': typeof RestaurantsIndexRoute
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
@@ -444,21 +505,28 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/dishes'
     | '/forgot-password'
     | '/reset-password'
+    | '/restaurants'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$slug'
     | '/health/live'
     | '/health/ready'
+    | '/restaurants/$venueId'
     | '/settings/account'
     | '/settings/security'
     | '/admin/'
+    | '/dishes/'
+    | '/restaurants/'
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
@@ -498,14 +566,19 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$slug'
     | '/health/live'
     | '/health/ready'
+    | '/restaurants/$venueId'
     | '/settings/account'
     | '/settings/security'
     | '/admin'
+    | '/dishes'
+    | '/restaurants'
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
@@ -539,21 +612,28 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/dishes'
     | '/forgot-password'
     | '/reset-password'
+    | '/restaurants'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$slug'
     | '/health/live'
     | '/health/ready'
+    | '/restaurants/$venueId'
     | '/settings/account'
     | '/settings/security'
     | '/admin/'
+    | '/dishes/'
+    | '/restaurants/'
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
@@ -588,8 +668,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  DishesRoute: typeof DishesRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  RestaurantsRoute: typeof RestaurantsRouteWithChildren
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
@@ -626,6 +708,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dishes': {
+      id: '/dishes'
+      path: '/dishes'
+      fullPath: '/dishes'
+      preLoaderRoute: typeof DishesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/forgot-password': {
       id: '/forgot-password'
       path: '/forgot-password'
@@ -638,6 +727,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/restaurants': {
+      id: '/restaurants'
+      path: '/restaurants'
+      fullPath: '/restaurants'
+      preLoaderRoute: typeof RestaurantsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in': {
@@ -682,6 +778,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminImportsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/restaurants': {
+      id: '/admin/restaurants'
+      path: '/restaurants'
+      fullPath: '/admin/restaurants'
+      preLoaderRoute: typeof AdminRestaurantsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/reviews': {
       id: '/admin/reviews'
       path: '/reviews'
@@ -703,6 +806,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/dishes/': {
+      id: '/dishes/'
+      path: '/'
+      fullPath: '/dishes/'
+      preLoaderRoute: typeof DishesIndexRouteImport
+      parentRoute: typeof DishesRoute
+    }
+    '/dishes/$slug': {
+      id: '/dishes/$slug'
+      path: '/$slug'
+      fullPath: '/dishes/$slug'
+      preLoaderRoute: typeof DishesSlugRouteImport
+      parentRoute: typeof DishesRoute
+    }
     '/health/live': {
       id: '/health/live'
       path: '/health/live'
@@ -716,6 +833,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/health/ready'
       preLoaderRoute: typeof HealthReadyRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/restaurants/': {
+      id: '/restaurants/'
+      path: '/'
+      fullPath: '/restaurants/'
+      preLoaderRoute: typeof RestaurantsIndexRouteImport
+      parentRoute: typeof RestaurantsRoute
+    }
+    '/restaurants/$venueId': {
+      id: '/restaurants/$venueId'
+      path: '/$venueId'
+      fullPath: '/restaurants/$venueId'
+      preLoaderRoute: typeof RestaurantsVenueIdRouteImport
+      parentRoute: typeof RestaurantsRoute
     }
     '/settings/account': {
       id: '/settings/account'
@@ -966,6 +1097,7 @@ const AdminImportsRouteWithChildren = AdminImportsRoute._addFileChildren(
 interface AdminRouteChildren {
   AdminDishesRoute: typeof AdminDishesRouteWithChildren
   AdminImportsRoute: typeof AdminImportsRouteWithChildren
+  AdminRestaurantsRoute: typeof AdminRestaurantsRoute
   AdminReviewsRoute: typeof AdminReviewsRoute
   AdminRolesRoute: typeof AdminRolesRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -975,6 +1107,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminDishesRoute: AdminDishesRouteWithChildren,
   AdminImportsRoute: AdminImportsRouteWithChildren,
+  AdminRestaurantsRoute: AdminRestaurantsRoute,
   AdminReviewsRoute: AdminReviewsRoute,
   AdminRolesRoute: AdminRolesRoute,
   AdminUsersRoute: AdminUsersRoute,
@@ -982,6 +1115,33 @@ const AdminRouteChildren: AdminRouteChildren = {
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface DishesRouteChildren {
+  DishesSlugRoute: typeof DishesSlugRoute
+  DishesIndexRoute: typeof DishesIndexRoute
+}
+
+const DishesRouteChildren: DishesRouteChildren = {
+  DishesSlugRoute: DishesSlugRoute,
+  DishesIndexRoute: DishesIndexRoute,
+}
+
+const DishesRouteWithChildren =
+  DishesRoute._addFileChildren(DishesRouteChildren)
+
+interface RestaurantsRouteChildren {
+  RestaurantsVenueIdRoute: typeof RestaurantsVenueIdRoute
+  RestaurantsIndexRoute: typeof RestaurantsIndexRoute
+}
+
+const RestaurantsRouteChildren: RestaurantsRouteChildren = {
+  RestaurantsVenueIdRoute: RestaurantsVenueIdRoute,
+  RestaurantsIndexRoute: RestaurantsIndexRoute,
+}
+
+const RestaurantsRouteWithChildren = RestaurantsRoute._addFileChildren(
+  RestaurantsRouteChildren,
+)
 
 interface ApiV1DishesIdRouteChildren {
   ApiV1DishesIdRelatedRoute: typeof ApiV1DishesIdRelatedRoute
@@ -1083,8 +1243,10 @@ const ApiV1AdminDishesRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  DishesRoute: DishesRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  RestaurantsRoute: RestaurantsRouteWithChildren,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   VerifyEmailRoute: VerifyEmailRoute,

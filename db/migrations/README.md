@@ -57,6 +57,22 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 
 See `docs/infra/migrations.md`, `docs/infra/postgres.md`, and `docs/architecture/persistence.md`.
 
+PR #4 reserves `V20261028_100`–`106` beyond PR #3's inspected `_013` head:
+
+- `_100` creates Restaurant Discovery tables/views, PostGIS/trigram indexes,
+  exact observation history, FX cache/leases, User currency preference and RBAC grants.
+- `_101` enforces immutable provenance and receipt source/amount integrity.
+- `_102` maintains diacritic-folded restaurant search names with a trigger.
+- `_103` installs SIX ISO 4217 monetary codes and reattaches currency foreign
+  keys; the initial ICU lookup is preserved as an unused legacy table.
+- `_104` adds generated non-null coordinate projections of venue geography.
+- `_105` protects item/variant identity and adds variant retirement.
+- `_106` preserves unknown receipt adjustments as NULL rather than fabricated zero.
+
+All are forward-only. No parent migration is modified. Review numbering against
+any later PR #3 migrations before integration; rollback is application rollback
+with the additive schema retained, not Flyway clean/repair or data deletion.
+
 A checked-in migration is immutable once applied. Never edit, rename, or
 delete an applied file; write the next forward migration instead.
 

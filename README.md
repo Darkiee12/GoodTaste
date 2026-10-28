@@ -34,6 +34,10 @@ The default production build targets Bun. For Node, rebuild with `bun run build:
 
 ## Routes
 
+- `/dishes`, `/dishes/$slug` — public catalog search and detail, with canonical dish IDs carried into restaurant search.
+- `/restaurants`, `/restaurants/$venueId` — independent public restaurant search, optional map/geolocation, branch menus, exact observed prices and optional dated currency equivalents.
+- `/admin/restaurants` — RBAC-protected venue and menu entry, structured source imports, offering retirement and separate price/serving review.
+
 - `/` — public landing page with dish discovery (English default, `?lang=` switch for vi/hi/es/zh, validated by Zod; no cookie persistence).
 - `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/verify-email` — Better Auth email + Google/Facebook OAuth.
 - `/settings/account`, `/settings/security` — profile, linked accounts, sessions, password change.
@@ -43,6 +47,14 @@ The default production build targets Bun. For Node, rebuild with `bun run build:
 See `docs/architecture/access-control.md` (permission vocabulary, system roles, owner safeguards) and `docs/architecture/admin-dashboard.md` (dashboard routes, contracts, import lifecycle).
 
 ## Catalog data and imports
+
+Restaurant menus and prices are editorial observations, not AI estimates or live
+availability. There is no seeded restaurant inventory: authorized staff must
+record real branches and source-backed offerings. Original currency stays
+primary; Frankfurter v2 provides optional daily reference equivalents. Strict
+budgets require a canonical dish, comparable portion, channel and known current
+listed price. See [Restaurant Discovery](docs/architecture/restaurant-discovery.md)
+for import contracts, ranking, FX policy, environment and deferred features.
 
 Canonical dishes live in `feastjourney.dishes` plus names/descriptions/ingredients/cuisines/categories/places link tables (`db/migrations/V20261028_001`–`V004`). The import studio (`/admin/imports`) stages JSON/CSV datasets into `catalog_import_jobs`/`catalog_import_records`, validates against canonical taxonomy, requires explicit license + editorial-review acknowledgment plus per-duplicate decisions, and applies records as `review` status — never published. Applied records carry `source_records`/`dish_sources` provenance links. Publication is a separate `food:publish`-gated editorial action.
 

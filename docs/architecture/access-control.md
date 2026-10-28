@@ -48,6 +48,14 @@ All catalog administration endpoints resolve the actor from the verified Better 
 
 `admin:access` guards the administration surface only; it never authorizes a resource mutation by itself.
 
+Restaurant workspace access requires `restaurant:manage`; review controls
+additionally require `restaurant:review`. These grants are seeded to curator,
+admin and owner by `V20261028_100` and remain dynamically assignable. The admin
+surface OR-gate recognizes restaurant managers. Every venue/menu/import and
+visibility operation checks `manage` internally; every price/serving approval or
+rejection checks `review` internally. Mutations and mandatory audit events share
+a transaction. Public discovery needs neither grant nor a session.
+
 ## Better Auth's place in the picture
 
 Better Auth owns **authentication only**: sessions, passwords, OAuth, verification, recovery. Its admin plugin is deliberately neutralized — every role in its access-control config carries **zero grants**, so `/api/auth/admin/*` denies for everyone. All user administration (list, ban, roles, session revocation) is implemented behind our authorization boundary with Reylo queries; the plugin's passive behavior (default role on signup, banned-user session blocking) remains.

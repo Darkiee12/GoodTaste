@@ -64,6 +64,15 @@ No root `packages/`, no generic root `services/`, and no parallel `backend/` pro
 
 ## Module interactions
 
+Restaurant Discovery is implemented in `src/modules/restaurant-discovery/`.
+It owns venues, menus, immutable offering identities, sources, serving/price
+review, PostGIS queries and reference-FX caching. `src/shared/money.ts` and
+`currencies.ts` are deliberately browser-safe monetary presentation and ISO
+metadata shared with User preferences. Restaurant operations use Food's public
+`getPublishedDishIdentities` batch read and `DishService.getDish`; they never
+read Food's private SQL. User owns `user_profiles.preferred_currency` and its
+actor-scoped operations. See [Restaurant Discovery](restaurant-discovery.md).
+
 - A module **may** call another module's public server operation when the dependency is one-way and the contract is stable.
 - Cross-domain orchestration (e.g. recommend food and find places serving it) lives in `src/server/workflows/`: it can call Food Discovery, Restaurant Discovery and optionally User preferences.
 - If A needs B and B needs A, fix the ownership or move the orchestration upwards; do not conceal cycles behind Effect services.

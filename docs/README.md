@@ -15,6 +15,7 @@
 - [Data model](architecture/data-model.md): conceptual entities and provenance.
 - [Effect conventions](architecture/effect.md): typed effects and adapter practices.
 - [Maps and geosearch](architecture/maps.md): PostGIS, MapLibre React, TanStack SSR, tile/Places separation.
+- [Restaurant discovery and observed prices](architecture/restaurant-discovery.md): branches, menus, evidence, exact pricing, FX caching, currency preferences and admin workflow.
 - [Effect domain modeling](architecture/domain-modeling.md): ADTs, tagged errors, request-scoped Actor and codec boundaries.
 - [Authentication](architecture/authentication.md): Better Auth sessions, RBAC, token categories, revocation.
 - [Trust and safety](architecture/trust-and-safety.md): food claims, privacy, media and AI risks.

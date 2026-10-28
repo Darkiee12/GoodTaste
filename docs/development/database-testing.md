@@ -54,4 +54,16 @@ This document describes **required scenarios**, not an already-implemented or pa
 
 ## Geospatial tests (once restaurant schema exists)
 
+Restaurant integration tests are now implemented in `restaurants.test.ts`:
+real PostGIS radius/bounds, normalized names, stable branch ordering, evidence
+eligibility, exact budget/sort, provenance constraints, history, receipt-paid
+selection and RBAC. `restaurant-fx-cache.test.ts` uses PostgreSQL and mocked
+providers for cache hit/miss, staleness, cooldown, concurrent refresh and token
+takeover. No ordinary test calls a live FX provider.
+
+Bun's test preload now loads the existing disposable-database/environment guard
+before application imports. This makes individual auth/restaurant test files
+independent of test-file execution order. Supply the isolated loopback
+`DATABASE_URL`; never point tests at a shared or production database.
+
 Test strict coordinate/radius bounds, venue inclusion/exclusion at the edge of the radius, null/missing coordinates, stable ordering and spatial-index use. Browser-test TanStack SSR-safe MapLibre mounting, map/list selection, narrow/mobile scrolling, missing-location permission and map attribution. See `docs/architecture/maps.md`.
