@@ -27,6 +27,7 @@ export const Route = createFileRoute("/admin")({
 
 type AdminNavTarget =
   | "/admin"
+  | "/admin/restaurants"
   | "/admin/dishes"
   | "/admin/imports"
   | "/admin/reviews"
@@ -39,6 +40,7 @@ function AdminLayout() {
 
   const links: ReadonlyArray<{ readonly to: AdminNavTarget; readonly label: string }> = [
     { to: "/admin", label: copy.adminDashboard },
+    { to: "/admin/restaurants", label: "Restaurants & menus" },
     { to: "/admin/dishes", label: copy.adminDishes },
     { to: "/admin/imports", label: copy.adminImports },
     { to: "/admin/reviews", label: copy.adminReviews },

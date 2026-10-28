@@ -25,10 +25,11 @@ const loadServer = () =>
 export const searchDishesFn = createServerFn({ method: "GET" })
   .validator(dishSearchQuerySchema)
   .handler(async ({ data }) => {
-    const [effects, { DishService }, _catalog, { Actor }, { withActor }, { runApp }] =
-      await loadServer();
+    const [effects, { DishService }, _catalog, { Actor }, { withActor }] = await loadServer();
 
-    return runApp(
+    const { runClientOperation } = await import("@/server/http/run-client-operation");
+
+    return runClientOperation(
       withActor(
         Actor.Guest(),
         effects.Effect.flatMap(DishService, (service) =>
@@ -50,26 +51,22 @@ export const searchDishesFn = createServerFn({ method: "GET" })
           }),
         ),
       ),
-      "fn/dishes/search",
-      15000,
-      "server-fn",
+      "search",
     );
   });
 
 export const getDishFn = createServerFn({ method: "GET" })
   .validator(dishDetailParamsSchema)
   .handler(async ({ data }) => {
-    const [effects, { DishService }, _catalog, { Actor }, { withActor }, { runApp }] =
-      await loadServer();
+    const [effects, { DishService }, _catalog, { Actor }, { withActor }] = await loadServer();
 
-    return runApp(
+    const { runClientOperation } = await import("@/server/http/run-client-operation");
+
+    return runClientOperation(
       withActor(
         Actor.Guest(),
         effects.Effect.flatMap(DishService, (service) => service.getDish(data.id, data.locale)),
       ),
-      "fn/dishes/detail",
-      15000,
-      "server-fn",
     );
   });
 

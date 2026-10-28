@@ -8,6 +8,11 @@ Direct one-way calls are permitted; cyclic dependencies are not. A workflow unde
 
 ## Implemented catalog contracts (Food Discovery)
 
+Food's public `getPublishedDishIdentities(ids)` is a batch read returning
+Reylo-projected string IDs and slugs for published dishes only. Restaurant menu
+reads use it to suppress links to subsequently unpublished dishes without an
+N+1 catalog lookup. It never exposes draft metadata.
+
 Public read operations (`DishService`, `CatalogService`) serve guests and members:
 
 - `searchDishes`: multilingual text search with deterministic tier ranking, or
@@ -48,6 +53,33 @@ machine identity:
   valid record in its own transaction and recording revisions and notes.
   Unknown references invalidate the record; slugs that collide are skipped,
   never merged.
+
+## Implemented restaurant contracts
+
+Public operations exported by `restaurant-discovery/server/index.ts` are
+`searchRestaurants`, `getRestaurant`, and `listRestaurantAreas`. Search selects
+separate area, name or dish SQL strategies; price comparisons require a portion,
+channel and comparison currency. The response retains the actual selected
+offering, original observation, and the request's dated FX snapshot. Local
+ranges need three venues with current listed, tax-included prices for the same
+portion/channel/currency. Detail returns curated offerings and reviewed canonical
+links; private object keys and receipt URLs never leave SQL projections.
+
+`writeVenue`, `importMenu`, menu/item/variant status changes, and
+`reviewObservation` enforce `restaurant:manage` or `restaurant:review` inside
+the operation. Imports are bounded and transactional, always pending; review
+is separate. Item/variant IDs cannot be reused with different identities.
+Source/line duplicates conflict; no last-write-wins price replacement exists.
+See [the complete contract](restaurant-discovery.md).
+
+`FxRates` is the replaceable Effect capability for supported currencies and
+dated exact pair rates; `FxProviderLive` is provided at the composition root.
+An FX failure preserves ordinary menu reads but fails a dependent budget/sort.
+User's published currency operations use only the verified request Actor.
+
+Restaurant RPC and the dish search/detail RPCs use the shared client-operation
+boundary for rate limits, request timeout and safe typed-error messages. Success
+projections remain unchanged; raw database errors and stacks are never returned.
 
 Before implementing a public operation, specify:
 - owning module, callers and observable user outcome;

@@ -117,6 +117,15 @@ the resource (acquire/use/release) with the **current** Effect v4 API in
 
 ## Geographic queries
 
+Implemented Restaurant Discovery uses purpose-specific area, name, dish,
+currency-candidate, local-range, menu and administration SQL. Database views
+centralize eligible serving evidence and authoritative displayed-price selection;
+search still checks publication through Food's public operation. Exact decimal
+strings remain NUMERIC through budget multiplication and are never converted to
+JavaScript Number. Expiring token-owned FX refresh leases are acquired/released
+with individual statements; provider HTTP runs outside transactions. See
+[Restaurant Discovery](restaurant-discovery.md).
+
 PostGIS 3.6 in PostgreSQL 18 handles Restaurant Discovery radius and bounding-box queries through domain-owned Reylo SQL. Prefer `geography(Point,4326)` + GiST, use `ST_DWithin` for index-aware filtering and select scalar distances rather than raw geography payloads. Long/lat/radius are bounded by Zod at the HTTP adapter. MapLibre renders results only; it is not the geographic search service. See [maps](maps.md).
 
 ## Domain trust and access
