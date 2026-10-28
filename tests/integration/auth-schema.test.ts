@@ -72,10 +72,23 @@ describe("auth schema isolation", () => {
   test("auth flows ignore same-named tables in public", async () => {
     const sql = new SQL(process.env.DATABASE_URL ?? "");
 
-    await sql`CREATE TABLE IF NOT EXISTS public."user" (id text primary key, marker text)`;
-    await sql`CREATE TABLE IF NOT EXISTS public."session" (id text primary key, marker text)`;
-    await sql`INSERT INTO public."user" (id, marker) VALUES ('decoy-user', 'decoy') ON CONFLICT DO NOTHING`;
-    await sql`INSERT INTO public."session" (id, marker) VALUES ('decoy-session', 'decoy') ON CONFLICT DO NOTHING`;
+    // Ownership proof: record whether the decoy tables already exist before
+    // touching them. The test only drops tables it created itself; a
+    // pre-existing shared object is never adopted and never removed.
+    const existed = await sql<Array<{ name: string | null }>>`
+      SELECT to_regclass('public."user"') AS name
+      UNION ALL
+      SELECT to_regclass('public."session"') AS name
+    `;
+
+    const decoysExisted = existed.some((row) => row.name !== null);
+
+    if (!decoysExisted) {
+      await sql`CREATE TABLE public."user" (id text primary key, marker text)`;
+      await sql`CREATE TABLE public."session" (id text primary key, marker text)`;
+      await sql`INSERT INTO public."user" (id, marker) VALUES ('decoy-user', 'decoy')`;
+      await sql`INSERT INTO public."session" (id, marker) VALUES ('decoy-session', 'decoy')`;
+    }
 
     try {
       const email = `decoy-${stamp}@example.com`;
@@ -93,22 +106,35 @@ describe("auth schema isolation", () => {
 
       expect(Number(real[0]?.count ?? 0)).toBe(1);
 
-      const decoys = await sql<
-        Array<{ count: string }>
-      >`SELECT COUNT(*) AS count FROM public."user" WHERE id <> 'decoy-user'`;
+      if (!decoysExisted) {
+        const decoys = await sql<
+          Array<{ count: string }>
+        >`SELECT COUNT(*) AS count FROM public."user" WHERE id <> 'decoy-user'`;
 
-      expect(Number(decoys[0]?.count ?? -1)).toBe(0);
+        expect(Number(decoys[0]?.count ?? -1)).toBe(0);
 
-      const sessions = await sql<
-        Array<{ count: string }>
-      >`SELECT COUNT(*) AS count FROM public."session" WHERE id <> 'decoy-session'`;
+        const sessions = await sql<
+          Array<{ count: string }>
+        >`SELECT COUNT(*) AS count FROM public."session" WHERE id <> 'decoy-session'`;
 
-      expect(Number(sessions[0]?.count ?? -1)).toBe(0);
+        expect(Number(sessions[0]?.count ?? -1)).toBe(0);
+      }
 
       await sql`DELETE FROM feastjourney."user" WHERE email = ${email}`;
     } finally {
-      await sql`DROP TABLE IF EXISTS public."session"`;
-      await sql`DROP TABLE IF EXISTS public."user"`;
+      if (!decoysExisted) {
+        // Owned fixtures only: these tables did not exist before this test.
+        await sql`DROP TABLE public."session"`;
+        await sql`DROP TABLE public."user"`;
+      } else {
+        // A pre-existing shared object must survive the test untouched.
+        const survived = await sql<Array<{ name: string | null }>>`
+          SELECT to_regclass('public."user"') AS name
+        `;
+
+        expect(survived.some((row) => row.name !== null)).toBe(true);
+      }
+
       await sql.end();
     }
   });
