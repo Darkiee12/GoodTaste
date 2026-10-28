@@ -366,13 +366,34 @@ const english = {
   recRetry: "Try again",
   recAdjust: "Adjust and try again",
   recAiNote: "Ranked by Muse",
-  recPopularNote: "Popular matches",
+  recPopularNote: "Suggested dishes",
   recWarningsLabel: "Heads up",
   recAllergyNotice:
     "Ingredient data may be incomplete; this is not an allergy guarantee. Always ask the people making your food.",
   recReasonsHeading: "Why no dishes?",
   recResultsHeading: "Your picks",
   recTermTooLong: "Keep each item to 100 characters or fewer.",
+  recViewDish: "View dish",
+  recCuisineLoading: "Loading cuisines…",
+  recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
+  recCuisineLoadError: "Could not load cuisines from the catalog.",
+  recSurpriseNote:
+    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
+  recClearPrefs: "Clear saved preferences",
+  recClearPrefsConfirm: "Clear the preferences saved on this device?",
+  recClearPrefsYes: "Yes, clear them",
+  recClearPrefsNo: "Keep them",
+  recRegionAssocNote:
+    "We match dishes associated with a cuisine or region — not necessarily where they originated.",
+  recReviewRegionAssoc: "Associated with",
+  dishBack: "Back to recommendations",
+  dishLoading: "Plating up…",
+  dishError: "Could not load this dish.",
+  dishNotFound: "This dish is not on the public menu.",
+  dishAbout: "About this dish",
+  dishCuisines: "Cuisines",
+  dishCategories: "Categories",
+  dishPlaces: "Associated places",
 };
 
 export type Messages = { [Key in keyof typeof english]: string };
@@ -714,13 +735,33 @@ const vietnamese: Messages = {
   recRetry: "Thử lại",
   recAdjust: "Điều chỉnh rồi thử lại",
   recAiNote: "Được xếp hạng bởi Muse",
-  recPopularNote: "Các món được yêu thích",
+  recPopularNote: "Món gợi ý",
   recWarningsLabel: "Lưu ý",
   recAllergyNotice:
     "Dữ liệu nguyên liệu có thể chưa đầy đủ; đây không phải cam kết an toàn dị ứng. Luôn hỏi người chế biến trước khi ăn.",
   recReasonsHeading: "Vì sao không có món nào?",
   recResultsHeading: "Món dành cho bạn",
   recTermTooLong: "Mỗi mục tối đa 100 ký tự.",
+  recViewDish: "Xem món ăn",
+  recCuisineLoading: "Đang tải danh sách ẩm thực…",
+  recCuisineEmpty: "Danh mục hiện chưa có ẩm thực nào — hãy chọn mọi nơi hoặc theo quốc gia.",
+  recCuisineLoadError: "Không tải được danh sách ẩm thực từ danh mục.",
+  recSurpriseNote: "Chế độ bất ngờ giữ nguyên lựa chọn và dị ứng hiện tại — không xóa gì đã lưu.",
+  recClearPrefs: "Xóa sở thích đã lưu",
+  recClearPrefsConfirm: "Xóa sở thích đã lưu trên thiết bị này?",
+  recClearPrefsYes: "Vâng, xóa",
+  recClearPrefsNo: "Giữ lại",
+  recRegionAssocNote:
+    "Chúng tôi gợi ý món liên quan đến ẩm thực hoặc vùng — không nhất thiết là nơi khai sinh món đó.",
+  recReviewRegionAssoc: "Liên quan đến",
+  dishBack: "Về trang gợi ý",
+  dishLoading: "Đang dọn món…",
+  dishError: "Không tải được món này.",
+  dishNotFound: "Món này không có trong thực đơn công khai.",
+  dishAbout: "Về món này",
+  dishCuisines: "Ẩm thực",
+  dishCategories: "Danh mục",
+  dishPlaces: "Địa điểm liên quan",
 };
 
 const hindi: Messages = {
@@ -1071,6 +1112,28 @@ const hindi: Messages = {
   recResultsHeading: "Your picks",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
+  // Translator TODO: rec/dish strings below are English placeholders.
+  recViewDish: "View dish",
+  recCuisineLoading: "Loading cuisines…",
+  recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
+  recCuisineLoadError: "Could not load cuisines from the catalog.",
+  recSurpriseNote:
+    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
+  recClearPrefs: "Clear saved preferences",
+  recClearPrefsConfirm: "Clear the preferences saved on this device?",
+  recClearPrefsYes: "Yes, clear them",
+  recClearPrefsNo: "Keep them",
+  recRegionAssocNote:
+    "We match dishes associated with a cuisine or region — not necessarily where they originated.",
+  recReviewRegionAssoc: "Associated with",
+  dishBack: "Back to recommendations",
+  dishLoading: "Plating up…",
+  dishError: "Could not load this dish.",
+  dishNotFound: "This dish is not on the public menu.",
+  dishAbout: "About this dish",
+  dishCuisines: "Cuisines",
+  dishCategories: "Categories",
+  dishPlaces: "Associated places",
 };
 
 const spanish: Messages = {
@@ -1422,6 +1485,28 @@ const spanish: Messages = {
   recResultsHeading: "Your picks",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
+  // Translator TODO: rec/dish strings below are English placeholders.
+  recViewDish: "View dish",
+  recCuisineLoading: "Loading cuisines…",
+  recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
+  recCuisineLoadError: "Could not load cuisines from the catalog.",
+  recSurpriseNote:
+    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
+  recClearPrefs: "Clear saved preferences",
+  recClearPrefsConfirm: "Clear the preferences saved on this device?",
+  recClearPrefsYes: "Yes, clear them",
+  recClearPrefsNo: "Keep them",
+  recRegionAssocNote:
+    "We match dishes associated with a cuisine or region — not necessarily where they originated.",
+  recReviewRegionAssoc: "Associated with",
+  dishBack: "Back to recommendations",
+  dishLoading: "Plating up…",
+  dishError: "Could not load this dish.",
+  dishNotFound: "This dish is not on the public menu.",
+  dishAbout: "About this dish",
+  dishCuisines: "Cuisines",
+  dishCategories: "Categories",
+  dishPlaces: "Associated places",
 };
 
 const chinese: Messages = {
@@ -1771,6 +1856,28 @@ const chinese: Messages = {
   recResultsHeading: "Your picks",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
+  // Translator TODO: rec/dish strings below are English placeholders.
+  recViewDish: "View dish",
+  recCuisineLoading: "Loading cuisines…",
+  recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
+  recCuisineLoadError: "Could not load cuisines from the catalog.",
+  recSurpriseNote:
+    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
+  recClearPrefs: "Clear saved preferences",
+  recClearPrefsConfirm: "Clear the preferences saved on this device?",
+  recClearPrefsYes: "Yes, clear them",
+  recClearPrefsNo: "Keep them",
+  recRegionAssocNote:
+    "We match dishes associated with a cuisine or region — not necessarily where they originated.",
+  recReviewRegionAssoc: "Associated with",
+  dishBack: "Back to recommendations",
+  dishLoading: "Plating up…",
+  dishError: "Could not load this dish.",
+  dishNotFound: "This dish is not on the public menu.",
+  dishAbout: "About this dish",
+  dishCuisines: "Cuisines",
+  dishCategories: "Categories",
+  dishPlaces: "Associated places",
 };
 
 export const messages: ReadonlyMap<Locale, Messages> = new Map<Locale, Messages>([

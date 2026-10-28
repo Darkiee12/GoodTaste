@@ -1,10 +1,16 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
 import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 
-import { recommendDishesFn } from "@/modules/food-discovery/food.functions";
+import { listCuisinesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
+import {
+  MEAL_OCCASIONS,
+  RECOMMENDATION_MOODS,
+  type MealOccasion,
+  type RecommendationMood,
+} from "@/modules/food-discovery/recommendation.constants";
 import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -15,46 +21,15 @@ export const Route = createFileRoute("/recommend")({
   component: Recommend,
 });
 
-export const REC_MEALS = ["breakfast", "lunch", "dinner", "snack", "dessert", "anything"] as const;
+/** UI mirror of the shared meal vocabulary; undefined is never a meal. */
+export const mealSchema = z.enum(MEAL_OCCASIONS);
 
-export type RecMeal = (typeof REC_MEALS)[number];
-
-export const REC_MOODS = [
-  "comforting",
-  "light",
-  "hearty",
-  "spicy",
-  "adventurous",
-  "surprise",
-  "any",
-] as const;
-
-export type RecMood = (typeof REC_MOODS)[number];
-
-export const REC_CUISINES = [
-  "vietnamese",
-  "japanese",
-  "korean",
-  "indian",
-  "italian",
-  "spanish",
-  "mexican",
-  "nigerian",
-  "ethiopian",
-  "levantine",
-] as const;
-
-export type RecCuisine = (typeof REC_CUISINES)[number];
+/** UI mirror of the shared mood vocabulary; undefined is never a mood. */
+export const moodSchema = z.enum(RECOMMENDATION_MOODS);
 
 export type RecRegionMode = "anywhere" | "cuisine" | "country";
 
 export const MAX_REC_TERM_LENGTH = 100;
-
-export const recMealSchema = z.enum(REC_MEALS);
-
-export const recMoodSchema = z.enum(REC_MOODS);
-
-export const recCuisineSchema = z.enum(REC_CUISINES);
 
 export const recCountrySchema = z
   .string()
@@ -70,23 +45,31 @@ export interface QuizDraft {
 }
 
 export interface RecommendAnswers {
-  readonly meal: RecMeal;
+  readonly meal: MealOccasion;
   readonly avoid: ReadonlyArray<string>;
   readonly allergies: ReadonlyArray<string>;
-  readonly cuisine: RecCuisine | undefined;
+  readonly cuisine: string | undefined;
   readonly country: string | undefined;
-  readonly mood: RecMood;
+  readonly mood: RecommendationMood;
   readonly locale: string;
 }
 
 export interface RecommendPayload {
-  readonly meal: RecMeal;
+  readonly meal: MealOccasion;
   readonly avoid: Array<string>;
   readonly allergies: Array<string>;
-  readonly cuisine: RecCuisine | undefined;
+  readonly cuisine: string | undefined;
   readonly country: string | undefined;
-  readonly mood: RecMood;
+  readonly mood: RecommendationMood;
   readonly locale: string;
+}
+
+export interface SurpriseInputs {
+  readonly draft: QuizDraft;
+  readonly meal: MealOccasion;
+  readonly mood: RecommendationMood;
+  readonly locale: string;
+  readonly cuisineSlugs?: ReadonlyArray<string>;
 }
 
 /** Split a comma-separated field into trimmed, deduplicated, non-empty terms. */
@@ -136,15 +119,33 @@ export const buildRecommendPayload = (answers: RecommendAnswers): RecommendPaylo
   locale: answers.locale,
 });
 
+/**
+ * Surprise keeps the visitor's current meal, mood, region, and exclusions;
+ * only the sense of direction is "surprise". It never reads or writes
+ * persisted preferences as a side effect — the draft already carries any
+ * saved values via its initializer.
+ */
+export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =>
+  buildRecommendPayload({
+    meal: inputs.meal,
+    avoid: parseCommaList(inputs.draft.avoidRaw),
+    allergies: parseCommaList(inputs.draft.allergiesRaw),
+    cuisine: resolveCuisine(inputs.draft.regionMode, inputs.draft.cuisine, inputs.cuisineSlugs),
+    country: resolveCountry(inputs.draft.regionMode, inputs.draft.country),
+    mood: inputs.mood,
+    locale: inputs.locale,
+  });
+
 /** Validate the region step, returning a localized error or null when it passes. */
 export const validateRegion = (
   mode: RecRegionMode,
   cuisine: string,
   country: string,
   copy: Messages,
+  cuisineSlugs?: ReadonlyArray<string>,
 ): string | null => {
   if (mode === "cuisine") {
-    if (!recCuisineSchema.safeParse(cuisine).success) {
+    if (resolveCuisine(mode, cuisine, cuisineSlugs) === undefined) {
       return copy.recCuisineError;
     }
 
@@ -162,18 +163,26 @@ export const validateRegion = (
   return null;
 };
 
-const resolveCuisine = (mode: RecRegionMode, cuisine: string): RecCuisine | undefined => {
+const resolveCuisine = (
+  mode: RecRegionMode,
+  cuisine: string,
+  cuisineSlugs?: ReadonlyArray<string>,
+): string | undefined => {
   if (mode !== "cuisine") {
     return undefined;
   }
 
-  const parsed = recCuisineSchema.safeParse(cuisine);
+  const slug = cuisine.trim();
 
-  if (!parsed.success) {
+  if (slug.length === 0 || slug.length > 80) {
     return undefined;
   }
 
-  return parsed.data;
+  if (cuisineSlugs !== undefined && cuisineSlugs.length > 0 && !cuisineSlugs.includes(slug)) {
+    return undefined;
+  }
+
+  return slug;
 };
 
 const resolveCountry = (mode: RecRegionMode, country: string): string | undefined => {
@@ -195,7 +204,7 @@ const savedPrefsSchema = z.object({
   remember: z.literal(true),
   avoid: z.array(z.string()).default([]),
   allergies: z.array(z.string()).default([]),
-  cuisine: recCuisineSchema.optional(),
+  cuisine: z.string().min(1).max(80).optional(),
   country: recCountrySchema.optional(),
 });
 
@@ -203,7 +212,7 @@ export type SavedRecommendPrefs = z.infer<typeof savedPrefsSchema>;
 
 const PREFS_KEY = "feastjourney.recommend.prefs.v1";
 
-const EMPTY_DRAFT: QuizDraft = {
+export const EMPTY_DRAFT: QuizDraft = {
   avoidRaw: "",
   allergiesRaw: "",
   regionMode: "anywhere",
@@ -236,17 +245,17 @@ export const readSavedPrefs = (read: () => string | null): SavedRecommendPrefs |
 
 export const serializePrefs = (prefs: SavedRecommendPrefs): string => JSON.stringify(prefs);
 
+/** Invoke the storage remover; the caller resets the form separately. */
+export const removeSavedPrefs = (remove: () => void): void => {
+  remove();
+};
+
 /**
- * Lazy useState initializer: meal/mood are per-visit (always defaults);
- * only exclusions, cuisine, and country restore, and only with prior consent.
+ * Pure draft initializer from parsed prefs: only exclusions, cuisine, and
+ * country restore, and only with prior consent. Meal and mood are per-visit
+ * and always start at their defaults.
  */
-const readInitialDraft = (): QuizDraft => {
-  if (typeof window === "undefined") {
-    return EMPTY_DRAFT;
-  }
-
-  const saved = readSavedPrefs(() => window.localStorage.getItem(PREFS_KEY));
-
+export const draftFromSavedPrefs = (saved: SavedRecommendPrefs | null): QuizDraft => {
   if (saved === null) {
     return EMPTY_DRAFT;
   }
@@ -269,11 +278,20 @@ const readInitialDraft = (): QuizDraft => {
   };
 };
 
+/** Lazy useState initializer: window-backed, consent-gated, corruption-proof. */
+const readInitialDraft = (): QuizDraft => {
+  if (typeof window === "undefined") {
+    return EMPTY_DRAFT;
+  }
+
+  return draftFromSavedPrefs(readSavedPrefs(() => window.localStorage.getItem(PREFS_KEY)));
+};
+
 const persistPrefs = (
   remember: boolean,
   avoid: ReadonlyArray<string>,
   allergies: ReadonlyArray<string>,
-  cuisine: RecCuisine | undefined,
+  cuisine: string | undefined,
   country: string | undefined,
 ): void => {
   if (typeof window === "undefined") {
@@ -297,7 +315,7 @@ const persistPrefs = (
   window.localStorage.setItem(PREFS_KEY, serializePrefs(prefs));
 };
 
-const mealOptions = (copy: Messages): ReadonlyArray<{ value: RecMeal; label: string }> => [
+const mealOptions = (copy: Messages): ReadonlyArray<{ value: MealOccasion; label: string }> => [
   { value: "breakfast", label: copy.recMealBreakfast },
   { value: "lunch", label: copy.recMealLunch },
   { value: "dinner", label: copy.recMealDinner },
@@ -306,7 +324,9 @@ const mealOptions = (copy: Messages): ReadonlyArray<{ value: RecMeal; label: str
   { value: "anything", label: copy.recMealAnything },
 ];
 
-const moodOptions = (copy: Messages): ReadonlyArray<{ value: RecMood; label: string }> => [
+const moodOptions = (
+  copy: Messages,
+): ReadonlyArray<{ value: RecommendationMood; label: string }> => [
   { value: "comforting", label: copy.recMoodComforting },
   { value: "light", label: copy.recMoodLight },
   { value: "hearty", label: copy.recMoodHearty },
@@ -355,10 +375,31 @@ function Recommend() {
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [showResults, setShowResults] = useState<boolean>(false);
   const [draft, setDraft] = useState<QuizDraft>(readInitialDraft);
-  const [meal, setMeal] = useState<RecMeal>("anything");
-  const [mood, setMood] = useState<RecMood>("any");
+  const [meal, setMeal] = useState<MealOccasion>("anything");
+  const [mood, setMood] = useState<RecommendationMood>("any");
   const [stepError, setStepError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<RecommendPayload | null>(null);
+  const [confirmClear, setConfirmClear] = useState<boolean>(false);
+
+  const [hasSaved, setHasSaved] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return readSavedPrefs(() => window.localStorage.getItem(PREFS_KEY)) !== null;
+  });
+
+  const cuisines = useQuery({
+    queryKey: ["catalog", "cuisines", lang],
+    queryFn: () => listCuisinesFn({ data: { locale: lang } }),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const catalogSlugs = useMemo<ReadonlyArray<string> | undefined>(
+    () => cuisines.data?.map((entry) => entry.slug),
+    [cuisines.data],
+  );
 
   const recommend = useMutation({
     mutationFn: (payload: RecommendPayload) => recommendDishesFn({ data: payload }),
@@ -366,6 +407,7 @@ function Recommend() {
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     persistPrefs(remember, payload.avoid, payload.allergies, payload.cuisine, payload.country);
+    setHasSaved(remember);
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
@@ -373,15 +415,7 @@ function Recommend() {
   };
 
   const currentPayload = (): RecommendPayload =>
-    buildRecommendPayload({
-      meal,
-      avoid: parseCommaList(draft.avoidRaw),
-      allergies: parseCommaList(draft.allergiesRaw),
-      cuisine: resolveCuisine(draft.regionMode, draft.cuisine),
-      country: resolveCountry(draft.regionMode, draft.country),
-      mood,
-      locale: lang,
-    });
+    buildSurprisePayload({ draft, meal, mood, locale: lang, cuisineSlugs: catalogSlugs });
 
   const goNext = (): void => {
     if (stepIndex === 1) {
@@ -395,7 +429,13 @@ function Recommend() {
     }
 
     if (stepIndex === 2) {
-      const regionError = validateRegion(draft.regionMode, draft.cuisine, draft.country, copy);
+      const regionError = validateRegion(
+        draft.regionMode,
+        draft.cuisine,
+        draft.country,
+        copy,
+        catalogSlugs,
+      );
 
       if (regionError !== null) {
         setStepError(regionError);
@@ -424,7 +464,13 @@ function Recommend() {
       return;
     }
 
-    const regionError = validateRegion(draft.regionMode, draft.cuisine, draft.country, copy);
+    const regionError = validateRegion(
+      draft.regionMode,
+      draft.cuisine,
+      draft.country,
+      copy,
+      catalogSlugs,
+    );
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -437,19 +483,35 @@ function Recommend() {
     startSearch(currentPayload(), draft.remember);
   };
 
+  /**
+   * Surprise keeps the current meal, mood, region, and exclusions and never
+   * touches saved preferences: no persist, no clear.
+   */
   const surprise = (): void => {
-    startSearch(
-      buildRecommendPayload({
-        meal: "anything",
-        avoid: [],
-        allergies: [],
-        cuisine: undefined,
-        country: undefined,
-        mood: "any",
-        locale: lang,
-      }),
-      false,
-    );
+    const payload = currentPayload();
+
+    setSubmitted(payload);
+    setStepError(null);
+    setShowResults(true);
+    recommend.mutate(payload);
+  };
+
+  /** Wipe saved preferences and reset the whole form; storage first. */
+  const clearSaved = (): void => {
+    if (typeof window !== "undefined") {
+      removeSavedPrefs(() => window.localStorage.removeItem(PREFS_KEY));
+    }
+
+    recommend.reset();
+    setDraft(EMPTY_DRAFT);
+    setMeal("anything");
+    setMood("any");
+    setStepError(null);
+    setSubmitted(null);
+    setStepIndex(0);
+    setShowResults(false);
+    setConfirmClear(false);
+    setHasSaved(false);
   };
 
   const retry = (): void => {
@@ -474,6 +536,7 @@ function Recommend() {
     setSubmitted(null);
     setStepIndex(0);
     setShowResults(false);
+    setConfirmClear(false);
   };
 
   const outcome: RecommendResult | null = recommend.data ?? null;
@@ -509,6 +572,7 @@ function Recommend() {
         >
           <SparklesIcon aria-hidden="true" className="size-5" /> {copy.recSurprise}
         </button>
+        <p className="mt-2 max-w-[60ch] text-sm text-muted">{copy.recSurpriseNote}</p>
       </div>
 
       <p
@@ -640,6 +704,7 @@ function Recommend() {
                 {copy.recRegionLegend}
               </legend>
               <p className="mb-4 text-sm text-muted">{copy.recRegionHint}</p>
+              <p className="mb-4 text-sm font-semibold text-ink">{copy.recRegionAssocNote}</p>
               <div className="flex flex-col gap-3">
                 <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                   <input
@@ -687,21 +752,48 @@ function Recommend() {
                   <label htmlFor="rec-cuisine" className="mb-2 block text-sm font-bold text-ink">
                     {copy.recCuisineLabel}
                   </label>
-                  <select
-                    id="rec-cuisine"
-                    value={draft.cuisine}
-                    onChange={(event) => {
-                      setDraft({ ...draft, cuisine: event.target.value });
-                    }}
-                    className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
-                  >
-                    <option value="">{copy.recCuisineLabel}…</option>
-                    {REC_CUISINES.map((cuisine) => (
-                      <option key={cuisine} value={cuisine}>
-                        {cuisine}
-                      </option>
-                    ))}
-                  </select>
+                  {cuisines.isPending ? (
+                    <output className="block text-sm text-muted">{copy.recCuisineLoading}</output>
+                  ) : null}
+                  {cuisines.isError ? (
+                    <div>
+                      <p
+                        role="alert"
+                        className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                      >
+                        {copy.recCuisineLoadError}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void cuisines.refetch();
+                        }}
+                        className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+                      >
+                        {copy.recRetry}
+                      </button>
+                    </div>
+                  ) : null}
+                  {cuisines.data !== undefined && cuisines.data.length === 0 ? (
+                    <output className="block text-sm text-muted">{copy.recCuisineEmpty}</output>
+                  ) : null}
+                  {cuisines.data !== undefined && cuisines.data.length > 0 ? (
+                    <select
+                      id="rec-cuisine"
+                      value={draft.cuisine}
+                      onChange={(event) => {
+                        setDraft({ ...draft, cuisine: event.target.value });
+                      }}
+                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
+                    >
+                      <option value="">{copy.recCuisineLabel}…</option>
+                      {cuisines.data.map((entry) => (
+                        <option key={entry.slug} value={entry.slug}>
+                          {entry.displayName ?? entry.slug}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -781,7 +873,7 @@ function Recommend() {
                   <dd className="text-muted">{orAny(draft.allergiesRaw, copy)}</dd>
                 </div>
                 <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewRegion}</dt>
+                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewRegionAssoc}</dt>
                   <dd className="text-muted">{regionLabel(draft, copy)}</dd>
                 </div>
                 <div className="flex gap-3">
@@ -805,6 +897,44 @@ function Recommend() {
                   </span>
                 </span>
               </label>
+              {hasSaved ? (
+                <div className="mt-4 rounded-2xl border-2 border-border-soft px-4 py-3">
+                  {confirmClear ? (
+                    <div>
+                      <p className="text-sm font-bold text-ink">{copy.recClearPrefsConfirm}</p>
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={clearSaved}
+                          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-danger bg-white px-5 text-sm font-bold text-danger transition hover:bg-danger hover:text-white"
+                        >
+                          {copy.recClearPrefsYes}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmClear(false);
+                          }}
+                          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                        >
+                          {copy.recClearPrefsNo}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmClear(true);
+                      }}
+                      aria-expanded="false"
+                      className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                    >
+                      {copy.recClearPrefs}
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </fieldset>
           ) : null}
 
@@ -938,7 +1068,14 @@ function Recommend() {
             <li key={dish.id}>
               <article className="flex h-full flex-col gap-2 rounded-2xl border border-border-soft bg-white p-6 transition hover:-translate-y-0.5 hover:border-food-orange motion-reduce:transition-none motion-reduce:hover:translate-y-0">
                 <h3 className="text-lg leading-tight font-extrabold">
-                  {displayNameFor(dish.name, dish.englishName, dish.slug)}
+                  <Link
+                    to="/dishes/$dishId"
+                    params={{ dishId: dish.slug }}
+                    search={{ lang }}
+                    className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
+                  >
+                    {displayNameFor(dish.name, dish.englishName, dish.slug)}
+                  </Link>
                 </h3>
                 {dish.name !== undefined &&
                 dish.englishName !== undefined &&
@@ -959,6 +1096,16 @@ function Recommend() {
                     ))}
                   </ul>
                 ) : null}
+                <p className="mt-1">
+                  <Link
+                    to="/dishes/$dishId"
+                    params={{ dishId: dish.slug }}
+                    search={{ lang }}
+                    className="inline-flex min-h-11 items-center text-sm font-bold text-brand-blue-hover underline underline-offset-4"
+                  >
+                    {copyMessages.recViewDish}
+                  </Link>
+                </p>
               </article>
             </li>
           ))}
@@ -976,7 +1123,7 @@ function ModeNote(properties: { note: string | null }) {
   return <p className="mb-3 text-sm font-semibold text-muted">{properties.note}</p>;
 }
 
-const mealLabel = (meal: RecMeal, copy: Messages): string => {
+const mealLabel = (meal: MealOccasion, copy: Messages): string => {
   const found = mealOptions(copy).find((option) => option.value === meal);
 
   if (found === undefined) {
@@ -986,7 +1133,7 @@ const mealLabel = (meal: RecMeal, copy: Messages): string => {
   return found.label;
 };
 
-const moodLabel = (mood: RecMood, copy: Messages): string => {
+const moodLabel = (mood: RecommendationMood, copy: Messages): string => {
   const found = moodOptions(copy).find((option) => option.value === mood);
 
   if (found === undefined) {
