@@ -33,6 +33,14 @@ export class Authorization extends Context.Service<
       actor: Actor,
       request: PermissionRequest,
     ) => Effect.Effect<void, InsufficientPermissions | DatabaseError, Database | RoleRepository>;
+    /**
+     * Target-role manageability: the role exists and, when protected, the
+     * caller holds `role:manage-protected`. This answers only whether the
+     * target may be touched — never whether the operation is allowed. Every
+     * caller pairs it with the permission governing its own action
+     * (`role:update`, `role:delete`, `role:assign`,
+     * `role:manage-permissions`), enforced independently at that boundary.
+     */
     readonly requireManageableRole: (
       actor: Actor,
       roleId: RoleId,
@@ -133,12 +141,6 @@ export const AuthorizationLive = Layer.succeed(Authorization, {
 
       if (record.is_protected && !granted.has("role:manage-protected")) {
         return yield* new ProtectedRole({ roleId });
-      }
-
-      if (!granted.has("role:update")) {
-        return yield* new InsufficientPermissions({
-          reason: "Missing permission: role:update.",
-        });
       }
 
       return { id: record.id, isProtected: record.is_protected };

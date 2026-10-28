@@ -11,11 +11,25 @@ import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleService } from "@/modules/user/server/operations/role-service";
 import { RoleRepository } from "@/modules/user/server/repository/role-repository";
 import { Actor } from "@/server/auth/actor";
+import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
 const uid = (id: string): UserId => UserId.parse(id);
 const rid = (id: string): RoleId => RoleId.parse(id);
 const actorOf = (userId: string): Actor => Actor.Member({ userId });
+
+const testAudit = { requestId: "test-request", sessionId: null };
+
+const allows = <A, R extends AppServices>(effect: Effect.Effect<A, unknown, R>): Promise<A> =>
+  appRuntime.runPromise(effect);
+
+const denies = async <A, R extends AppServices>(
+  effect: Effect.Effect<A, unknown, R>,
+): Promise<void> => {
+  const exit = await appRuntime.runPromiseExit(effect);
+
+  expect(exit._tag).toBe("Failure");
+};
 
 const stamp = Date.now().toString(36).slice(0, 8);
 const roleSlug = (name: string): string => `role-test-${name}-${stamp}`;
@@ -90,21 +104,33 @@ describe("dynamic authorization", () => {
 
     const created = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(owner, {
-          slug,
-          name: "Test Editor",
-          description: "rules engine test role",
-          color: "#123456",
-          position: 15,
-        }),
+        service.createRole(
+          owner,
+          {
+            slug,
+            name: "Test Editor",
+            description: "rules engine test role",
+            color: "#123456",
+            position: 15,
+          },
+          testAudit,
+        ),
       ),
     );
+
+    // No baseline grants: a fresh custom role authorizes nothing, not even
+    // the role catalog itself.
+    const initial = await appRuntime.runPromise(
+      Effect.flatMap(RoleRepository, (repository) => repository.permissionsOfRole(created.id)),
+    );
+
+    expect(initial.length).toBe(0);
 
     const memberId = await makeUser("editor");
     await grant("member", memberId);
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.assignRole(owner, uid(memberId), rid(created.id)),
+        service.assignRole(owner, uid(memberId), rid(created.id), testAudit),
       ),
     );
 
@@ -112,7 +138,7 @@ describe("dynamic authorization", () => {
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(created.id), ["food:update", "food:publish"]),
+        service.setRoleGrants(owner, rid(created.id), ["food:update", "food:publish"], testAudit),
       ),
     );
 
@@ -120,12 +146,193 @@ describe("dynamic authorization", () => {
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(created.id), ["food:update"]),
+        service.setRoleGrants(owner, rid(created.id), ["food:update"], testAudit),
       ),
     );
 
     expect(await has(memberId, "food", ["publish"])).toBe(false);
     expect(await has(memberId, "food", ["update"])).toBe(true);
+  });
+
+  test("role permissions are enforced independently, never conflated", async () => {
+    const ownerId = await makeUser("matrix-owner");
+    await grant("owner", ownerId);
+    const owner = actorOf(ownerId);
+
+    const makeRoleWith = async (suffix: string, grants: ReadonlyArray<string>): Promise<string> => {
+      const created = await appRuntime.runPromise(
+        Effect.flatMap(RoleService, (service) =>
+          service.createRole(
+            owner,
+            {
+              slug: roleSlug(suffix),
+              name: suffix,
+              description: "",
+              color: "#123456",
+              position: 70,
+            },
+            testAudit,
+          ),
+        ),
+      );
+
+      await appRuntime.runPromise(
+        Effect.flatMap(RoleService, (service) =>
+          service.setRoleGrants(owner, rid(created.id), [...grants], testAudit),
+        ),
+      );
+
+      return created.id;
+    };
+
+    const holderFor = async (suffix: string, grants: ReadonlyArray<string>): Promise<Actor> => {
+      const roleId = await makeRoleWith(`matrix-${suffix}`, grants);
+      const userId = await makeUser(`matrix-${suffix}`);
+      await grant(roleId, userId);
+
+      return actorOf(userId);
+    };
+
+    const targetId = await makeRoleWith("matrix-target", []);
+
+    // role:create alone authorizes creation and nothing else.
+    const creator = await holderFor("creator", ["role:create"]);
+
+    await allows(
+      Effect.flatMap(RoleService, (service) =>
+        service.createRole(
+          creator,
+          {
+            slug: roleSlug("matrix-made"),
+            name: "Made",
+            description: "",
+            color: "#123456",
+            position: 71,
+          },
+          testAudit,
+        ),
+      ),
+    );
+
+    await denies(Effect.flatMap(RoleService, (service) => service.listRoles(creator)));
+
+    // role:read alone authorizes listing and nothing else.
+    const reader = await holderFor("reader", ["role:read"]);
+
+    await allows(Effect.flatMap(RoleService, (service) => service.listRoles(reader)));
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.createRole(
+          reader,
+          {
+            slug: roleSlug("matrix-nope"),
+            name: "Nope",
+            description: "",
+            color: "#123456",
+            position: 72,
+          },
+          testAudit,
+        ),
+      ),
+    );
+
+    // role:update alone authorizes metadata edits but not assignment.
+    const updater = await holderFor("updater", ["role:update"]);
+
+    await allows(
+      Effect.flatMap(RoleService, (service) =>
+        service.updateRole(
+          updater,
+          rid(targetId),
+          {
+            slug: roleSlug("matrix-target"),
+            name: "Renamed",
+            description: "",
+            color: "#123456",
+            position: 73,
+          },
+          testAudit,
+        ),
+      ),
+    );
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.assignRole(updater, uid(ownerId), rid(targetId), testAudit),
+      ),
+    );
+
+    // role:assign alone authorizes assignment of a manageable empty role
+    // but not metadata edits, deletion, or grant changes.
+    const assigner = await holderFor("assigner", ["role:assign"]);
+    const assigneeId = await makeUser("matrix-assignee");
+
+    await allows(
+      Effect.flatMap(RoleService, (service) =>
+        service.assignRole(assigner, uid(assigneeId), rid(targetId), testAudit),
+      ),
+    );
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.updateRole(
+          assigner,
+          rid(targetId),
+          {
+            slug: roleSlug("matrix-target"),
+            name: "Renamed",
+            description: "",
+            color: "#123456",
+            position: 74,
+          },
+          testAudit,
+        ),
+      ),
+    );
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.deleteRole(assigner, rid(targetId), testAudit),
+      ),
+    );
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.setRoleGrants(assigner, rid(targetId), [], testAudit),
+      ),
+    );
+
+    // role:manage-permissions alone authorizes grant replacement but cannot
+    // delegate what the actor lacks.
+    const granter = await holderFor("granter", ["role:manage-permissions"]);
+
+    await allows(
+      Effect.flatMap(RoleService, (service) =>
+        service.setRoleGrants(granter, rid(targetId), [], testAudit),
+      ),
+    );
+
+    await denies(
+      Effect.flatMap(RoleService, (service) =>
+        service.setRoleGrants(granter, rid(targetId), ["user:ban"], testAudit),
+      ),
+    );
+
+    // role:delete alone authorizes deletion of an eligible role.
+    const deleter = await holderFor("deleter", ["role:delete"]);
+    const doomedId = await makeRoleWith("matrix-doomed", []);
+
+    await allows(
+      Effect.flatMap(RoleService, (service) =>
+        service.deleteRole(deleter, rid(doomedId), testAudit),
+      ),
+    );
+
+    // Plain members cannot even list roles.
+    const plainId = await makeUser("matrix-plain");
+
+    await denies(Effect.flatMap(RoleService, (service) => service.listRoles(actorOf(plainId))));
   });
 
   test("unknown permission keys are rejected, never granted", async () => {
@@ -137,19 +344,23 @@ describe("dynamic authorization", () => {
 
     const created = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(owner, {
-          slug,
-          name: "Weird",
-          description: "",
-          color: "#000000",
-          position: 16,
-        }),
+        service.createRole(
+          owner,
+          {
+            slug,
+            name: "Weird",
+            description: "",
+            color: "#000000",
+            position: 16,
+          },
+          testAudit,
+        ),
       ),
     );
 
     const rejected = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(created.id), ["user:impersonate", "nope"]),
+        service.setRoleGrants(owner, rid(created.id), ["user:impersonate", "nope"], testAudit),
       ),
     );
 
@@ -164,19 +375,23 @@ describe("dynamic authorization", () => {
     const makeRole = async (suffix: string, grants: ReadonlyArray<string>): Promise<string> => {
       const created = await appRuntime.runPromise(
         Effect.flatMap(RoleService, (service) =>
-          service.createRole(owner, {
-            slug: roleSlug(suffix),
-            name: suffix,
-            description: "",
-            color: "#000000",
-            position: 20,
-          }),
+          service.createRole(
+            owner,
+            {
+              slug: roleSlug(suffix),
+              name: suffix,
+              description: "",
+              color: "#000000",
+              position: 20,
+            },
+            testAudit,
+          ),
         ),
       );
 
       await appRuntime.runPromise(
         Effect.flatMap(RoleService, (service) =>
-          service.setRoleGrants(owner, rid(created.id), grants),
+          service.setRoleGrants(owner, rid(created.id), grants, testAudit),
         ),
       );
 
@@ -196,7 +411,9 @@ describe("dynamic authorization", () => {
     expect(await has(userId, "food", ["publish"])).toBe(false);
 
     await appRuntime.runPromise(
-      Effect.flatMap(RoleService, (service) => service.removeRole(owner, uid(userId), rid(first))),
+      Effect.flatMap(RoleService, (service) =>
+        service.removeRole(owner, uid(userId), rid(first), testAudit),
+      ),
     );
 
     expect(await has(userId, "food", ["update"])).toBe(false);
@@ -217,7 +434,7 @@ describe("dynamic authorization", () => {
 
     const modDenied = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(actorOf(moderatorId), rid("moderator"), ["user:ban"]),
+        service.setRoleGrants(actorOf(moderatorId), rid("moderator"), ["user:ban"], testAudit),
       ),
     );
 
@@ -225,7 +442,7 @@ describe("dynamic authorization", () => {
 
     const supDenied = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.assignRole(actorOf(supportId), uid(moderatorId), rid("admin")),
+        service.assignRole(actorOf(supportId), uid(moderatorId), rid("admin"), testAudit),
       ),
     );
 
@@ -246,24 +463,28 @@ describe("dynamic authorization", () => {
 
     const juniorRole = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(owner, {
-          slug: roleSlug("junior-admin"),
-          name: "Junior",
-          description: "",
-          color: "#000000",
-          position: 31,
-        }),
+        service.createRole(
+          owner,
+          {
+            slug: roleSlug("junior-admin"),
+            name: "Junior",
+            description: "",
+            color: "#000000",
+            position: 31,
+          },
+          testAudit,
+        ),
       ),
     );
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(juniorRole.id), [
-          "role:update",
-          "role:assign",
-          "role:manage-permissions",
-          "user:ban",
-        ]),
+        service.setRoleGrants(
+          owner,
+          rid(juniorRole.id),
+          ["role:update", "role:assign", "role:manage-permissions", "user:ban"],
+          testAudit,
+        ),
       ),
     );
     await grant(juniorRole.id, juniorId);
@@ -273,25 +494,29 @@ describe("dynamic authorization", () => {
 
     const created = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(owner, {
-          slug,
-          name: "Limited",
-          description: "",
-          color: "#000000",
-          position: 30,
-        }),
+        service.createRole(
+          owner,
+          {
+            slug,
+            name: "Limited",
+            description: "",
+            color: "#000000",
+            position: 30,
+          },
+          testAudit,
+        ),
       ),
     );
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(created.id), ["user:ban"]),
+        service.setRoleGrants(owner, rid(created.id), ["user:ban"], testAudit),
       ),
     );
 
     const overreach = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(junior, rid(created.id), ["user:ban", "admin:access"]),
+        service.setRoleGrants(junior, rid(created.id), ["user:ban", "admin:access"], testAudit),
       ),
     );
 
@@ -299,7 +524,7 @@ describe("dynamic authorization", () => {
 
     const allowed = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(junior, rid(created.id), ["user:ban"]),
+        service.setRoleGrants(junior, rid(created.id), ["user:ban"], testAudit),
       ).pipe(Effect.as(true)),
     );
 
@@ -316,14 +541,14 @@ describe("dynamic authorization", () => {
     const pleb = actorOf(plebId);
 
     const deleteProtected = await appRuntime.runPromiseExit(
-      Effect.flatMap(RoleService, (service) => service.deleteRole(pleb, rid("owner"))),
+      Effect.flatMap(RoleService, (service) => service.deleteRole(pleb, rid("owner"), testAudit)),
     );
 
     expect(deleteProtected._tag).toBe("Failure");
 
     const removeProtected = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.removeRole(pleb, uid(ownerId), rid("owner")),
+        service.removeRole(pleb, uid(ownerId), rid("owner"), testAudit),
       ),
     );
 
@@ -340,7 +565,7 @@ describe("dynamic authorization", () => {
 
     const lastOwnerGuard = await appRuntime.runPromiseExit(
       Effect.flatMap(RoleService, (service) =>
-        service.removeRole(owner, uid(ownerId), rid("owner")),
+        service.removeRole(owner, uid(ownerId), rid("owner"), testAudit),
       ),
     );
 
@@ -373,23 +598,28 @@ describe("dynamic authorization", () => {
 
     const guardRole = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(setup, {
-          slug: roleSlug("guard"),
-          name: "Race Guard",
-          description: "",
-          color: "#000000",
-          position: 60,
-        }),
+        service.createRole(
+          setup,
+          {
+            slug: roleSlug("guard"),
+            name: "Race Guard",
+            description: "",
+            color: "#000000",
+            position: 60,
+          },
+          testAudit,
+        ),
       ),
     );
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(setup, rid(guardRole.id), [
-          "role:update",
-          "role:assign",
-          "role:manage-protected",
-        ]),
+        service.setRoleGrants(
+          setup,
+          rid(guardRole.id),
+          ["role:update", "role:assign", "role:manage-protected"],
+          testAudit,
+        ),
       ),
     );
 
@@ -399,7 +629,7 @@ describe("dynamic authorization", () => {
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.removeRole(setup, uid(setupId), rid("owner")),
+        service.removeRole(setup, uid(setupId), rid("owner"), testAudit),
       ),
     );
 
@@ -427,7 +657,7 @@ describe("dynamic authorization", () => {
       const outcomes = await Promise.all([
         appRuntime.runPromise(
           Effect.flatMap(RoleService, (service) =>
-            service.removeRole(actor, uid(ownerA), rid("owner")),
+            service.removeRole(actor, uid(ownerA), rid("owner"), testAudit),
           ).pipe(
             Effect.as(true),
             Effect.catchTag("LastOwnerRemovalDenied", () => Effect.succeed(false)),
@@ -435,7 +665,7 @@ describe("dynamic authorization", () => {
         ),
         appRuntime.runPromise(
           Effect.flatMap(RoleService, (service) =>
-            service.removeRole(actor, uid(ownerB), rid("owner")),
+            service.removeRole(actor, uid(ownerB), rid("owner"), testAudit),
           ).pipe(
             Effect.as(true),
             Effect.catchTag("LastOwnerRemovalDenied", () => Effect.succeed(false)),
@@ -501,12 +731,16 @@ describe("dynamic authorization", () => {
     try {
       // E is not the last active owner (D is active), so banning succeeds.
       await appRuntime.runPromise(
-        Effect.flatMap(UserAdminService, (service) => service.banUser(actor, uid(ownerE), "probe")),
+        Effect.flatMap(UserAdminService, (service) =>
+          service.banUser(actor, uid(ownerE), "probe", testAudit),
+        ),
       );
 
       // D is now the last active owner: banning D must fail.
       const denied = await appRuntime.runPromiseExit(
-        Effect.flatMap(UserAdminService, (service) => service.banUser(actor, uid(ownerD), "probe")),
+        Effect.flatMap(UserAdminService, (service) =>
+          service.banUser(actor, uid(ownerD), "probe", testAudit),
+        ),
       );
 
       expect(denied._tag).toBe("Failure");
@@ -518,7 +752,9 @@ describe("dynamic authorization", () => {
       expect(stillActive).toBe(BigInt(1));
 
       await appRuntime.runPromise(
-        Effect.flatMap(UserAdminService, (service) => service.unbanUser(actor, uid(ownerE))),
+        Effect.flatMap(UserAdminService, (service) =>
+          service.unbanUser(actor, uid(ownerE), testAudit),
+        ),
       );
     } finally {
       const restore = new SQL(process.env.DATABASE_URL ?? "");
@@ -533,6 +769,107 @@ describe("dynamic authorization", () => {
     }
   });
 
+  test("revoking a protected account's sessions needs manage-protected", async () => {
+    const ownerId = await makeUser("revoke-owner");
+    await grant("owner", ownerId);
+
+    const adminId = await makeUser("revoke-admin");
+    await grant("admin", adminId);
+    const admin = actorOf(adminId);
+
+    // Administrators hold session:revoke-any but not role:manage-protected,
+    // so revoking an owner's sessions is denied at the target check.
+    const denied = await appRuntime.runPromiseExit(
+      Effect.flatMap(UserAdminService, (service) =>
+        service.revokeUserSessions(admin, uid(ownerId), testAudit),
+      ),
+    );
+
+    expect(denied._tag).toBe("Failure");
+
+    // Revoking an ordinary member's sessions still succeeds.
+    const memberId = await makeUser("revoke-member");
+
+    await appRuntime.runPromise(
+      Effect.flatMap(UserAdminService, (service) =>
+        service.revokeUserSessions(admin, uid(memberId), testAudit),
+      ),
+    );
+  });
+
+  test("a failed audit insert rolls the privileged mutation back", async () => {
+    const ownerId = await makeUser("audit-owner");
+    await grant("owner", ownerId);
+    const owner = actorOf(ownerId);
+
+    const created = await appRuntime.runPromise(
+      Effect.flatMap(RoleService, (service) =>
+        service.createRole(
+          owner,
+          {
+            slug: roleSlug("audit-target"),
+            name: "Audit Target",
+            description: "",
+            color: "#123456",
+            position: 80,
+          },
+          testAudit,
+        ),
+      ),
+    );
+
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+    const before = await sql<
+      Array<{ count: string }>
+    >`SELECT COUNT(*) AS count FROM feastjourney.role_permissions WHERE role_id = ${created.id}`;
+
+    // Inject an audit failure that the mutation cannot survive: a
+    // NOT VALID check constraint rejects every audit insert without
+    // scanning existing rows.
+    await sql`ALTER TABLE feastjourney.security_audit_events ADD CONSTRAINT audit_test_must_fail CHECK (false) NOT VALID`;
+
+    try {
+      const failed = await appRuntime.runPromiseExit(
+        Effect.flatMap(RoleService, (service) =>
+          service.setRoleGrants(owner, rid(created.id), ["food:update"], testAudit),
+        ),
+      );
+
+      expect(failed._tag).toBe("Failure");
+
+      const after = await sql<
+        Array<{ count: string }>
+      >`SELECT COUNT(*) AS count FROM feastjourney.role_permissions WHERE role_id = ${created.id}`;
+
+      expect(after[0]?.count).toBe(before[0]?.count);
+    } finally {
+      await sql`ALTER TABLE feastjourney.security_audit_events DROP CONSTRAINT audit_test_must_fail`;
+      await sql.end();
+    }
+
+    // The success case writes exactly one audit record for the mutation.
+    const audit = new SQL(process.env.DATABASE_URL ?? "");
+
+    const eventsBefore = await audit<
+      Array<{ count: string }>
+    >`SELECT COUNT(*) AS count FROM feastjourney.security_audit_events WHERE event = 'auth.role.permissions_changed' AND resource = ${`role:${created.id}`}`;
+
+    await appRuntime.runPromise(
+      Effect.flatMap(RoleService, (service) =>
+        service.setRoleGrants(owner, rid(created.id), ["food:update"], testAudit),
+      ),
+    );
+
+    const eventsAfter = await audit<
+      Array<{ count: string }>
+    >`SELECT COUNT(*) AS count FROM feastjourney.security_audit_events WHERE event = 'auth.role.permissions_changed' AND resource = ${`role:${created.id}`}`;
+
+    await audit.end();
+
+    expect(Number(eventsAfter[0]?.count ?? 0) - Number(eventsBefore[0]?.count ?? 0)).toBe(1);
+  });
+
   test("concurrent assignments of the same role are idempotent", async () => {
     const ownerId = await makeUser("owner7");
     await grant("owner", ownerId);
@@ -544,12 +881,12 @@ describe("dynamic authorization", () => {
     await Promise.all([
       appRuntime.runPromise(
         Effect.flatMap(RoleService, (service) =>
-          service.assignRole(owner, uid(userId), rid("curator")),
+          service.assignRole(owner, uid(userId), rid("curator"), testAudit),
         ),
       ),
       appRuntime.runPromise(
         Effect.flatMap(RoleService, (service) =>
-          service.assignRole(owner, uid(userId), rid("curator")),
+          service.assignRole(owner, uid(userId), rid("curator"), testAudit),
         ),
       ),
     ]);
@@ -574,13 +911,17 @@ describe("dynamic authorization", () => {
 
     const created = await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.createRole(owner, {
-          slug,
-          name: "Live",
-          description: "",
-          color: "#000000",
-          position: 40,
-        }),
+        service.createRole(
+          owner,
+          {
+            slug,
+            name: "Live",
+            description: "",
+            color: "#000000",
+            position: 40,
+          },
+          testAudit,
+        ),
       ),
     );
 
@@ -592,7 +933,7 @@ describe("dynamic authorization", () => {
 
     await appRuntime.runPromise(
       Effect.flatMap(RoleService, (service) =>
-        service.setRoleGrants(owner, rid(created.id), ["restaurant:verify"]),
+        service.setRoleGrants(owner, rid(created.id), ["restaurant:verify"], testAudit),
       ),
     );
 
