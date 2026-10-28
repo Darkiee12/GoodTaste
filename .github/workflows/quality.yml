@@ -30,8 +30,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
+      # Disposable CI-only values (fresh Postgres per run, test-only admin key).
       DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
       ADMIN_API_KEY: ci-only-admin-key
+      BETTER_AUTH_URL: http://localhost:3000
+      TRUSTED_PROXIES: ""
+      # Fill real values under Settings → Secrets and variables → Actions.
+      # Unset secrets arrive as empty strings and the test setup substitutes
+      # documented non-secret stubs (tests use an in-memory mail sender and
+      # never call real providers). `||=` in tests/integration/cleanup.ts
+      # means provided secrets always take precedence.
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      FACEBOOK_CLIENT_ID: ${{ secrets.FACEBOOK_CLIENT_ID }}
+      FACEBOOK_CLIENT_SECRET: ${{ secrets.FACEBOOK_CLIENT_SECRET }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
