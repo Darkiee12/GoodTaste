@@ -21,6 +21,16 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1, "SMTP_PASSWORD is required"),
   EMAIL_FROM: z.string().min(1, "EMAIL_FROM is required"),
   TRUSTED_PROXIES: z.string().default(""),
+  // Optional Muse ranking integration. Every MODEL_* field stays optional
+  // in both input and output so startup never depends on AI configuration
+  // and existing ServerEnv literals keep compiling; modelConfig() below
+  // applies the documented defaults at the use site.
+  MODEL_API_KEY: z.string().optional(),
+  MODEL_MODEL_ID: z.string().optional(),
+  MODEL_BASE_URL: z.string().optional(),
+  MODEL_TIMEOUT_MS: z.coerce.number().int().optional(),
+  MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
+  MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
@@ -36,4 +46,27 @@ export const serverEnv = (): ServerEnv => {
 /** Test-only escape hatch: reset the cached parse between cases. */
 export const resetServerEnvCache = (): void => {
   cached = undefined;
+};
+
+export interface ModelConfig {
+  readonly apiKey: string | undefined;
+  readonly modelId: string;
+  readonly baseUrl: string;
+  readonly timeoutMs: number;
+  readonly candidateLimit: number;
+  readonly outputLimit: number;
+}
+
+/** Documented defaults for the optional Muse ranking integration. */
+export const modelConfig = (): ModelConfig => {
+  const env = serverEnv();
+
+  return {
+    apiKey: env.MODEL_API_KEY,
+    modelId: env.MODEL_MODEL_ID ?? "muse-spark-1.3",
+    baseUrl: env.MODEL_BASE_URL ?? "https://api.meta.ai/v1",
+    timeoutMs: env.MODEL_TIMEOUT_MS ?? 15000,
+    candidateLimit: env.MODEL_CANDIDATE_LIMIT ?? 60,
+    outputLimit: env.MODEL_OUTPUT_LIMIT ?? 10,
+  };
 };

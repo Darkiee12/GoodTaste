@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 
+import type { DishStatus } from "@/modules/food-discovery/server/domain/ids";
 import adminDishesByStatus from "@/modules/food-discovery/server/repository/sql/admin-dishes-by-status.sql";
 import adminDishesMissingIngredientsCount from "@/modules/food-discovery/server/repository/sql/admin-dishes-missing-ingredients-count.sql";
 import adminDishesRecent from "@/modules/food-discovery/server/repository/sql/admin-dishes-recent.sql";
@@ -45,11 +46,11 @@ export class DishRepository extends Context.Service<
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
     readonly listByStatus: (
-      status: string,
+      status: DishStatus,
       cursor: bigint,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
-    readonly countByStatus: (status: string) => Effect.Effect<number, DatabaseError, Database>;
+    readonly countByStatus: (status: DishStatus) => Effect.Effect<number, DatabaseError, Database>;
     readonly missingIngredientsCount: () => Effect.Effect<number, DatabaseError, Database>;
     readonly recentAdminDishes: (
       limit: number,

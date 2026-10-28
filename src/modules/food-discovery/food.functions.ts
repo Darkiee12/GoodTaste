@@ -4,14 +4,25 @@ import {
   dishDetailParamsSchema,
   dishSearchQuerySchema,
   nameSearchQuerySchema,
+  recommendationQuerySchema,
   relatedQuerySchema,
 } from "@/modules/food-discovery/food.schema";
+import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 
 const loadServer = () =>
   Promise.all([
     import("effect"),
     import("@/modules/food-discovery/server/operations/dish-service"),
     import("@/modules/food-discovery/server/operations/catalog-service"),
+    import("@/server/auth/actor"),
+    import("@/server/auth/current-actor"),
+    import("@/server/runtime"),
+  ]);
+
+const loadRecommendServer = () =>
+  Promise.all([
+    import("effect"),
+    import("@/modules/food-discovery/server/operations/recommendation-service"),
     import("@/server/auth/actor"),
     import("@/server/auth/current-actor"),
     import("@/server/runtime"),
@@ -125,3 +136,65 @@ export const listCategoriesFn = createServerFn({ method: "GET" }).handler(async 
     "server-fn",
   );
 });
+
+/**
+ * Public dish recommendations: deterministic baseline, optionally re-ranked
+ * by Muse when MODEL_API_KEY is configured. No authentication needed.
+ * The outcome envelope always returns HTTP 200; empty pools and
+ * unresolvable allergies are honest outcomes, not errors.
+ */
+export const recommendDishesFn = createServerFn({ method: "POST" })
+  .validator(recommendationQuerySchema)
+  .handler(async ({ data }) => {
+    const [
+      effects,
+      { RecommendationService, RecommendationOutcome },
+      { Actor },
+      { withActor },
+      { runApp },
+    ] = await loadRecommendServer();
+
+    const noDishes: Array<DishSummary> = [];
+    const noNotes: Array<string> = [];
+
+    const outcome = await runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(RecommendationService, (service) =>
+          service.recommend({
+            meal: data.meal,
+            avoid: data.avoid,
+            allergies: data.allergies,
+            cuisine: data.cuisine,
+            country: data.country,
+            mood: data.mood,
+            locale: data.locale,
+          }),
+        ),
+      ),
+      "fn/dishes/recommend",
+      30000,
+      "server-fn",
+    );
+
+    return RecommendationOutcome.$match(outcome, {
+      Ready: ({ dishes, mode, warnings }) => ({
+        mode,
+        dishes: [...dishes],
+        warnings: [...warnings],
+        reasons: noNotes,
+      }),
+      Uncertain: ({ reasons }) => ({
+        mode: "uncertain" as const,
+        dishes: noDishes,
+        warnings: noNotes,
+        reasons: [...reasons],
+      }),
+      Empty: ({ reasons }) => ({
+        mode: "empty" as const,
+        dishes: noDishes,
+        warnings: noNotes,
+        reasons: [...reasons],
+      }),
+    });
+  });
