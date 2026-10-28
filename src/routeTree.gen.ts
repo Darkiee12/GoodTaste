@@ -10,17 +10,25 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminDishesRouteImport } from './routes/admin.dishes'
+import { Route as AdminImportsRouteImport } from './routes/admin.imports'
+import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as HealthLiveRouteImport } from './routes/health.live'
 import { Route as HealthReadyRouteImport } from './routes/health.ready'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
+import { Route as AdminDishesDishIdRouteImport } from './routes/admin.dishes.$dishId'
+import { Route as AdminImportsJobIdRouteImport } from './routes/admin.imports.$jobId'
+import { Route as AdminImportsNewRouteImport } from './routes/admin.imports.new'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiV1CategoriesRouteImport } from './routes/api/v1/categories'
 import { Route as ApiV1CuisinesRouteImport } from './routes/api/v1/cuisines'
@@ -53,6 +61,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
@@ -78,15 +91,35 @@ const VerifyEmailRoute = VerifyEmailRouteImport.update({
   path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDishesRoute = AdminDishesRouteImport.update({
+  id: '/dishes',
+  path: '/dishes',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminImportsRoute = AdminImportsRouteImport.update({
+  id: '/imports',
+  path: '/imports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReviewsRoute = AdminReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminRolesRoute = AdminRolesRouteImport.update({
-  id: '/admin/roles',
-  path: '/admin/roles',
-  getParentRoute: () => rootRouteImport,
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
-  id: '/admin/users',
-  path: '/admin/users',
-  getParentRoute: () => rootRouteImport,
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AdminRoute,
 } as any)
 const HealthLiveRoute = HealthLiveRouteImport.update({
   id: '/health/live',
@@ -107,6 +140,21 @@ const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
   id: '/settings/security',
   path: '/settings/security',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminDishesDishIdRoute = AdminDishesDishIdRouteImport.update({
+  id: '/$dishId',
+  path: '/$dishId',
+  getParentRoute: () => AdminDishesRoute,
+} as any)
+const AdminImportsJobIdRoute = AdminImportsJobIdRouteImport.update({
+  id: '/$jobId',
+  path: '/$jobId',
+  getParentRoute: () => AdminImportsRoute,
+} as any)
+const AdminImportsNewRoute = AdminImportsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AdminImportsRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
@@ -249,17 +297,25 @@ const ApiV1AdminDishesIdStatusRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -294,12 +350,19 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/admin': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -330,17 +393,25 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -372,17 +443,25 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/forgot-password'
     | '/reset-password'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
     | '/settings/security'
+    | '/admin/'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -417,12 +496,19 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
     | '/settings/security'
+    | '/admin'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -452,17 +538,25 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/forgot-password'
     | '/reset-password'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
     | '/settings/security'
+    | '/admin/'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -493,13 +587,12 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
-  AdminRolesRoute: typeof AdminRolesRoute
-  AdminUsersRoute: typeof AdminUsersRoute
   HealthLiveRoute: typeof HealthLiveRoute
   HealthReadyRoute: typeof HealthReadyRoute
   SettingsAccountRoute: typeof SettingsAccountRoute
@@ -524,6 +617,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -561,19 +661,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VerifyEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/dishes': {
+      id: '/admin/dishes'
+      path: '/dishes'
+      fullPath: '/admin/dishes'
+      preLoaderRoute: typeof AdminDishesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/imports': {
+      id: '/admin/imports'
+      path: '/imports'
+      fullPath: '/admin/imports'
+      preLoaderRoute: typeof AdminImportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reviews': {
+      id: '/admin/reviews'
+      path: '/reviews'
+      fullPath: '/admin/reviews'
+      preLoaderRoute: typeof AdminReviewsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/roles': {
       id: '/admin/roles'
-      path: '/admin/roles'
+      path: '/roles'
       fullPath: '/admin/roles'
       preLoaderRoute: typeof AdminRolesRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/admin/users': {
       id: '/admin/users'
-      path: '/admin/users'
+      path: '/users'
       fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/health/live': {
       id: '/health/live'
@@ -602,6 +730,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/security'
       preLoaderRoute: typeof SettingsSecurityRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/admin/dishes/$dishId': {
+      id: '/admin/dishes/$dishId'
+      path: '/$dishId'
+      fullPath: '/admin/dishes/$dishId'
+      preLoaderRoute: typeof AdminDishesDishIdRouteImport
+      parentRoute: typeof AdminDishesRoute
+    }
+    '/admin/imports/$jobId': {
+      id: '/admin/imports/$jobId'
+      path: '/$jobId'
+      fullPath: '/admin/imports/$jobId'
+      preLoaderRoute: typeof AdminImportsJobIdRouteImport
+      parentRoute: typeof AdminImportsRoute
+    }
+    '/admin/imports/new': {
+      id: '/admin/imports/new'
+      path: '/new'
+      fullPath: '/admin/imports/new'
+      preLoaderRoute: typeof AdminImportsNewRouteImport
+      parentRoute: typeof AdminImportsRoute
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -788,6 +937,52 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AdminDishesRouteChildren {
+  AdminDishesDishIdRoute: typeof AdminDishesDishIdRoute
+}
+
+const AdminDishesRouteChildren: AdminDishesRouteChildren = {
+  AdminDishesDishIdRoute: AdminDishesDishIdRoute,
+}
+
+const AdminDishesRouteWithChildren = AdminDishesRoute._addFileChildren(
+  AdminDishesRouteChildren,
+)
+
+interface AdminImportsRouteChildren {
+  AdminImportsJobIdRoute: typeof AdminImportsJobIdRoute
+  AdminImportsNewRoute: typeof AdminImportsNewRoute
+}
+
+const AdminImportsRouteChildren: AdminImportsRouteChildren = {
+  AdminImportsJobIdRoute: AdminImportsJobIdRoute,
+  AdminImportsNewRoute: AdminImportsNewRoute,
+}
+
+const AdminImportsRouteWithChildren = AdminImportsRoute._addFileChildren(
+  AdminImportsRouteChildren,
+)
+
+interface AdminRouteChildren {
+  AdminDishesRoute: typeof AdminDishesRouteWithChildren
+  AdminImportsRoute: typeof AdminImportsRouteWithChildren
+  AdminReviewsRoute: typeof AdminReviewsRoute
+  AdminRolesRoute: typeof AdminRolesRoute
+  AdminUsersRoute: typeof AdminUsersRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminDishesRoute: AdminDishesRouteWithChildren,
+  AdminImportsRoute: AdminImportsRouteWithChildren,
+  AdminReviewsRoute: AdminReviewsRoute,
+  AdminRolesRoute: AdminRolesRoute,
+  AdminUsersRoute: AdminUsersRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 interface ApiV1DishesIdRouteChildren {
   ApiV1DishesIdRelatedRoute: typeof ApiV1DishesIdRelatedRoute
 }
@@ -887,13 +1082,12 @@ const ApiV1AdminDishesRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   VerifyEmailRoute: VerifyEmailRoute,
-  AdminRolesRoute: AdminRolesRoute,
-  AdminUsersRoute: AdminUsersRoute,
   HealthLiveRoute: HealthLiveRoute,
   HealthReadyRoute: HealthReadyRoute,
   SettingsAccountRoute: SettingsAccountRoute,
