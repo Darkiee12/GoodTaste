@@ -106,3 +106,58 @@ describe("csvToRecords existing behaviors", () => {
     expect(() => csvToRecords("name,places\n,VN\n")).toThrow('row 2: "name" is required');
   });
 });
+
+describe("csvToRecords strict validation", () => {
+  test("rejects exact duplicate headers naming the column", () => {
+    expect(() => csvToRecords("name,name\nPho,Bun\n")).toThrow('duplicate CSV column "name"');
+  });
+
+  test("rejects case-variant duplicates after trimming", () => {
+    expect(() => csvToRecords("Name,NAME\nPho,Bun\n")).toThrow('duplicate CSV column "name"');
+
+    expect(() => csvToRecords(" name , Name \nPho,Bun\n")).toThrow('duplicate CSV column "name"');
+  });
+
+  test("rejects short rows naming the spreadsheet row", () => {
+    expect(() => csvToRecords("name,places\nPho\n")).toThrow(
+      "row 2: expected 2 columns but found 1",
+    );
+
+    expect(() => csvToRecords("name,places\nPho,VN\nBun\n")).toThrow(
+      "row 3: expected 2 columns but found 1",
+    );
+  });
+
+  test("rejects long rows with extra unescaped commas instead of truncating", () => {
+    expect(() => csvToRecords("name,places\nPho,VN,extra\n")).toThrow(
+      "row 2: expected 2 columns but found 3",
+    );
+  });
+
+  test("rejects stray quotes mid-field", () => {
+    expect(() => csvToRecords('name\nab"cd\n')).toThrow("row 2: invalid quote placement");
+  });
+
+  test("rejects closing quotes not followed by a delimiter", () => {
+    expect(() => csvToRecords('name\n"abc"def\n')).toThrow("row 2: invalid quote placement");
+  });
+
+  test("rejects unterminated quoted fields", () => {
+    expect(() => csvToRecords('name\n"abc\n')).toThrow("unterminated quoted field");
+  });
+
+  test("keeps quoted commas, newlines, and escaped quotes legal", () => {
+    const records = csvToRecords('name,description\n"Pho, tasty","line1\nline2"\n');
+
+    expect(records.length).toBe(1);
+
+    const serialized = JSON.stringify(records[0]);
+
+    expect(serialized).toContain("Pho, tasty");
+    expect(serialized).toContain("line1\\nline2");
+
+    const escaped = csvToRecords('name\n"a""b"\n');
+
+    expect(JSON.stringify(escaped[0])).toContain('a\\"b');
+  });
+});

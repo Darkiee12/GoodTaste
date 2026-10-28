@@ -319,7 +319,9 @@ describe("admin import journey", () => {
 
     expect(sources.length).toBeGreaterThanOrEqual(1);
     expect(sources[0]?.provider).toBe("other");
-    expect(sources[0]?.external_id).toBe(appliedRow?.external_ref);
+    // Slugless records use job-relative refs, so provenance scopes them
+    // with the job id (`<jobId>:record-N`); slugged records reuse the slug.
+    expect(sources[0]?.external_id).toBe(`${report.jobId}:${appliedRow?.external_ref}`);
     expect(sources[0]?.license).toBe("other:unknown");
   });
 
