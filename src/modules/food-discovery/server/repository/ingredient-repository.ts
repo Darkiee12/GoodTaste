@@ -13,10 +13,6 @@ export type IngredientRow = (typeof ingredientFindById)["~reylo"]["element"];
 
 export type IngredientNameRow = (typeof ingredientNamesByIngredientIds)["~reylo"]["element"];
 
-export interface IngredientRecord {
-  readonly id: bigint;
-}
-
 export class IngredientRepository extends Context.Service<
   IngredientRepository,
   {
@@ -30,9 +26,7 @@ export class IngredientRepository extends Context.Service<
       DatabaseError,
       Database
     >;
-    readonly findById: (
-      id: bigint,
-    ) => Effect.Effect<IngredientRecord | null, DatabaseError, Database>;
+    readonly findById: (id: bigint) => Effect.Effect<IngredientRow | null, DatabaseError, Database>;
     readonly namesByIngredientIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<IngredientNameRow>, DatabaseError, Database>;
@@ -45,7 +39,7 @@ export class IngredientRepository extends Context.Service<
       DatabaseError,
       Database
     >;
-    readonly insert: () => Effect.Effect<IngredientRecord, DatabaseError, Database>;
+    readonly insert: () => Effect.Effect<IngredientRow, DatabaseError, Database>;
   }
 >()("feastjourney/food-discovery/IngredientRepository") {}
 
@@ -67,11 +61,7 @@ export const IngredientRepositoryLive = Layer.succeed(IngredientRepository, {
         ingredientFindById.run(sql, { id }),
       );
 
-      if (row === null) {
-        return null;
-      }
-
-      return { id: row.id };
+      return row;
     }),
   namesByIngredientIds: (ids) =>
     Effect.gen(function* () {
@@ -109,6 +99,6 @@ export const IngredientRepositoryLive = Layer.succeed(IngredientRepository, {
         return yield* classifyDatabaseError("ingredient/insert", outcome.error.cause);
       }
 
-      return { id: outcome.value.id };
+      return outcome.value;
     }),
 });

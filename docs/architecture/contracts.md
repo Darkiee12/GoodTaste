@@ -59,6 +59,8 @@ Before implementing a public operation, specify:
 
 Define multi-case domain outcomes with Effect's `Data.TaggedEnum` (or `Schema.TaggedUnion` where true codec support is necessary) rather than arbitrary stringly typed `kind` payloads. Use `Data.TaggedError`/`Schema.TaggedError` for typed failures and `Effect.catchTag` at appropriate boundaries. A trusted `Actor` is provided from the verified session, never a decoded client choice. See [domain modeling](domain-modeling.md) and [access control](access-control.md).
 
+Public recommendation outcomes (`Ready` with dishes + ranking mode, `Uncertain`, `Empty`) follow the same rule: the service returns the tagged union and the transport maps it to `{mode, dishes, warnings, reasons}`. The `mode` field tells clients exactly which path produced the result (`ai`, `deterministic`, `uncertain`, `empty`) — a deterministic fallback is never labeled as AI output.
+
 Do not expose raw SQL/driver exceptions through RPC. Translate expected Effect failures to client-safe outcomes at the transport edge.
 
 Database contracts: Flyway owns all ordered DDL in `db/migrations/`; every domain owns its Reylo query files under `server/repository/sql/`. Typed query results do not replace business invariants or evidence provenance checks. Read `docs/architecture/persistence.md` before adding database layers or a repository facade.
