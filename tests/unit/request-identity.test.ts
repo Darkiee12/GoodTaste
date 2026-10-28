@@ -36,4 +36,21 @@ describe("recommendation rate-limit identity", () => {
   test("falls back to direct when no forwarding header is present", () => {
     expect(resolveIdentityFromHeaders(new Headers(), configWithProxies)).toBe("net:direct");
   });
+
+  test("two distinct clients stay isolated behind trusted proxies, share one budget otherwise", () => {
+    const alice = new Headers({ "x-forwarded-for": "203.0.113.7" });
+    const bob = new Headers({ "x-forwarded-for": "198.51.100.9" });
+
+    // Supported deployment (trusted proxy strips/spoof-protects XFF):
+    // distinct IPs get distinct identities, so one client's burst cannot
+    // exhaust the other's quota.
+    expect(resolveIdentityFromHeaders(alice, configWithProxies)).not.toBe(
+      resolveIdentityFromHeaders(bob, configWithProxies),
+    );
+
+    // Direct deployment without trusted proxies: every client collapses to
+    // the single honest global budget documented in recommendations.md.
+    expect(resolveIdentityFromHeaders(alice, baseConfig)).toBe("net:direct");
+    expect(resolveIdentityFromHeaders(bob, baseConfig)).toBe("net:direct");
+  });
 });

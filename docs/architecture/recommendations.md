@@ -27,9 +27,11 @@ offline (shape only).
 ```text
 preferences (Zod enums shared with the UI via recommendation.constants.ts)
   |
-  +--> rate-limit budget ("search" bucket, per-client identity from
-  |     trusted-proxy-aware headers; over budget -> HTTP 429 with
-  |     Retry-After, provider never called)
+  +--> rate-limit budget ("search" bucket; identity is per-client IP
+  |     only when TRUSTED_PROXIES is configured — otherwise all direct
+  |     traffic shares one global budget, which is the honest enforced
+  |     limit; over budget -> HTTP 429 with Retry-After, provider never
+  |     called)
   v
 exclusion resolution (IngredientRepository.resolveByKey)
   |  ANY allergy term present -> Uncertain (no allergy filtering: the
@@ -44,7 +46,9 @@ LIMIT param)
   |  zero rows -> Empty (with reasons)
   v
 deterministic rank (cuisine +2, meal category +1; mood has no catalog
-signal and only reaches the Muse prompt) with cap 10
+signal and only reaches the Muse prompt) with cap 10, then Surprise
+rotation when `surpriseSeed > 0` (stable order at seed 0; nonzero seeds
+rotate the ranked slice — same eligible pool, varied order, honest note)
   |
   +--> deterministic / no key -> ReadyDeterministic
   |

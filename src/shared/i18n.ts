@@ -11,6 +11,18 @@ export const localeSearchSchema = z.object({
   lang: z.enum(locales).catch("en"),
 });
 
+/**
+ * Fully supported UI locales. English and Vietnamese have complete,
+ * reviewed translations; Hindi, Spanish, and Chinese retain genuine
+ * translations for the homepage globe but fall back to English for
+ * authentication, recommendation, settings, and admin flows. Only fully
+ * supported locales are advertised in the language menu — the others
+ * remain parseable for backwards-compatible links but render English
+ * fallback copy (tracked for future review, never machine-translated
+ * dietary facts).
+ */
+export const displayLocales: ReadonlyArray<Locale> = ["en", "vi"];
+
 export const fallbackLocaleName = "English";
 
 export const localeNames: ReadonlyMap<Locale, string> = new Map<Locale, string>([
@@ -334,8 +346,8 @@ const english = {
   recRegionCuisine: "By cuisine",
   recRegionCountry: "By country",
   recCuisineLabel: "Cuisine",
-  recCountryLabel: "Country code",
-  recCountryPlaceholder: "e.g. VN, JP, FR",
+  recCountryLabel: "Country",
+  recCountryPlaceholder: "Choose a country…",
   recCountryError: "Use a 2-letter uppercase ISO code, for example VN.",
   recCuisineError: "Choose a cuisine.",
   recMoodLegend: "What kind of mood?",
@@ -383,6 +395,10 @@ const english = {
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  recQuick: "Find dishes now",
+  recQuickNote:
+    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
+  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -394,6 +410,48 @@ const english = {
   dishCuisines: "Cuisines",
   dishCategories: "Categories",
   dishPlaces: "Associated places",
+  dishIngredients: "Ingredients",
+  dishSources: "Sources",
+  dishUpdated: "Last updated",
+  authSignInFailed: "Could not sign you in. Check your email and password, then try again.",
+  authSignUpFailed: "Could not create your account. Check the details and try again.",
+  authSocialFailed: "Social sign-in did not finish. Try again.",
+  commonRetry: "Try again",
+  authSigningIn: "Signing in…",
+  authCreatingAccount: "Creating your account…",
+  authForgotFailed: "Could not send the link. Check your connection and try again.",
+  authSending: "Sending…",
+  authSendAgain: "Send again",
+  authResetNoToken: "This reset link is missing its code. Request a new link below.",
+  authResetFailed: "That link did not work — it may have expired. Request a new link below.",
+  authRequestNewLink: "Request a new link",
+  authResetting: "Resetting…",
+  authResendFailed: "Could not resend the email. Try again.",
+  settingsSaving: "Saving…",
+  settingsSaveFailed: "Could not save your changes. Try again.",
+  settingsUnlinkConfirm:
+    "Remove this sign-in method? You will no longer be able to sign in with it.",
+  settingsUnlinkLastConfirm:
+    "This is your only sign-in method. Remove it anyway? Make sure you have another way to sign in.",
+  settingsUnlinkFailed: "Could not remove that method. Try again.",
+  settingsNoLinked: "No connected sign-in methods.",
+  commonConfirm: "Confirm",
+  commonCancel: "Cancel",
+  settingsSigningOut: "Signing out…",
+  settingsSignOutFailed: "Could not sign you out. Try again.",
+  authChanging: "Changing…",
+  securityRevokeFailed: "Could not sign out that device. Try again.",
+  securityRevokeOthersConfirm: "Sign out all other devices? You will stay signed in here.",
+  securityRevokeAllConfirm:
+    "Sign out everywhere, including this device? You will need to sign in again.",
+  securityRevokeOthersFailed: "Could not sign out the other devices. Try again.",
+  securityRevokeAllFailed: "Could not sign you out everywhere. Try again.",
+  adminRefresh: "Refresh list",
+  adminActionFailed: "That change did not save. Refresh the list and try again.",
+  adminBanConfirm: "Suspend this member? They will lose access until restored.",
+  adminRoleCreateFailed: "Could not create that role. Check the slug and try again.",
+  adminDeleteRoleConfirm:
+    "Delete this role? Members keep their other roles, but this cannot be undone.",
 };
 
 export type Messages = { [Key in keyof typeof english]: string };
@@ -703,8 +761,8 @@ const vietnamese: Messages = {
   recRegionCuisine: "Theo ẩm thực",
   recRegionCountry: "Theo quốc gia",
   recCuisineLabel: "Ẩm thực",
-  recCountryLabel: "Mã quốc gia",
-  recCountryPlaceholder: "vd: VN, JP, FR",
+  recCountryLabel: "Quốc gia",
+  recCountryPlaceholder: "Chọn một quốc gia…",
   recCountryError: "Nhập mã ISO gồm 2 chữ cái in hoa, ví dụ VN.",
   recCuisineError: "Hãy chọn một ẩm thực.",
   recMoodLegend: "Hôm nay muốn ăn kiểu gì?",
@@ -751,6 +809,10 @@ const vietnamese: Messages = {
   recClearPrefsConfirm: "Xóa sở thích đã lưu trên thiết bị này?",
   recClearPrefsYes: "Vâng, xóa",
   recClearPrefsNo: "Giữ lại",
+  recQuick: "Tìm món ngay",
+  recQuickNote:
+    "Một chạm: tìm với lựa chọn hiện tại. Dùng các bước bên dưới để chỉnh bữa ăn, kiêng kỵ, vùng hoặc tâm trạng.",
+  recSkip: "Bỏ qua",
   recRegionAssocNote:
     "Chúng tôi gợi ý món liên quan đến ẩm thực hoặc vùng — không nhất thiết là nơi khai sinh món đó.",
   recReviewRegionAssoc: "Liên quan đến",
@@ -762,6 +824,48 @@ const vietnamese: Messages = {
   dishCuisines: "Ẩm thực",
   dishCategories: "Danh mục",
   dishPlaces: "Địa điểm liên quan",
+  dishIngredients: "Nguyên liệu",
+  dishSources: "Nguồn",
+  dishUpdated: "Cập nhật lần cuối",
+  authSignInFailed: "Không thể đăng nhập. Kiểm tra email và mật khẩu rồi thử lại.",
+  authSignUpFailed: "Không thể tạo tài khoản. Kiểm tra lại thông tin rồi thử lại.",
+  authSocialFailed: "Đăng nhập qua mạng xã hội chưa hoàn tất. Thử lại.",
+  commonRetry: "Thử lại.",
+  authSigningIn: "Đang đăng nhập…",
+  authCreatingAccount: "Đang tạo tài khoản…",
+  authForgotFailed: "Không gửi được liên kết. Kiểm tra kết nối rồi thử lại.",
+  authSending: "Đang gửi…",
+  authSendAgain: "Gửi lại",
+  authResetNoToken: "Liên kết đặt lại thiếu mã xác nhận. Hãy yêu cầu liên kết mới bên dưới.",
+  authResetFailed:
+    "Liên kết này không dùng được — có thể đã hết hạn. Hãy yêu cầu liên kết mới bên dưới.",
+  authRequestNewLink: "Yêu cầu liên kết mới",
+  authResetting: "Đang đặt lại…",
+  authResendFailed: "Không gửi lại được email. Thử lại.",
+  settingsSaving: "Đang lưu…",
+  settingsSaveFailed: "Không lưu được thay đổi. Thử lại.",
+  settingsUnlinkConfirm:
+    "Gỡ phương thức đăng nhập này? Bạn sẽ không thể đăng nhập bằng phương thức đó nữa.",
+  settingsUnlinkLastConfirm:
+    "Đây là phương thức đăng nhập duy nhất của bạn. Vẫn gỡ? Hãy chắc bạn còn cách đăng nhập khác.",
+  settingsUnlinkFailed: "Không gỡ được phương thức này. Thử lại.",
+  settingsNoLinked: "Chưa kết nối phương thức đăng nhập nào.",
+  commonConfirm: "Xác nhận",
+  commonCancel: "Hủy",
+  settingsSigningOut: "Đang đăng xuất…",
+  settingsSignOutFailed: "Không thể đăng xuất. Thử lại.",
+  authChanging: "Đang đổi…",
+  securityRevokeFailed: "Không thể đăng xuất thiết bị đó. Thử lại.",
+  securityRevokeOthersConfirm: "Đăng xuất mọi thiết bị khác? Bạn vẫn đăng nhập ở đây.",
+  securityRevokeAllConfirm: "Đăng xuất mọi nơi, kể cả thiết bị này? Bạn sẽ phải đăng nhập lại.",
+  securityRevokeOthersFailed: "Không thể đăng xuất các thiết bị khác. Thử lại.",
+  securityRevokeAllFailed: "Không thể đăng xuất mọi nơi. Thử lại.",
+  adminRefresh: "Làm mới danh sách",
+  adminActionFailed: "Thay đổi chưa được lưu. Làm mới danh sách rồi thử lại.",
+  adminBanConfirm: "Tạm khóa thành viên này? Họ sẽ mất quyền truy cập cho đến khi được mở khóa.",
+  adminRoleCreateFailed: "Không tạo được vai trò này. Kiểm tra slug rồi thử lại.",
+  adminDeleteRoleConfirm:
+    "Xóa vai trò này? Thành viên giữ các vai trò còn lại, nhưng thao tác này không thể hoàn tác.",
 };
 
 const hindi: Messages = {
@@ -1072,8 +1176,8 @@ const hindi: Messages = {
   recRegionCuisine: "By cuisine",
   recRegionCountry: "By country",
   recCuisineLabel: "Cuisine",
-  recCountryLabel: "Country code",
-  recCountryPlaceholder: "e.g. VN, JP, FR",
+  recCountryLabel: "Country",
+  recCountryPlaceholder: "Choose a country…",
   recCountryError: "Use a 2-letter uppercase ISO code, for example VN.",
   recCuisineError: "Choose a cuisine.",
   recMoodLegend: "What kind of mood?",
@@ -1123,6 +1227,10 @@ const hindi: Messages = {
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  recQuick: "Find dishes now",
+  recQuickNote:
+    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
+  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -1134,6 +1242,48 @@ const hindi: Messages = {
   dishCuisines: "Cuisines",
   dishCategories: "Categories",
   dishPlaces: "Associated places",
+  dishIngredients: "Ingredients",
+  dishSources: "Sources",
+  dishUpdated: "Last updated",
+  authSignInFailed: "Could not sign you in. Check your email and password, then try again.",
+  authSignUpFailed: "Could not create your account. Check the details and try again.",
+  authSocialFailed: "Social sign-in did not finish. Try again.",
+  commonRetry: "Try again",
+  authSigningIn: "Signing in…",
+  authCreatingAccount: "Creating your account…",
+  authForgotFailed: "Could not send the link. Check your connection and try again.",
+  authSending: "Sending…",
+  authSendAgain: "Send again",
+  authResetNoToken: "This reset link is missing its code. Request a new link below.",
+  authResetFailed: "That link did not work — it may have expired. Request a new link below.",
+  authRequestNewLink: "Request a new link",
+  authResetting: "Resetting…",
+  authResendFailed: "Could not resend the email. Try again.",
+  settingsSaving: "Saving…",
+  settingsSaveFailed: "Could not save your changes. Try again.",
+  settingsUnlinkConfirm:
+    "Remove this sign-in method? You will no longer be able to sign in with it.",
+  settingsUnlinkLastConfirm:
+    "This is your only sign-in method. Remove it anyway? Make sure you have another way to sign in.",
+  settingsUnlinkFailed: "Could not remove that method. Try again.",
+  settingsNoLinked: "No connected sign-in methods.",
+  commonConfirm: "Confirm",
+  commonCancel: "Cancel",
+  settingsSigningOut: "Signing out…",
+  settingsSignOutFailed: "Could not sign you out. Try again.",
+  authChanging: "Changing…",
+  securityRevokeFailed: "Could not sign out that device. Try again.",
+  securityRevokeOthersConfirm: "Sign out all other devices? You will stay signed in here.",
+  securityRevokeAllConfirm:
+    "Sign out everywhere, including this device? You will need to sign in again.",
+  securityRevokeOthersFailed: "Could not sign out the other devices. Try again.",
+  securityRevokeAllFailed: "Could not sign you out everywhere. Try again.",
+  adminRefresh: "Refresh list",
+  adminActionFailed: "That change did not save. Refresh the list and try again.",
+  adminBanConfirm: "Suspend this member? They will lose access until restored.",
+  adminRoleCreateFailed: "Could not create that role. Check the slug and try again.",
+  adminDeleteRoleConfirm:
+    "Delete this role? Members keep their other roles, but this cannot be undone.",
 };
 
 const spanish: Messages = {
@@ -1445,8 +1595,8 @@ const spanish: Messages = {
   recRegionCuisine: "By cuisine",
   recRegionCountry: "By country",
   recCuisineLabel: "Cuisine",
-  recCountryLabel: "Country code",
-  recCountryPlaceholder: "e.g. VN, JP, FR",
+  recCountryLabel: "Country",
+  recCountryPlaceholder: "Choose a country…",
   recCountryError: "Use a 2-letter uppercase ISO code, for example VN.",
   recCuisineError: "Choose a cuisine.",
   recMoodLegend: "What kind of mood?",
@@ -1496,6 +1646,10 @@ const spanish: Messages = {
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  recQuick: "Find dishes now",
+  recQuickNote:
+    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
+  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -1507,6 +1661,48 @@ const spanish: Messages = {
   dishCuisines: "Cuisines",
   dishCategories: "Categories",
   dishPlaces: "Associated places",
+  dishIngredients: "Ingredients",
+  dishSources: "Sources",
+  dishUpdated: "Last updated",
+  authSignInFailed: "Could not sign you in. Check your email and password, then try again.",
+  authSignUpFailed: "Could not create your account. Check the details and try again.",
+  authSocialFailed: "Social sign-in did not finish. Try again.",
+  commonRetry: "Try again",
+  authSigningIn: "Signing in…",
+  authCreatingAccount: "Creating your account…",
+  authForgotFailed: "Could not send the link. Check your connection and try again.",
+  authSending: "Sending…",
+  authSendAgain: "Send again",
+  authResetNoToken: "This reset link is missing its code. Request a new link below.",
+  authResetFailed: "That link did not work — it may have expired. Request a new link below.",
+  authRequestNewLink: "Request a new link",
+  authResetting: "Resetting…",
+  authResendFailed: "Could not resend the email. Try again.",
+  settingsSaving: "Saving…",
+  settingsSaveFailed: "Could not save your changes. Try again.",
+  settingsUnlinkConfirm:
+    "Remove this sign-in method? You will no longer be able to sign in with it.",
+  settingsUnlinkLastConfirm:
+    "This is your only sign-in method. Remove it anyway? Make sure you have another way to sign in.",
+  settingsUnlinkFailed: "Could not remove that method. Try again.",
+  settingsNoLinked: "No connected sign-in methods.",
+  commonConfirm: "Confirm",
+  commonCancel: "Cancel",
+  settingsSigningOut: "Signing out…",
+  settingsSignOutFailed: "Could not sign you out. Try again.",
+  authChanging: "Changing…",
+  securityRevokeFailed: "Could not sign out that device. Try again.",
+  securityRevokeOthersConfirm: "Sign out all other devices? You will stay signed in here.",
+  securityRevokeAllConfirm:
+    "Sign out everywhere, including this device? You will need to sign in again.",
+  securityRevokeOthersFailed: "Could not sign out the other devices. Try again.",
+  securityRevokeAllFailed: "Could not sign you out everywhere. Try again.",
+  adminRefresh: "Refresh list",
+  adminActionFailed: "That change did not save. Refresh the list and try again.",
+  adminBanConfirm: "Suspend this member? They will lose access until restored.",
+  adminRoleCreateFailed: "Could not create that role. Check the slug and try again.",
+  adminDeleteRoleConfirm:
+    "Delete this role? Members keep their other roles, but this cannot be undone.",
 };
 
 const chinese: Messages = {
@@ -1816,8 +2012,8 @@ const chinese: Messages = {
   recRegionCuisine: "By cuisine",
   recRegionCountry: "By country",
   recCuisineLabel: "Cuisine",
-  recCountryLabel: "Country code",
-  recCountryPlaceholder: "e.g. VN, JP, FR",
+  recCountryLabel: "Country",
+  recCountryPlaceholder: "Choose a country…",
   recCountryError: "Use a 2-letter uppercase ISO code, for example VN.",
   recCuisineError: "Choose a cuisine.",
   recMoodLegend: "What kind of mood?",
@@ -1867,6 +2063,10 @@ const chinese: Messages = {
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  recQuick: "Find dishes now",
+  recQuickNote:
+    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
+  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -1878,6 +2078,48 @@ const chinese: Messages = {
   dishCuisines: "Cuisines",
   dishCategories: "Categories",
   dishPlaces: "Associated places",
+  dishIngredients: "Ingredients",
+  dishSources: "Sources",
+  dishUpdated: "Last updated",
+  authSignInFailed: "Could not sign you in. Check your email and password, then try again.",
+  authSignUpFailed: "Could not create your account. Check the details and try again.",
+  authSocialFailed: "Social sign-in did not finish. Try again.",
+  commonRetry: "Try again",
+  authSigningIn: "Signing in…",
+  authCreatingAccount: "Creating your account…",
+  authForgotFailed: "Could not send the link. Check your connection and try again.",
+  authSending: "Sending…",
+  authSendAgain: "Send again",
+  authResetNoToken: "This reset link is missing its code. Request a new link below.",
+  authResetFailed: "That link did not work — it may have expired. Request a new link below.",
+  authRequestNewLink: "Request a new link",
+  authResetting: "Resetting…",
+  authResendFailed: "Could not resend the email. Try again.",
+  settingsSaving: "Saving…",
+  settingsSaveFailed: "Could not save your changes. Try again.",
+  settingsUnlinkConfirm:
+    "Remove this sign-in method? You will no longer be able to sign in with it.",
+  settingsUnlinkLastConfirm:
+    "This is your only sign-in method. Remove it anyway? Make sure you have another way to sign in.",
+  settingsUnlinkFailed: "Could not remove that method. Try again.",
+  settingsNoLinked: "No connected sign-in methods.",
+  commonConfirm: "Confirm",
+  commonCancel: "Cancel",
+  settingsSigningOut: "Signing out…",
+  settingsSignOutFailed: "Could not sign you out. Try again.",
+  authChanging: "Changing…",
+  securityRevokeFailed: "Could not sign out that device. Try again.",
+  securityRevokeOthersConfirm: "Sign out all other devices? You will stay signed in here.",
+  securityRevokeAllConfirm:
+    "Sign out everywhere, including this device? You will need to sign in again.",
+  securityRevokeOthersFailed: "Could not sign out the other devices. Try again.",
+  securityRevokeAllFailed: "Could not sign you out everywhere. Try again.",
+  adminRefresh: "Refresh list",
+  adminActionFailed: "That change did not save. Refresh the list and try again.",
+  adminBanConfirm: "Suspend this member? They will lose access until restored.",
+  adminRoleCreateFailed: "Could not create that role. Check the slug and try again.",
+  adminDeleteRoleConfirm:
+    "Delete this role? Members keep their other roles, but this cannot be undone.",
 };
 
 export const messages: ReadonlyMap<Locale, Messages> = new Map<Locale, Messages>([

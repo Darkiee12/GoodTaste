@@ -1,8 +1,9 @@
 import { ClientOnly } from "@tanstack/react-router";
-import { Component, lazy, Suspense, useRef, type ReactNode } from "react";
+import { Component, lazy, Suspense, useRef, type ReactNode, type RefObject } from "react";
 
 import type { GlobeOverlayBridge } from "@/components/home/globe/geo-utils";
 import { GlobeFallback } from "@/components/home/globe/globe-fallback";
+import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { Locale, Messages } from "@/shared/i18n";
 
 const LazyGlobeScene = lazy(() =>
@@ -29,9 +30,40 @@ class GlobeErrorBoundary extends Component<
 }
 
 /**
- * SSR-safe globe slot: an empty slot on the server and while three.js loads
- * (the hero sky shows through honestly), WebGL on the client. The static
- * planet only appears when WebGL fails; reduced motion is handled in-scene.
+ * Client-only branch: the static planet for reduced motion (without ever
+ * downloading the WebGL chunk), WebGL with a static-planet loading slot and
+ * an error fallback otherwise. Runs inside ClientOnly so the first client
+ * render matches the server HTML.
+ */
+function GlobeContent({
+  copy,
+  lang,
+  bridgeRef,
+}: {
+  copy: Messages;
+  lang: Locale;
+  bridgeRef: RefObject<GlobeOverlayBridge>;
+}) {
+  const reducedMotion = usePrefersReducedMotion();
+  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
+
+  if (reducedMotion) {
+    return fallback;
+  }
+
+  return (
+    <GlobeErrorBoundary fallback={fallback}>
+      <Suspense fallback={fallback}>
+        <LazyGlobeScene copy={copy} lang={lang} bridgeRef={bridgeRef} />
+      </Suspense>
+    </GlobeErrorBoundary>
+  );
+}
+
+/**
+ * SSR-safe globe slot: an empty slot on the server, the static planet while
+ * three.js loads, WebGL on the client. WebGL failures fall back to the same
+ * static planet.
  */
 export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
   const bridgeRef = useRef<GlobeOverlayBridge>({
@@ -43,16 +75,10 @@ export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
     node: null,
   });
 
-  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
-
   return (
     <div className="hero-globe pointer-events-none absolute inset-0">
       <ClientOnly fallback={null}>
-        <GlobeErrorBoundary fallback={fallback}>
-          <Suspense fallback={null}>
-            <LazyGlobeScene copy={copy} lang={lang} bridgeRef={bridgeRef} />
-          </Suspense>
-        </GlobeErrorBoundary>
+        <GlobeContent copy={copy} lang={lang} bridgeRef={bridgeRef} />
       </ClientOnly>
     </div>
   );

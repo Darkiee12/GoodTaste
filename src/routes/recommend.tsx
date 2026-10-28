@@ -1,10 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
 import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
-import { listCuisinesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
+import {
+  listCuisinesFn,
+  listPlacesFn,
+  recommendDishesFn,
+} from "@/modules/food-discovery/food.functions";
 import {
   MEAL_OCCASIONS,
   RECOMMENDATION_MOODS,
@@ -58,10 +62,11 @@ export interface RecommendPayload {
   readonly meal: MealOccasion;
   readonly avoid: Array<string>;
   readonly allergies: Array<string>;
-  readonly cuisine: string | undefined;
-  readonly country: string | undefined;
+  readonly cuisine?: string | undefined;
+  readonly country?: string | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
+  readonly surpriseSeed: number;
 }
 
 export interface SurpriseInputs {
@@ -69,6 +74,7 @@ export interface SurpriseInputs {
   readonly meal: MealOccasion;
   readonly mood: RecommendationMood;
   readonly locale: string;
+  readonly surpriseSeed: number;
   readonly cuisineSlugs?: ReadonlyArray<string>;
 }
 
@@ -109,7 +115,9 @@ export const termLengthError = (
 };
 
 /** Client mirror of the server recommendation enums; undefined means "unfiltered". */
-export const buildRecommendPayload = (answers: RecommendAnswers): RecommendPayload => ({
+export const buildRecommendPayload = (
+  answers: RecommendAnswers & { readonly surpriseSeed?: number },
+): RecommendPayload => ({
   meal: answers.meal,
   avoid: [...answers.avoid],
   allergies: [...answers.allergies],
@@ -117,13 +125,15 @@ export const buildRecommendPayload = (answers: RecommendAnswers): RecommendPaylo
   country: answers.country,
   mood: answers.mood,
   locale: answers.locale,
+  surpriseSeed: answers.surpriseSeed ?? 0,
 });
 
 /**
  * Surprise keeps the visitor's current meal, mood, region, and exclusions;
  * only the sense of direction is "surprise". It never reads or writes
  * persisted preferences as a side effect — the draft already carries any
- * saved values via its initializer.
+ * saved values via its initializer. The seed rotates the ranked slice so
+ * repeated clicks vary; seed 0 keeps the stable deterministic order.
  */
 export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =>
   buildRecommendPayload({
@@ -134,6 +144,7 @@ export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =
     country: resolveCountry(inputs.draft.regionMode, inputs.draft.country),
     mood: inputs.mood,
     locale: inputs.locale,
+    surpriseSeed: inputs.surpriseSeed,
   });
 
 /** Validate the region step, returning a localized error or null when it passes. */
@@ -248,6 +259,68 @@ export const serializePrefs = (prefs: SavedRecommendPrefs): string => JSON.strin
 /** Invoke the storage remover; the caller resets the form separately. */
 export const removeSavedPrefs = (remove: () => void): void => {
   remove();
+};
+
+/**
+ * Tab-scoped journey snapshot: preserves the in-progress quiz (meal, mood,
+ * draft, step, submitted payload, results flag, surprise seed) across dish
+ * detail visits within the same tab. Session storage, never local storage:
+ * closing the tab forgets the journey, and no other tab or device sees it.
+ * Corruption or schema drift restores nothing; opt-in local prefs stay separate.
+ */
+const JOURNEY_KEY = "feastjourney.recommend.journey.v1";
+
+const journeySnapshotSchema = z.object({
+  meal: z.enum(MEAL_OCCASIONS).default("anything"),
+  mood: z.enum(RECOMMENDATION_MOODS).default("any"),
+  draft: z.object({
+    avoidRaw: z.string().max(500).default(""),
+    allergiesRaw: z.string().max(500).default(""),
+    regionMode: z.enum(["anywhere", "cuisine", "country"]).default("anywhere"),
+    cuisine: z.string().max(80).default(""),
+    country: z.string().max(12).default(""),
+    remember: z.boolean().default(false),
+  }),
+  stepIndex: z.number().int().min(0).max(4).default(0),
+  submitted: z
+    .object({
+      meal: z.enum(MEAL_OCCASIONS),
+      avoid: z.array(z.string().max(100)).max(20),
+      allergies: z.array(z.string().max(100)).max(20),
+      cuisine: z.string().max(80).optional(),
+      country: recCountrySchema.optional(),
+      mood: z.enum(RECOMMENDATION_MOODS),
+      locale: z.string().max(12),
+      surpriseSeed: z.number().int().min(0).default(0),
+    })
+    .nullable()
+    .default(null),
+  showResults: z.boolean().default(false),
+  surpriseSeed: z.number().int().min(0).default(0),
+});
+
+type JourneySnapshot = z.infer<typeof journeySnapshotSchema>;
+
+const readJourneySnapshot = (): JourneySnapshot | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(JOURNEY_KEY);
+
+    if (raw === null) {
+      return null;
+    }
+
+    // SAFETY: session storage holds our own JSON snapshot; unknown is
+    // validated by journeySnapshotSchema below, never trusted directly.
+    const result = journeySnapshotSchema.safeParse(JSON.parse(raw) as unknown);
+
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -372,14 +445,17 @@ function Recommend() {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
 
-  const [stepIndex, setStepIndex] = useState<number>(0);
-  const [showResults, setShowResults] = useState<boolean>(false);
-  const [draft, setDraft] = useState<QuizDraft>(readInitialDraft);
-  const [meal, setMeal] = useState<MealOccasion>("anything");
-  const [mood, setMood] = useState<RecommendationMood>("any");
+  const [journey] = useState<JourneySnapshot | null>(readJourneySnapshot);
+
+  const [stepIndex, setStepIndex] = useState<number>(journey?.stepIndex ?? 0);
+  const [showResults, setShowResults] = useState<boolean>(journey?.showResults ?? false);
+  const [draft, setDraft] = useState<QuizDraft>(journey?.draft ?? readInitialDraft());
+  const [meal, setMeal] = useState<MealOccasion>(journey?.meal ?? "anything");
+  const [mood, setMood] = useState<RecommendationMood>(journey?.mood ?? "any");
   const [stepError, setStepError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState<RecommendPayload | null>(null);
+  const [submitted, setSubmitted] = useState<RecommendPayload | null>(journey?.submitted ?? null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
+  const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
 
   const [hasSaved, setHasSaved] = useState<boolean>(() => {
     if (typeof window === "undefined") {
@@ -401,9 +477,70 @@ function Recommend() {
     [cuisines.data],
   );
 
+  const places = useQuery({
+    queryKey: ["catalog", "places", lang],
+    queryFn: () => listPlacesFn({ data: { locale: lang, limit: 100 } }),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const countryOptions = useMemo<ReadonlyArray<{ code: string; label: string }>>(
+    () =>
+      (places.data ?? [])
+        .flatMap((entry) =>
+          entry.iso3166 === null
+            ? []
+            : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
+        )
+        .toSorted((left, right) => left.label.localeCompare(right.label)),
+    [places.data],
+  );
+
   const recommend = useMutation({
     mutationFn: (payload: RecommendPayload) => recommendDishesFn({ data: payload }),
   });
+
+  const restoredRef = useRef(false);
+
+  // Persist the in-progress journey per tab so dish detail visits (back
+  // navigation remounts this route) restore form, step, and results context.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const snapshot: JourneySnapshot = {
+        meal,
+        mood,
+        draft,
+        stepIndex,
+        submitted,
+        showResults,
+        surpriseSeed,
+      };
+
+      window.sessionStorage.setItem(JOURNEY_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Storage full or blocked: the journey simply does not restore.
+    }
+  }, [meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed]);
+
+  // On remount with a restored results flag, re-run the submitted search once
+  // so results reflect fresh catalog data instead of stale snapshots.
+  useEffect(() => {
+    if (restoredRef.current) {
+      return;
+    }
+
+    restoredRef.current = true;
+
+    if (journey?.showResults === true && journey.submitted !== null) {
+      recommend.mutate(journey.submitted);
+    }
+    // Mount-only restore: the mutation object is stable for this purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     persistPrefs(remember, payload.avoid, payload.allergies, payload.cuisine, payload.country);
@@ -414,8 +551,15 @@ function Recommend() {
     recommend.mutate(payload);
   };
 
-  const currentPayload = (): RecommendPayload =>
-    buildSurprisePayload({ draft, meal, mood, locale: lang, cuisineSlugs: catalogSlugs });
+  const currentPayload = (seed: number): RecommendPayload =>
+    buildSurprisePayload({
+      draft,
+      meal,
+      mood,
+      locale: lang,
+      surpriseSeed: seed,
+      cuisineSlugs: catalogSlugs,
+    });
 
   const goNext = (): void => {
     if (stepIndex === 1) {
@@ -480,15 +624,19 @@ function Recommend() {
       return;
     }
 
-    startSearch(currentPayload(), draft.remember);
+    startSearch(currentPayload(0), draft.remember);
   };
 
   /**
    * Surprise keeps the current meal, mood, region, and exclusions and never
-   * touches saved preferences: no persist, no clear.
+   * touches saved preferences: no persist, no clear. Each click bumps a
+   * bounded seed so the server rotates the ranked slice — same eligible
+   * pool, visibly different order. Allergies still refuse before ranking.
    */
   const surprise = (): void => {
-    const payload = currentPayload();
+    const nextSeed = surpriseSeed + 1;
+    setSurpriseSeed(nextSeed);
+    const payload = currentPayload(nextSeed);
 
     setSubmitted(payload);
     setStepError(null);
@@ -500,6 +648,7 @@ function Recommend() {
   const clearSaved = (): void => {
     if (typeof window !== "undefined") {
       removeSavedPrefs(() => window.localStorage.removeItem(PREFS_KEY));
+      window.sessionStorage.removeItem(JOURNEY_KEY);
     }
 
     recommend.reset();
@@ -512,6 +661,7 @@ function Recommend() {
     setShowResults(false);
     setConfirmClear(false);
     setHasSaved(false);
+    setSurpriseSeed(0);
   };
 
   const retry = (): void => {
@@ -528,6 +678,10 @@ function Recommend() {
   };
 
   const startOver = (): void => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(JOURNEY_KEY);
+    }
+
     recommend.reset();
     setDraft(EMPTY_DRAFT);
     setMeal("anything");
@@ -537,6 +691,7 @@ function Recommend() {
     setStepIndex(0);
     setShowResults(false);
     setConfirmClear(false);
+    setSurpriseSeed(0);
   };
 
   const outcome: RecommendResult | null = recommend.data ?? null;
@@ -563,7 +718,7 @@ function Recommend() {
       </h1>
       <p className="mt-3 max-w-[60ch] text-lg text-muted">{copy.recIntro}</p>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
           onClick={surprise}
@@ -572,8 +727,17 @@ function Recommend() {
         >
           <SparklesIcon aria-hidden="true" className="size-5" /> {copy.recSurprise}
         </button>
-        <p className="mt-2 max-w-[60ch] text-sm text-muted">{copy.recSurpriseNote}</p>
+        <button
+          type="button"
+          onClick={findDishes}
+          disabled={recommend.isPending}
+          className="inline-flex min-h-12 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-6 text-base font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70"
+        >
+          {copy.recQuick}
+        </button>
       </div>
+      <p className="mt-2 max-w-[60ch] text-sm text-muted">{copy.recSurpriseNote}</p>
+      <p className="mt-1 max-w-[60ch] text-sm text-muted">{copy.recQuickNote}</p>
 
       <p
         aria-live="polite"
@@ -639,7 +803,7 @@ function Recommend() {
                       onChange={() => {
                         setMeal(option.value);
                       }}
-                      className="size-5 flex-none accent-[#c2410c]"
+                      className="size-5 flex-none accent-food-orange-strong"
                     />
                     {option.label}
                   </label>
@@ -715,7 +879,7 @@ function Recommend() {
                     onChange={() => {
                       setDraft({ ...draft, regionMode: "anywhere" });
                     }}
-                    className="size-5 flex-none accent-[#c2410c]"
+                    className="size-5 flex-none accent-food-orange-strong"
                   />
                   {copy.recRegionAnywhere}
                 </label>
@@ -728,7 +892,7 @@ function Recommend() {
                     onChange={() => {
                       setDraft({ ...draft, regionMode: "cuisine" });
                     }}
-                    className="size-5 flex-none accent-[#c2410c]"
+                    className="size-5 flex-none accent-food-orange-strong"
                   />
                   {copy.recRegionCuisine}
                 </label>
@@ -741,7 +905,7 @@ function Recommend() {
                     onChange={() => {
                       setDraft({ ...draft, regionMode: "country" });
                     }}
-                    className="size-5 flex-none accent-[#c2410c]"
+                    className="size-5 flex-none accent-food-orange-strong"
                   />
                   {copy.recRegionCountry}
                 </label>
@@ -802,19 +966,45 @@ function Recommend() {
                   <label htmlFor="rec-country" className="mb-2 block text-sm font-bold text-ink">
                     {copy.recCountryLabel}
                   </label>
-                  <input
-                    id="rec-country"
-                    type="text"
-                    autoComplete="off"
-                    autoCapitalize="characters"
-                    spellCheck={false}
-                    value={draft.country}
-                    placeholder={copy.recCountryPlaceholder}
-                    onChange={(event) => {
-                      setDraft({ ...draft, country: event.target.value });
-                    }}
-                    className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
-                  />
+                  {places.isPending ? (
+                    <output className="block text-sm text-muted">{copy.recCuisineLoading}</output>
+                  ) : null}
+                  {places.isError ? (
+                    <div>
+                      <p
+                        role="alert"
+                        className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                      >
+                        {copy.recCuisineLoadError}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void places.refetch();
+                        }}
+                        className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+                      >
+                        {copy.recRetry}
+                      </button>
+                    </div>
+                  ) : null}
+                  {places.data !== undefined ? (
+                    <select
+                      id="rec-country"
+                      value={draft.country}
+                      onChange={(event) => {
+                        setDraft({ ...draft, country: event.target.value });
+                      }}
+                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
+                    >
+                      <option value="">{copy.recCountryPlaceholder}</option>
+                      {countryOptions.map((entry) => (
+                        <option key={entry.code} value={entry.code}>
+                          {entry.label} · {entry.code}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                 </div>
               ) : null}
             </fieldset>
@@ -844,7 +1034,7 @@ function Recommend() {
                       onChange={() => {
                         setMood(option.value);
                       }}
-                      className="size-5 flex-none accent-[#c2410c]"
+                      className="size-5 flex-none accent-food-orange-strong"
                     />
                     {option.label}
                   </label>
@@ -888,7 +1078,7 @@ function Recommend() {
                   onChange={(event) => {
                     setDraft({ ...draft, remember: event.target.checked });
                   }}
-                  className="mt-0.5 size-5 flex-none accent-[#c2410c]"
+                  className="mt-0.5 size-5 flex-none accent-food-orange-strong"
                 />
                 <span>
                   {copy.recRemember}
@@ -955,6 +1145,24 @@ function Recommend() {
                 className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
               >
                 {copy.recBack}
+              </button>
+            ) : null}
+            {stepIndex === 2 || stepIndex === 3 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (stepIndex === 2) {
+                    setDraft({ ...draft, regionMode: "anywhere", cuisine: "", country: "" });
+                  } else {
+                    setMood("any");
+                  }
+
+                  setStepError(null);
+                  setStepIndex(stepIndex + 1);
+                }}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-muted transition hover:border-ink hover:text-ink"
+              >
+                {copy.recSkip}
               </button>
             ) : null}
             {stepIndex < QUIZ_STEPS - 1 ? (

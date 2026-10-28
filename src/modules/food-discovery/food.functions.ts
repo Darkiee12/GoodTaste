@@ -6,6 +6,7 @@ import {
   dishSearchQuerySchema,
   localeSchema,
   nameSearchQuerySchema,
+  placeQuerySchema,
   recommendationQuerySchema,
   relatedQuerySchema,
 } from "@/modules/food-discovery/food.schema";
@@ -142,6 +143,31 @@ export const listCategoriesFn = createServerFn({ method: "GET" }).handler(async 
   );
 });
 
+/**
+ * Public place listing for the recommendation country chooser. Reuses the
+ * existing CatalogService/place repository — no new SQL. Guests see ISO
+ * codes and display names only; suggestions never claim origin, only
+ * association (the region step already words it that way).
+ */
+export const listPlacesFn = createServerFn({ method: "GET" })
+  .validator(placeQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.listPlaces(data.locale, data.limit),
+        ),
+      ),
+      "fn/places/list",
+      15000,
+      "server-fn",
+    );
+  });
+
 export const listCuisinesFn = createServerFn({ method: "GET" })
   .validator(z.object({ locale: localeSchema.optional() }))
   .handler(async ({ data }) => {
@@ -239,6 +265,7 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
             country: data.country,
             mood: data.mood,
             locale: data.locale,
+            surpriseSeed: data.surpriseSeed,
           }),
         ),
       ),

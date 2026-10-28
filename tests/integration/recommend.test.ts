@@ -133,6 +133,7 @@ describe("recommend route client parsing", () => {
       meal: "dinner",
       mood: "comforting",
       locale: "en",
+      surpriseSeed: 0,
     });
 
     expect(payload.meal).toBe("dinner");
@@ -152,6 +153,7 @@ describe("recommend route client parsing", () => {
       meal: "anything",
       mood: "any",
       locale: "en",
+      surpriseSeed: 0,
     });
 
     expect(payload.avoid).toEqual(["mushrooms"]);
@@ -164,6 +166,7 @@ describe("recommend route client parsing", () => {
       meal: "anything",
       mood: "any",
       locale: "en",
+      surpriseSeed: 2,
     });
 
     expect(payload.avoid).toEqual([]);
@@ -182,7 +185,7 @@ describe("recommend route client parsing", () => {
 
     const before = { ...draft };
 
-    buildSurprisePayload({ draft, meal: "lunch", mood: "light", locale: "en" });
+    buildSurprisePayload({ draft, meal: "lunch", mood: "light", locale: "en", surpriseSeed: 0 });
 
     expect(draft).toEqual(before);
   });

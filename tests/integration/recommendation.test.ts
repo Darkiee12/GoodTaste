@@ -124,6 +124,7 @@ const baseInput: RecommendDishesInput = {
   country: undefined,
   mood: "any",
   locale: "en",
+  surpriseSeed: 0,
 };
 
 const modeOf = (outcome: RecommendationOutcome): string =>
@@ -512,8 +513,65 @@ describe("dish recommendations", () => {
     expect(counter.calls).toBe(0);
   });
 
+  test("surprise seed 0 reproduces the deterministic baseline", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const first = await recommendOn(runtime, baseInput);
+    const again = await recommendOn(runtime, { ...baseInput, surpriseSeed: 0 });
+
+    expect(dishesOf(again).map((dish) => dish.id)).toEqual(dishesOf(first).map((dish) => dish.id));
+    expect(warningsOf(again).some((warning) => warning.includes("Surprise variety"))).toBe(false);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("surprise seed rotates the same eligible pool with an honest note", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const baseline = dishesOf(await recommendOn(runtime, baseInput)).map((dish) => dish.id);
+    expect(baseline.length).toBeGreaterThan(1);
+
+    const varied = dishesOf(await recommendOn(runtime, { ...baseInput, surpriseSeed: 1 })).map(
+      (dish) => dish.id,
+    );
+
+    expect([...varied].toSorted()).toEqual([...baseline].toSorted());
+    expect(varied).not.toEqual(baseline);
+    expect(varied[0]).toBe(baseline[1]);
+
+    const outcome = await recommendOn(runtime, { ...baseInput, surpriseSeed: 1 });
+
+    expect(warningsOf(outcome).some((warning) => warning.includes("Surprise variety"))).toBe(true);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("surprise seed keeps hard exclusions and allergy refusals", async () => {
+    withRankingEnv({});
+
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const excluded = await recommendOn(runtime, { ...baseInput, avoid: ["beef"], surpriseSeed: 3 });
+
+    expect(modeOf(excluded)).toBe("deterministic");
+
+    const refused = await recommendOn(runtime, {
+      ...baseInput,
+      allergies: ["peanuts"],
+      surpriseSeed: 5,
+    });
+
+    expect(modeOf(refused)).toBe("uncertain");
+    expect(dishesOf(refused)).toEqual([]);
+    expect(counter.calls).toBe(0);
+  });
+
   test("returns Empty when no dishes match", async () => {
     withRankingEnv({ provider: "muse", key: "test-key" });
+
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
 
