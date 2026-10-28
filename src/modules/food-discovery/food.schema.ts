@@ -71,6 +71,12 @@ export const placeQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+/** Country chooser bound: all ISO countries fit well under this cap. */
+export const countryQuerySchema = z.object({
+  locale: localeSchema,
+  limit: z.coerce.number().int().min(1).max(300).default(250),
+});
+
 export const placeDishesQuerySchema = z.object({
   locale: localeSchema,
   association: z.enum(["origin", "associated", "popular"]).optional(),

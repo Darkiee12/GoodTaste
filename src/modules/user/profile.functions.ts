@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 import {
   favoriteLinkSchema,
+  favoriteStatusSchema,
   favoritesQuerySchema,
   profileUpdateSchema,
 } from "@/modules/user/user.schema";
@@ -151,10 +152,50 @@ export const listFavoritesFn = createServerFn({ method: "GET" })
       currentActor.withActor(
         actor.Actor.Member({ userId: trusted.userId }),
         effects.Effect.flatMap(FavoritesService, (service) =>
-          service.listFavorites(trusted.userId, data.limit),
+          service.listFavorites(trusted.userId, data.limit, data.offset),
         ),
       ),
       "fn/user/favorites",
+      15000,
+      requestId,
+    );
+  });
+
+/**
+ * Membership probe for visible dish ids: returns the subset that is saved,
+ * so cards stay correct no matter how many favorites the account holds.
+ */
+export const favoriteStatusFn = createServerFn({ method: "GET" })
+  .validator(favoriteStatusSchema)
+  .handler(async ({ data }) => {
+    const {
+      effects,
+      server,
+      services: { FavoritesService },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "favorite", actions: ["read"] }),
+      "fn/user/favorites-status",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(FavoritesService, (service) =>
+          service.favoriteStatus(trusted.userId, data.ids),
+        ),
+      ),
+      "fn/user/favorites-status",
       15000,
       requestId,
     );

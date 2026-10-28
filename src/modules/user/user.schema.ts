@@ -20,6 +20,15 @@ export type FavoriteLink = z.infer<typeof favoriteLinkSchema>;
 
 export const favoritesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).max(100000).default(0),
+});
+
+/** Membership probe for visible dish ids; capped at one page of cards. */
+export const favoriteStatusSchema = z.object({
+  ids: z
+    .array(z.string().regex(/^[0-9]+$/, "id must be a decimal id string"))
+    .min(1)
+    .max(50),
 });
 
 export const sessionRevokeSchema = z.object({

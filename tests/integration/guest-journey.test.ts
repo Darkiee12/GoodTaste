@@ -1,10 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test";
 
+import { SQL } from "bun";
 import { Effect } from "effect";
+import { z } from "zod";
 
 import { CatalogService } from "@/modules/food-discovery/server/operations/catalog-service";
 import { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import { addFavoriteFn, listFavoritesFn, removeFavoriteFn } from "@/modules/user/profile.functions";
+import { FavoritesService } from "@/modules/user/server/operations/user-services";
+import type { FavoriteRow } from "@/modules/user/server/repository/user-repository";
 import { classifySessionFailure, sessionFailureSchema } from "@/modules/user/session.functions";
 import type { SessionState } from "@/modules/user/session.functions";
 import {
@@ -66,6 +70,116 @@ describe("guest journey: public catalog discovery", () => {
 
     for (const entry of coded) {
       expect(entry.iso3166).toMatch(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/);
+    }
+  });
+
+  test("saved list paginates beyond the first page", async () => {
+    const member = await foodAuth.signupSignin("pagedsaver");
+
+    await foodAuth.grantRole(member.userId, "member");
+
+    const found = await run(
+      Effect.flatMap(DishService, (service) => service.searchDishes({ locale: "en", limit: 3 })),
+    );
+
+    const ids = found.items.map((item) => item.id);
+
+    expect(ids.length).toBe(3);
+
+    await Promise.all(
+      ids.map((id) =>
+        run(Effect.flatMap(FavoritesService, (service) => service.addFavorite(member.userId, id))),
+      ),
+    );
+
+    try {
+      const page1 = await run(
+        Effect.flatMap(FavoritesService, (service) => service.listFavorites(member.userId, 2, 0)),
+      );
+
+      const page2 = await run(
+        Effect.flatMap(FavoritesService, (service) => service.listFavorites(member.userId, 2, 2)),
+      );
+
+      const favoriteRowSchema = z.object({ dish_id: z.string() });
+
+      const pageIds = (rows: ReadonlyArray<FavoriteRow>): Array<string> =>
+        rows.map((row) => favoriteRowSchema.parse(row).dish_id);
+
+      const allIds = [...pageIds(page1), ...pageIds(page2)];
+
+      expect(page1).toHaveLength(2);
+      expect(page2).toHaveLength(1);
+      expect(new Set(allIds).size).toBe(3);
+    } finally {
+      await Promise.allSettled(
+        ids.map((id) =>
+          run(
+            Effect.flatMap(FavoritesService, (service) =>
+              service.removeFavorite(member.userId, id),
+            ),
+          ),
+        ),
+      );
+    }
+  });
+
+  test("country listing returns only countries even past a 100-place limit", async () => {
+    const sql = new SQL(process.env["DATABASE_URL"] ?? "");
+    const placeIdSchema = z.object({ id: z.coerce.bigint() });
+    let localityIds: Array<bigint> = [];
+
+    try {
+      const localityRows: unknown = await sql`INSERT INTO feastjourney.places
+        (kind, iso3166, display_latitude, display_longitude)
+        SELECT 'locality', NULL, 0, 0 FROM generate_series(1, 110)
+        RETURNING id`;
+
+      localityIds = z
+        .array(placeIdSchema)
+        .parse(localityRows)
+        .map((row) => row.id);
+
+      expect(localityIds).toHaveLength(110);
+
+      const countryRows: unknown = await sql`INSERT INTO feastjourney.places
+        (kind, iso3166, display_latitude, display_longitude)
+        VALUES ('country', 'QX', 0, 0)
+        RETURNING id`;
+
+      const [countryRow] = z.array(placeIdSchema).parse(countryRows);
+
+      if (countryRow === undefined) {
+        throw new Error("country fixture insert returned no row");
+      }
+
+      await sql`INSERT INTO feastjourney.place_names
+        (place_id, language_tag, name, is_preferred, search_key)
+        VALUES (${countryRow.id}, 'en', 'Test Country QX', true, 'test country qx')`;
+
+      const countries = await run(
+        Effect.flatMap(CatalogService, (service) => service.listCountries("en", 250)),
+      );
+
+      expect(countries.length).toBeGreaterThan(0);
+
+      for (const entry of countries) {
+        expect(entry.kind).toBe("country");
+        expect(entry.iso3166).toMatch(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/);
+      }
+
+      const found = countries.find((entry) => entry.iso3166 === "QX");
+
+      expect(found?.displayName).toBe("Test Country QX");
+    } finally {
+      await sql`DELETE FROM feastjourney.place_names WHERE name = 'Test Country QX'`;
+      await sql`DELETE FROM feastjourney.places WHERE iso3166 = 'QX'`;
+
+      if (localityIds.length > 0) {
+        await sql`DELETE FROM feastjourney.places WHERE id = ANY(${sql.array(localityIds)})`;
+      }
+
+      await sql.end();
     }
   });
 

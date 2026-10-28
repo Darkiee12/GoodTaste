@@ -5,11 +5,16 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { z } from "zod";
 
 import { getDishFn } from "@/modules/food-discovery/food.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
-import { SaveDishButton } from "@/modules/user/components/save-dish-button";
+import {
+  SaveDishButton,
+  statusForDish,
+  useFavoriteStatus,
+} from "@/modules/user/components/save-dish-button";
 import { localeSearchSchema, messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -162,9 +167,17 @@ function DishDetail() {
 
   const nativeNames = dish.nativeNames.filter((entry) => entry.name !== title);
 
-  const updatedLabel = new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(
-    new Date(dish.lastUpdate * 1000),
+  const updatedLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(
+        new Date(dish.lastUpdate * 1000),
+      ),
+    [lang, dish.lastUpdate],
   );
+
+  const detailUserId = session.status === "signed-in" ? session.user.id : null;
+
+  const detailFavorites = useFavoriteStatus([dish.id], detailUserId);
 
   return (
     <DishShell>
@@ -200,6 +213,7 @@ function DishDetail() {
           lang={lang}
           returnTo={`/dishes/${dish.slug}`}
           session={session}
+          status={statusForDish(detailFavorites, dish.id)}
         />
       </div>
 

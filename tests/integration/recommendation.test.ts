@@ -527,12 +527,14 @@ describe("dish recommendations", () => {
   });
 
   test("surprise seed surfaces a different slice of the eligible pool", async () => {
-    withRankingEnv({});
+    // Explicit small output window so the contract holds regardless of seed
+    // catalog size: any pool larger than the limit yields a shifted slice.
+    withRankingEnv({ outputLimit: "5" });
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
 
     const baseline = dishesOf(await recommendOn(runtime, baseInput)).map((dish) => dish.id);
-    expect(baseline.length).toBeGreaterThan(1);
+    expect(baseline).toHaveLength(5);
 
     const varied = dishesOf(await recommendOn(runtime, { ...baseInput, surpriseSeed: 1 })).map(
       (dish) => dish.id,
@@ -540,9 +542,10 @@ describe("dish recommendations", () => {
 
     // Offset-1 window over the same ranking: drops the head, keeps the tail,
     // pulls in the next eligible candidate.
+    expect(varied).toHaveLength(5);
     expect(varied).not.toEqual(baseline);
-    expect(varied[0]).toBe(baseline[1]);
-    expect(varied.slice(0, baseline.length - 1)).toEqual(baseline.slice(1));
+    expect(varied.slice(0, 4)).toEqual(baseline.slice(1));
+    expect(baseline).not.toContain(varied[4]);
 
     const outcome = await recommendOn(runtime, { ...baseInput, surpriseSeed: 1 });
 

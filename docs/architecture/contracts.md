@@ -24,6 +24,13 @@ Public read operations (`DishService`, `CatalogService`) serve guests and member
   published dishes, ranked by shared relations.
 - `listPlaces` returns places plus parent edges (hierarchy built client-side);
   `searchPlaces` resolves names in supported languages.
+- `listCountries` returns only kind=`country` places with verified ISO 3166
+  identity for the recommendation region step; filtering happens in SQL
+  before the limit so no eligible country can hide behind other places.
+- Member saved dishes: `listFavorites` (paged enumeration, limit+offset),
+  `favoriteStatus` (membership probe for exactly the visible dish ids, so
+  cards stay correct at any saved total), `addFavorite`/`removeFavorite`
+  (idempotent conflicts surfaced as `FavoriteExists`/`FavoriteNotFound`).
 
 Administrative writes (`AdminService`) require a verified session whose
 database grants cover the operation (see `access-control.md` for the
