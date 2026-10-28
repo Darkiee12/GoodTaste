@@ -36,6 +36,19 @@ export class RecentAuthenticationRequired extends Data.TaggedError("RecentAuthen
   readonly reason: string;
 }> {}
 
+/**
+ * Better Auth provider rejection at a server-function adapter boundary.
+ * Authentication-provider calls (sign-in, resets, verification) reject for
+ * expected reasons (wrong credentials, expired tokens, store outages) as
+ * well as defects; both enter this typed failure channel instead of the
+ * Effect defect channel. Callers surface it as a generic authentication
+ * failure without leaking provider internals.
+ */
+export class AuthProviderError extends Data.TaggedError("AuthProviderError")<{
+  readonly operation: string;
+  readonly reason: string;
+}> {}
+
 export class RoleNotFound extends Data.TaggedError("RoleNotFound")<{
   readonly roleId: string;
 }> {}
