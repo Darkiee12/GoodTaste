@@ -8,6 +8,7 @@ import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import { InvalidLocale } from "@/modules/food-discovery/server/domain/errors";
 import { isLanguageTag } from "@/modules/food-discovery/server/domain/ids";
 import { normalizeSearchKey } from "@/modules/food-discovery/server/domain/search";
+import { windowForSurprise } from "@/modules/food-discovery/server/domain/surprise-window";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import dishRecommendationCandidates from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates.sql";
 import type { Database } from "@/server/database/client";
@@ -339,33 +340,8 @@ interface RankingLimits {
   readonly outputLimit: number;
 }
 
-// Bounded Surprise variety: seed 0 keeps the stable deterministic head; a
-// nonzero seed offsets a window into the ranked pool, so repeated Surprise
-// clicks surface different dishes rather than a reordered top 10. The window
-// applies after SQL eligibility and scoring, so hard constraints (published,
-// cuisine/region, ingredient anti-joins) and allergy refusals are
-// unaffected; there is no ORDER BY random() and nothing fetches the catalog
-// into JavaScript. Small pools degrade gracefully to the whole pool.
-const windowForSurprise = <T>(sorted: ReadonlyArray<T>, seed: number, limit: number): Array<T> => {
-  if (sorted.length <= limit || seed === 0) {
-    return sorted.slice(0, limit);
-  }
-
-  const offset = seed % sorted.length;
-  const count = Math.min(limit, sorted.length);
-  const windowed: Array<T> = [];
-
-  for (let index = 0; index < count; index += 1) {
-    const entry = sorted[(offset + index) % sorted.length];
-
-    if (entry !== undefined) {
-      windowed.push(entry);
-    }
-  }
-
-  return windowed;
-};
-
+// Surprise windowing lives in the domain layer (`surprise-window.ts`) so the
+// size matrix is unit-testable without a database.
 const SURPRISE_NOTE = "Surprise variety applied: showing a different slice of the eligible pool.";
 
 const serveRecommendations = (

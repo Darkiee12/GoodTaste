@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { authorizeFn } from "@/modules/user/admin.functions";
 import { signOutFn } from "@/modules/user/auth.functions";
+import { clearFavoriteCaches } from "@/modules/user/components/save-dish-button";
 import { getSessionStateFn } from "@/modules/user/session.functions";
 import {
   bcp47TagFor,
@@ -94,6 +95,7 @@ function Document({ children }: { children: ReactNode }) {
 function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
   const copy = messagesFor(lang);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [signOutFailed, setSignOutFailed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -107,6 +109,7 @@ function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
 
     void signOutFn().then(
       () => {
+        clearFavoriteCaches(queryClient);
         void navigate({ to: "/", search: { lang } });
       },
       () => {

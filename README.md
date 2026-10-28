@@ -35,7 +35,7 @@ The default production build targets Bun. For Node, rebuild with `bun run build:
 ## Routes
 
 - `/` — public landing page with dish discovery (English default, `?lang=` switch for vi/hi/es/zh, validated by Zod; no cookie persistence).
-- `/recommend` — public food chooser: one-click quick find or Surprise (seed-rotated variety, constraints preserved), optional 5-step refinement (meal → avoidances → region → mood → review) with skip shortcuts, human-readable country select, tab-scoped journey restore across dish visits (max 10 published dishes, deterministic fallback labeled honestly, opt-in device-local preference memory).
+- `/recommend` — public food chooser: one-click quick find or Surprise (windowed pool variety, constraints preserved, provider bypassed), optional 5-step refinement (meal → avoidances → region → mood → review) with skip shortcuts, server-filtered country select, in-memory journey restore across dish visits (max 10 published dishes, deterministic fallback labeled honestly, opt-in device-local preference memory).
 - `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/verify-email` — Better Auth email + Google/Facebook OAuth.
 - `/settings/account`, `/settings/security` — profile, linked accounts, sessions, password change.
 - `/admin`, `/admin/dishes`, `/admin/dishes/$dishId`, `/admin/imports`, `/admin/imports/new`, `/admin/imports/$jobId`, `/admin/reviews`, `/admin/users`, `/admin/roles` — administration shell (session + `admin:access`/`food:import`/`moderation:read` surface gate; every operation re-checks its own grant).

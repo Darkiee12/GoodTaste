@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 
+import placeCountriesWithNames from "@/modules/food-discovery/server/repository/sql/place-countries-with-names.sql";
 import placeFindById from "@/modules/food-discovery/server/repository/sql/place-find-by-id.sql";
 import placeFindByIso from "@/modules/food-discovery/server/repository/sql/place-find-by-iso.sql";
 import placeFindDescendants from "@/modules/food-discovery/server/repository/sql/place-find-descendants.sql";
@@ -48,6 +49,9 @@ export class PlaceRepository extends Context.Service<
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly listWithNames: (
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<PlaceListRow>, DatabaseError, Database>;
+    readonly countriesWithNames: (
       limit: number,
     ) => Effect.Effect<ReadonlyArray<PlaceListRow>, DatabaseError, Database>;
     readonly parentEdges: () => Effect.Effect<
@@ -120,6 +124,12 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
   listWithNames: (limit) =>
     Effect.gen(function* () {
       return yield* runQuery("place/list", (sql) => placeListWithNames.run(sql, { limit }));
+    }),
+  countriesWithNames: (limit) =>
+    Effect.gen(function* () {
+      return yield* runQuery("place/countries", (sql) =>
+        placeCountriesWithNames.run(sql, { limit }),
+      );
     }),
   parentEdges: () =>
     Effect.gen(function* () {

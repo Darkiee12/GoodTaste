@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
+  countryQuerySchema,
   dishBatchQuerySchema,
   dishDetailParamsSchema,
   dishSearchQuerySchema,
@@ -188,6 +189,30 @@ export const listPlacesFn = createServerFn({ method: "GET" })
         ),
       ),
       "fn/places/list",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
+ * Country chooser for the recommendation region step. Kind-filtered at the
+ * database level with verified ISO identity — every eligible country is
+ * reachable regardless of how many other places the catalog holds.
+ */
+export const listCountriesFn = createServerFn({ method: "GET" })
+  .validator(countryQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.listCountries(data.locale, data.limit),
+        ),
+      ),
+      "fn/countries/list",
       15000,
       "server-fn",
     );

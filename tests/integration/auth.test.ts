@@ -469,7 +469,7 @@ describe("profile and favorites ownership", () => {
     await run(Effect.flatMap(FavoritesService, (service) => service.addFavorite(bob.userId, "1")));
 
     const aliceFavorites = await run(
-      Effect.flatMap(FavoritesService, (service) => service.listFavorites(alice.userId, 20)),
+      Effect.flatMap(FavoritesService, (service) => service.listFavorites(alice.userId, 20, 0)),
     );
 
     expect(aliceFavorites.length).toBe(1);
@@ -485,10 +485,36 @@ describe("profile and favorites ownership", () => {
     expect(removed._tag).toBe("Failure");
 
     const bobFavorites = await run(
-      Effect.flatMap(FavoritesService, (service) => service.listFavorites(bob.userId, 20)),
+      Effect.flatMap(FavoritesService, (service) => service.listFavorites(bob.userId, 20, 0)),
     );
 
     expect(bobFavorites.length).toBe(1);
+  });
+
+  test("favorite status reports only the requested visible ids", async () => {
+    const carol = await signupVerifySignin("carol-status");
+
+    await run(
+      Effect.flatMap(FavoritesService, (service) => service.addFavorite(carol.userId, "1")),
+    );
+
+    const present = await run(
+      Effect.flatMap(FavoritesService, (service) =>
+        service.favoriteStatus(carol.userId, ["1", "2", "not-an-id"]),
+      ),
+    );
+
+    expect(present).toEqual(["1"]);
+
+    await run(
+      Effect.flatMap(FavoritesService, (service) => service.removeFavorite(carol.userId, "1")),
+    );
+
+    const absent = await run(
+      Effect.flatMap(FavoritesService, (service) => service.favoriteStatus(carol.userId, ["1"])),
+    );
+
+    expect(absent).toEqual([]);
   });
 
   test("guests cannot use member operations and members cannot reach admin", async () => {
