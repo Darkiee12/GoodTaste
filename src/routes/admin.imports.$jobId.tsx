@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import { adminImportJobDetailFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
+import { formatAdminDateTime } from "@/shared/format";
+import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -216,6 +218,7 @@ const countByStatus = (records: ReadonlyArray<JobRecord>, status: JobRecord["sta
 
 function AdminImportDetail() {
   const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
   const { jobId } = Route.useParams();
   const loaded: unknown = Route.useLoaderData();
   const initial = jobDetailSchema.parse(loaded);
@@ -274,96 +277,102 @@ function AdminImportDetail() {
     <div className="bg-cream min-h-screen text-ink">
       <p>
         <Link to="/admin/imports" search={{ lang }}>
-          Back to imports
+          {copy.adminImportBackToImports}
         </Link>
       </p>
 
-      <h1 className="font-display text-4xl tracking-wide">Import job {detail.job.id}</h1>
+      <h1 className="font-display text-4xl tracking-wide">
+        {copy.adminImportsJob} {detail.job.id}
+      </h1>
 
-      <section aria-label="Job metadata">
-        <h2 className="font-display text-2xl tracking-wide">Job details</h2>
+      <section aria-label={copy.adminImportJobDetails}>
+        <h2 className="font-display text-2xl tracking-wide">{copy.adminImportJobDetails}</h2>
 
         <dl>
           <div>
-            <dt>Source</dt>
+            <dt>{copy.adminSource}</dt>
             <dd>{detail.job.source_name}</dd>
           </div>
 
           <div>
-            <dt>Format</dt>
+            <dt>{copy.adminImportsFormat}</dt>
             <dd>{detail.job.format}</dd>
           </div>
 
           <div>
-            <dt>Status</dt>
+            <dt>{copy.adminStatus}</dt>
             <dd>{detail.job.status}</dd>
           </div>
 
           <div>
-            <dt>Total records</dt>
+            <dt>{copy.adminImportTotalRecords}</dt>
             <dd>{detail.job.total_records}</dd>
           </div>
 
           <div>
-            <dt>Valid records</dt>
+            <dt>{copy.adminImportValidCount}</dt>
             <dd>{detail.job.valid_records}</dd>
           </div>
 
           <div>
-            <dt>Invalid records</dt>
+            <dt>{copy.adminImportInvalidCount}</dt>
             <dd>{detail.job.invalid_records}</dd>
           </div>
 
           <div>
-            <dt>Source URL</dt>
+            <dt>{copy.adminImportSourceUrl}</dt>
             <dd>{cellText(detail.job.source_url)}</dd>
           </div>
 
           <div>
-            <dt>Source version</dt>
+            <dt>{copy.adminImportSourceVersion}</dt>
             <dd>{cellText(detail.job.source_version)}</dd>
           </div>
 
           <div>
-            <dt>License</dt>
+            <dt>{copy.adminLicense}</dt>
             <dd>{cellText(detail.job.license)}</dd>
           </div>
 
           <div>
-            <dt>Attribution</dt>
+            <dt>{copy.adminImportAttribution}</dt>
             <dd>{cellText(detail.job.attribution)}</dd>
           </div>
 
           <div>
-            <dt>Editorial notes</dt>
+            <dt>{copy.adminImportEditorialNotes}</dt>
             <dd>{cellText(detail.job.editorial_notes)}</dd>
           </div>
 
           <div>
-            <dt>Created</dt>
-            <dd>{detail.job.created_at}</dd>
+            <dt>{copy.adminCreated}</dt>
+            <dd>{formatAdminDateTime(detail.job.created_at, lang)}</dd>
           </div>
 
           <div>
-            <dt>Completed</dt>
-            <dd>{cellText(detail.job.completed_at)}</dd>
+            <dt>{copy.adminCompleted}</dt>
+            <dd>
+              {detail.job.completed_at === null
+                ? cellText(detail.job.completed_at)
+                : formatAdminDateTime(detail.job.completed_at, lang)}
+            </dd>
           </div>
         </dl>
       </section>
 
-      <section aria-label="Progress" aria-live="polite">
-        <h2 className="font-display text-2xl tracking-wide">Progress</h2>
+      <section aria-label={copy.adminImportProgress} aria-live="polite">
+        <h2 className="font-display text-2xl tracking-wide">{copy.adminImportProgress}</h2>
 
         <p>
           {processed} of {total} records processed ({applied} applied, {skipped} skipped duplicates,{" "}
           {failed} failed).
         </p>
 
-        {!terminal ? <p>Refreshing every 5 seconds while the job is running.</p> : null}
+        {!terminal ? <p>{copy.adminImportRefreshing}</p> : null}
       </section>
 
-      <section aria-label="Records">
-        <h2 className="font-display text-2xl tracking-wide">Records</h2>
+      <section aria-label={copy.adminImportRecordsTitle}>
+        <h2 className="font-display text-2xl tracking-wide">{copy.adminImportRecordsTitle}</h2>
 
         {failureCount > 0 ? (
           <p>
@@ -372,7 +381,7 @@ function AdminImportDetail() {
               className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white"
               onClick={downloadFailures}
             >
-              Download failures CSV
+              {copy.adminImportDownloadFailures}
             </button>
           </p>
         ) : null}
@@ -385,11 +394,11 @@ function AdminImportDetail() {
 
             <thead>
               <tr>
-                <th scope="col">External ref</th>
-                <th scope="col">Status</th>
-                <th scope="col">Errors</th>
-                <th scope="col">Dish</th>
-                <th scope="col">Preview</th>
+                <th scope="col">{copy.adminImportExternalRef}</th>
+                <th scope="col">{copy.adminStatus}</th>
+                <th scope="col">{copy.adminImportErrorsCol}</th>
+                <th scope="col">{copy.adminImportDishCol}</th>
+                <th scope="col">{copy.adminImportPreviewCol}</th>
               </tr>
             </thead>
 
@@ -415,7 +424,7 @@ function AdminImportDetail() {
               disabled={safePage === 0}
               onClick={showPrevious}
             >
-              Previous
+              {copy.adminImportPrevious}
             </button>{" "}
             <button
               type="button"
@@ -423,7 +432,7 @@ function AdminImportDetail() {
               disabled={safePage >= totalPages - 1}
               onClick={showNext}
             >
-              Next
+              {copy.adminImportNext}
             </button>
           </p>
         ) : null}

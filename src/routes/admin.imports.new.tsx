@@ -20,6 +20,7 @@ import {
 } from "@/modules/food-discovery/admin.schema";
 import type { ImportLicense, ImportSourceId } from "@/modules/food-discovery/admin.schema";
 import { getSessionFn } from "@/modules/user/session.functions";
+import { messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -49,14 +50,14 @@ const STAGES = ["upload", "source", "validate", "issues", "confirm", "apply", "d
 
 type Stage = (typeof STAGES)[number];
 
-const STAGE_LABELS: ReadonlyArray<{ stage: Stage; label: string }> = [
-  { stage: "upload", label: "Upload" },
-  { stage: "source", label: "Source" },
-  { stage: "validate", label: "Validate" },
-  { stage: "issues", label: "Issues" },
-  { stage: "confirm", label: "Confirm" },
-  { stage: "apply", label: "Apply" },
-  { stage: "done", label: "Done" },
+const stageLabels = (copy: Messages): ReadonlyArray<{ stage: Stage; label: string }> => [
+  { stage: "upload", label: copy.adminStageUpload },
+  { stage: "source", label: copy.adminStageSource },
+  { stage: "validate", label: copy.adminStageValidate },
+  { stage: "issues", label: copy.adminStageIssues },
+  { stage: "confirm", label: copy.adminStageConfirm },
+  { stage: "apply", label: copy.adminStageApply },
+  { stage: "done", label: copy.adminStageDone },
 ];
 
 const LICENSES: ReadonlyArray<ImportLicense> = [
@@ -173,6 +174,7 @@ const freshJobSchema = z.object({
 
 function AdminImportWizard() {
   const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [stage, setStage] = useState<Stage>("upload");
   const [dataset, setDataset] = useState<DatasetFile | null>(null);
@@ -210,7 +212,7 @@ function AdminImportWizard() {
     }
 
     if (file.size === 0) {
-      setUploadError("File is empty.");
+      setUploadError(copy.adminImportFileEmpty);
 
       return;
     }
@@ -220,7 +222,7 @@ function AdminImportWizard() {
     const fileType = sniffFileType(file.name, contentText);
 
     if (fileType === null) {
-      setUploadError("Could not detect a supported type. Upload a .json or .csv dataset file.");
+      setUploadError(copy.adminImportTypeUnknown);
 
       return;
     }
@@ -385,32 +387,29 @@ function AdminImportWizard() {
     <div className="bg-cream min-h-screen text-ink">
       <p>
         <Link to="/admin/imports" search={{ lang }}>
-          Back to imports
+          {copy.adminImportBackToImports}
         </Link>
       </p>
 
-      <h1 className="font-display text-4xl tracking-wide">New dataset import</h1>
+      <h1 className="font-display text-4xl tracking-wide">{copy.adminImportsNewTitle}</h1>
 
-      <ol aria-label="Import stages">
-        {STAGE_LABELS.map((entry, index) => (
+      <ol aria-label={copy.adminImportStagesLabel}>
+        {stageLabels(copy).map((entry, index) => (
           <li key={entry.stage} aria-current={entry.stage === stage ? "step" : undefined}>
             <span>
               {index + 1}. {entry.label}
             </span>
 
-            {index < stageIndex ? " (done)" : null}
+            {index < stageIndex ? copy.adminImportDoneSuffix : null}
           </li>
         ))}
       </ol>
 
       {stage === "upload" ? (
-        <section aria-label="Upload dataset">
-          <h2 className="font-display text-2xl tracking-wide">1. Upload</h2>
+        <section aria-label={copy.adminStageUpload}>
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepUpload}</h2>
 
-          <p>
-            Upload a JSON or CSV dataset (max 2 MB, max 100 records). The file stays in this page;
-            it is never put in the URL or browser storage.
-          </p>
+          <p>{copy.adminImportUploadHint}</p>
 
           <p>
             <button
@@ -418,20 +417,20 @@ function AdminImportWizard() {
               className="inline-flex min-h-11 items-center rounded-full px-5 font-bold"
               onClick={downloadTemplate}
             >
-              Download JSON template
+              {copy.adminImportDownloadTemplate}
             </button>{" "}
             <button
               type="button"
               className="inline-flex min-h-11 items-center rounded-full px-5 font-bold"
               onClick={downloadSample}
             >
-              Download sample CSV
+              {copy.adminImportDownloadSample}
             </button>
           </p>
 
           <button
             type="button"
-            aria-label="Drop a dataset file here, or activate to browse"
+            aria-label={copy.adminImportDropLabel}
             onDragOver={(event) => {
               event.preventDefault();
               setDragActive(true);
@@ -451,11 +450,11 @@ function AdminImportWizard() {
             onClick={openFilePicker}
             className={dragActive ? "border-2 border-dashed" : "border"}
           >
-            {dragActive ? "Drop the file to load it." : "Drag a file here, or activate to browse."}
+            {dragActive ? copy.adminImportDropActive : copy.adminImportDropHint}
           </button>
 
           <label>
-            Choose dataset file
+            {copy.adminImportChooseFile}
             <input
               ref={fileInput}
               type="file"
@@ -475,30 +474,30 @@ function AdminImportWizard() {
           {dataset !== null ? (
             <dl>
               <div>
-                <dt>File name</dt>
+                <dt>{copy.adminImportFileName}</dt>
                 <dd>{dataset.name}</dd>
               </div>
 
               <div>
-                <dt>Size</dt>
+                <dt>{copy.adminImportFileSize}</dt>
                 <dd>{dataset.size} bytes</dd>
               </div>
 
               <div>
-                <dt>Detected type</dt>
+                <dt>{copy.adminImportFileType}</dt>
                 <dd>{dataset.fileType}</dd>
               </div>
 
               <div>
-                <dt>SHA-256</dt>
+                <dt>{copy.adminImportFileSha}</dt>
                 <dd>{dataset.sha256}</dd>
               </div>
 
               <div>
-                <dt>Records detected</dt>
+                <dt>{copy.adminImportFileRecords}</dt>
                 <dd>
                   {dataset.recordCount === null
-                    ? "Could not parse yet; validation will report the problem."
+                    ? copy.adminImportRecordsUnknown
                     : dataset.recordCount}
                 </dd>
               </div>
@@ -514,18 +513,18 @@ function AdminImportWizard() {
                 goto("source");
               }}
             >
-              Continue to source
+              {copy.adminImportContinueSource}
             </button>
           </p>
         </section>
       ) : null}
 
       {stage === "source" ? (
-        <section aria-label="Source and license">
-          <h2 className="font-display text-2xl tracking-wide">2. Source</h2>
+        <section aria-label={copy.adminStageSource}>
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepSource}</h2>
 
           <label>
-            Source registry
+            {copy.adminImportSourceRegistry}
             <select
               value={sourceId}
               onChange={(event) => {
@@ -540,10 +539,14 @@ function AdminImportWizard() {
             </select>
           </label>
 
-          {selectedRegistry !== undefined ? <p>Reuse rule: {selectedRegistry.reuseRule}</p> : null}
+          {selectedRegistry !== undefined ? (
+            <p>
+              {copy.adminImportReuseRule} {selectedRegistry.reuseRule}
+            </p>
+          ) : null}
 
           <label>
-            Source name
+            {copy.adminImportSourceName}
             <input
               value={sourceName}
               onChange={(event) => {
@@ -553,7 +556,7 @@ function AdminImportWizard() {
           </label>
 
           <label>
-            Source URL (optional)
+            {copy.adminImportSourceUrlField}
             <input
               value={sourceUrl}
               inputMode="url"
@@ -564,7 +567,7 @@ function AdminImportWizard() {
           </label>
 
           <label>
-            Source version (optional)
+            {copy.adminImportSourceVersionField}
             <input
               value={sourceVersion}
               onChange={(event) => {
@@ -574,7 +577,7 @@ function AdminImportWizard() {
           </label>
 
           <label>
-            License
+            {copy.adminLicense}
             <select
               value={license}
               onChange={(event) => {
@@ -589,15 +592,10 @@ function AdminImportWizard() {
             </select>
           </label>
 
-          {licenseReview ? (
-            <p role="alert">
-              License review required: this source and license combination must be reviewed before
-              applying. You will confirm this in the Confirm stage.
-            </p>
-          ) : null}
+          {licenseReview ? <p role="alert">{copy.adminImportLicenseReview}</p> : null}
 
           <label>
-            Attribution (optional)
+            {copy.adminImportAttributionField}
             <input
               value={attribution}
               onChange={(event) => {
@@ -607,7 +605,7 @@ function AdminImportWizard() {
           </label>
 
           <label>
-            Editorial notes (optional)
+            {copy.adminImportEditorialNotesField}
             <textarea
               value={editorialNotes}
               onChange={(event) => {
@@ -624,7 +622,7 @@ function AdminImportWizard() {
                 goto("upload");
               }}
             >
-              Back
+              {copy.adminImportBack}
             </button>{" "}
             <button
               type="button"
@@ -632,23 +630,23 @@ function AdminImportWizard() {
               disabled={!sourceComplete}
               onClick={startValidation}
             >
-              Run validation
+              {copy.adminImportRunValidation}
             </button>
           </p>
 
-          {!sourceComplete ? <p>Source name is required.</p> : null}
+          {!sourceComplete ? <p>{copy.adminImportSourceRequired}</p> : null}
         </section>
       ) : null}
 
       {stage === "validate" ? (
-        <section aria-label="Validation result" aria-live="polite">
-          <h2 className="font-display text-2xl tracking-wide">3. Validate</h2>
+        <section aria-label={copy.adminStageValidate} aria-live="polite">
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepValidate}</h2>
 
-          {validateMutation.isPending ? <p>Validating the dataset on the server…</p> : null}
+          {validateMutation.isPending ? <p>{copy.adminImportValidating}</p> : null}
 
           {validateMutation.isError ? (
             <div>
-              <p role="alert">The validation request failed. Try again.</p>
+              <p role="alert">{copy.adminImportValidateFailed}</p>
 
               <p>
                 <button
@@ -658,7 +656,7 @@ function AdminImportWizard() {
                     goto("source");
                   }}
                 >
-                  Back to source
+                  {copy.adminImportBackToSource}
                 </button>{" "}
                 <button
                   type="button"
@@ -667,7 +665,7 @@ function AdminImportWizard() {
                     validateMutation.mutate();
                   }}
                 >
-                  Retry validation
+                  {copy.adminImportRetryValidation}
                 </button>
               </p>
             </div>
@@ -675,7 +673,9 @@ function AdminImportWizard() {
 
           {validateReason !== null ? (
             <div>
-              <p role="alert">Validation failed: {validateReason}</p>
+              <p role="alert">
+                {copy.adminImportValidationFailedPrefix} {validateReason}
+              </p>
 
               <p>
                 <button
@@ -685,7 +685,7 @@ function AdminImportWizard() {
                     goto("upload");
                   }}
                 >
-                  Back to upload
+                  {copy.adminImportBackToUpload}
                 </button>
               </p>
             </div>
@@ -704,7 +704,7 @@ function AdminImportWizard() {
                   className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white"
                   onClick={enterConfirm}
                 >
-                  Continue to issues
+                  {copy.adminImportContinueIssues}
                 </button>
               </p>
             </div>
@@ -713,11 +713,11 @@ function AdminImportWizard() {
       ) : null}
 
       {stage === "issues" ? (
-        <section aria-label="Validation issues">
-          <h2 className="font-display text-2xl tracking-wide">4. Issues</h2>
+        <section aria-label={copy.adminStageIssues}>
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepIssues}</h2>
 
           {report === null ? (
-            <p>No validation report yet. Run validation first.</p>
+            <p>{copy.adminImportNoReport}</p>
           ) : (
             <div>
               <p aria-live="polite">
@@ -728,13 +728,13 @@ function AdminImportWizard() {
               {invalidItems.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table>
-                    <caption>Invalid records (skipped automatically on apply)</caption>
+                    <caption>{copy.adminImportInvalidCaption}</caption>
 
                     <thead>
                       <tr>
-                        <th scope="col">External ref</th>
-                        <th scope="col">Slug</th>
-                        <th scope="col">Errors</th>
+                        <th scope="col">{copy.adminImportExternalRef}</th>
+                        <th scope="col">{copy.adminSlug}</th>
+                        <th scope="col">{copy.adminImportErrorsCol}</th>
                       </tr>
                     </thead>
 
@@ -750,20 +750,20 @@ function AdminImportWizard() {
                   </table>
                 </div>
               ) : (
-                <p>No invalid records.</p>
+                <p>{copy.adminImportNoInvalid}</p>
               )}
 
               {duplicateItems.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table>
-                    <caption>Possible duplicates</caption>
+                    <caption>{copy.adminImportDuplicatesCaption}</caption>
 
                     <thead>
                       <tr>
-                        <th scope="col">External ref</th>
-                        <th scope="col">Slug</th>
-                        <th scope="col">Possible duplicate of</th>
-                        <th scope="col">Create as new dish (goes to review)</th>
+                        <th scope="col">{copy.adminImportExternalRef}</th>
+                        <th scope="col">{copy.adminSlug}</th>
+                        <th scope="col">{copy.adminImportDupOf}</th>
+                        <th scope="col">{copy.adminImportCreateAsNew}</th>
                       </tr>
                     </thead>
 
@@ -782,7 +782,7 @@ function AdminImportWizard() {
                                   toggleDuplicateAck(item.externalRef);
                                 }}
                               />
-                              Create as a new dish; it will enter editorial review
+                              {copy.adminImportCreateAsNewAck}
                             </label>
                           </td>
                         </tr>
@@ -790,14 +790,10 @@ function AdminImportWizard() {
                     </tbody>
                   </table>
 
-                  <p>
-                    Merge or update of the existing dish is disabled in this release: there is no
-                    safe merge yet, so duplicates can only be created as new dishes for curators to
-                    review.
-                  </p>
+                  <p>{copy.adminImportMergeDisabled}</p>
                 </div>
               ) : (
-                <p>No duplicate warnings.</p>
+                <p>{copy.adminImportNoDuplicates}</p>
               )}
 
               <p>
@@ -808,7 +804,7 @@ function AdminImportWizard() {
                     goto("source");
                   }}
                 >
-                  Back
+                  {copy.adminImportBack}
                 </button>{" "}
                 <button
                   type="button"
@@ -816,54 +812,56 @@ function AdminImportWizard() {
                   disabled={!allDuplicatesAcked}
                   onClick={enterConfirm}
                 >
-                  Continue to confirm
+                  {copy.adminImportContinueConfirm}
                 </button>
               </p>
 
-              {!allDuplicatesAcked ? <p>Acknowledge every duplicate before continuing.</p> : null}
+              {!allDuplicatesAcked ? <p>{copy.adminImportAckAll}</p> : null}
             </div>
           )}
         </section>
       ) : null}
 
       {stage === "confirm" ? (
-        <section aria-label="Confirm apply">
-          <h2 className="font-display text-2xl tracking-wide">5. Confirm</h2>
+        <section aria-label={copy.adminStageConfirm}>
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepConfirm}</h2>
 
           {report === null ? (
-            <p>No validation report yet. Run validation first.</p>
+            <p>{copy.adminImportNoReport}</p>
           ) : (
             <div>
               <dl>
                 <div>
-                  <dt>Valid records</dt>
+                  <dt>{copy.adminImportValidCount}</dt>
                   <dd>{report.validRecords}</dd>
                 </div>
 
                 <div>
-                  <dt>Invalid records (skipped on apply)</dt>
+                  <dt>{copy.adminImportInvalidSkipped}</dt>
                   <dd>{report.invalidRecords}</dd>
                 </div>
 
                 <div>
-                  <dt>Possible duplicates</dt>
+                  <dt>{copy.adminImportDupCount}</dt>
                   <dd>{duplicateItems.length}</dd>
                 </div>
 
                 <div>
-                  <dt>Source</dt>
+                  <dt>{copy.adminImportSourceRow}</dt>
                   <dd>{sourceName}</dd>
                 </div>
 
                 <div>
-                  <dt>License</dt>
+                  <dt>{copy.adminImportLicenseRow}</dt>
                   <dd>{license}</dd>
                 </div>
               </dl>
 
               <p aria-live="polite">
-                Fresh job status:{" "}
-                {detailMutation.isPending ? "refreshing…" : (freshStatus ?? "unknown")}
+                {copy.adminImportFreshStatus}{" "}
+                {detailMutation.isPending
+                  ? copy.adminImportRefreshingShort
+                  : (freshStatus ?? copy.adminImportUnknown)}
               </p>
 
               {freshStatus !== null && freshStatus !== "validated" && !detailMutation.isPending ? (
@@ -873,10 +871,7 @@ function AdminImportWizard() {
                 </p>
               ) : null}
 
-              <p>
-                Applying creates dishes in editorial review only. Nothing enters the public catalog
-                until a curator publishes it.
-              </p>
+              <p>{copy.adminImportReviewNotice}</p>
 
               {licenseReview ? (
                 <label>
@@ -887,7 +882,7 @@ function AdminImportWizard() {
                       setLicenseAck(event.target.checked);
                     }}
                   />
-                  I confirm the license for this source has been reviewed
+                  {copy.adminImportLicenseAck}
                 </label>
               ) : null}
 
@@ -899,7 +894,7 @@ function AdminImportWizard() {
                     setReviewAck(event.target.checked);
                   }}
                 />
-                I understand these records enter editorial review, not the public catalog
+                {copy.adminImportReviewAck}
               </label>
 
               <p>
@@ -910,7 +905,7 @@ function AdminImportWizard() {
                     detailMutation.mutate(report.jobId);
                   }}
                 >
-                  Refresh job status
+                  {copy.adminImportRefreshStatus}
                 </button>{" "}
                 <button
                   type="button"
@@ -922,12 +917,7 @@ function AdminImportWizard() {
                 </button>
               </p>
 
-              {applyMutation.isError ? (
-                <p role="alert">
-                  Apply failed. The job may no longer be validated; refresh the job status and try
-                  again.
-                </p>
-              ) : null}
+              {applyMutation.isError ? <p role="alert">{copy.adminImportApplyFailed}</p> : null}
 
               <p>
                 <button
@@ -937,7 +927,7 @@ function AdminImportWizard() {
                     goto("issues");
                   }}
                 >
-                  Back to issues
+                  {copy.adminImportBackToIssues}
                 </button>
               </p>
             </div>
@@ -946,10 +936,10 @@ function AdminImportWizard() {
       ) : null}
 
       {stage === "apply" ? (
-        <section aria-label="Apply result" aria-live="polite">
-          <h2 className="font-display text-2xl tracking-wide">6. Apply</h2>
+        <section aria-label={copy.adminStageApply} aria-live="polite">
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepApply}</h2>
 
-          {applyMutation.isPending ? <p>Applying the import…</p> : null}
+          {applyMutation.isPending ? <p>{copy.adminImportApplying}</p> : null}
 
           {applyResult !== null ? (
             <div>
@@ -964,7 +954,7 @@ function AdminImportWizard() {
                   params={{ jobId: applyResult.jobId }}
                   search={{ lang }}
                 >
-                  View job detail
+                  {copy.adminImportViewJob}
                 </Link>
               </p>
 
@@ -976,7 +966,7 @@ function AdminImportWizard() {
                     goto("done");
                   }}
                 >
-                  Continue to done
+                  {copy.adminImportContinueDone}
                 </button>
               </p>
             </div>
@@ -985,13 +975,13 @@ function AdminImportWizard() {
       ) : null}
 
       {stage === "done" ? (
-        <section aria-label="Import complete">
-          <h2 className="font-display text-2xl tracking-wide">7. Done</h2>
+        <section aria-label={copy.adminStageDone}>
+          <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepDone}</h2>
 
           <p aria-live="polite">
             {applyResult !== null
               ? `Import ${applyResult.jobId} applied: ${applyResult.applied} records in editorial review.`
-              : "Import finished."}
+              : copy.adminImportFinished}
           </p>
 
           {applyResult !== null ? (
@@ -1001,7 +991,7 @@ function AdminImportWizard() {
                 params={{ jobId: applyResult.jobId }}
                 search={{ lang }}
               >
-                View job detail
+                {copy.adminImportViewJob}
               </Link>
             </p>
           ) : null}
@@ -1009,14 +999,14 @@ function AdminImportWizard() {
           {report !== null ? (
             <p>
               <Link to="/admin/imports/$jobId" params={{ jobId: report.jobId }} search={{ lang }}>
-                View validation job detail
+                {copy.adminImportViewValidationJob}
               </Link>
             </p>
           ) : null}
 
           <p>
             <Link to="/admin/imports" search={{ lang }}>
-              Back to imports
+              {copy.adminImportBackToImports}
             </Link>
           </p>
         </section>

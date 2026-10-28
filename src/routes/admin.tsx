@@ -28,6 +28,7 @@ export const Route = createFileRoute("/admin")({
 type AdminNavTarget =
   | "/admin"
   | "/admin/dishes"
+  | "/admin/imports"
   | "/admin/reviews"
   | "/admin/users"
   | "/admin/roles";
@@ -39,6 +40,7 @@ function AdminLayout() {
   const links: ReadonlyArray<{ readonly to: AdminNavTarget; readonly label: string }> = [
     { to: "/admin", label: copy.adminDashboard },
     { to: "/admin/dishes", label: copy.adminDishes },
+    { to: "/admin/imports", label: copy.adminImports },
     { to: "/admin/reviews", label: copy.adminReviews },
     { to: "/admin/users", label: copy.adminMembers },
     { to: "/admin/roles", label: copy.adminRoles },
@@ -65,14 +67,6 @@ function AdminLayout() {
                 </Link>
               </li>
             ))}
-            <li className="shrink-0">
-              <a
-                href={`/admin/imports?lang=${lang}`}
-                className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap text-white/80 hover:bg-white/10 hover:text-white"
-              >
-                {copy.adminImports}
-              </a>
-            </li>
           </ul>
         </nav>
       </div>

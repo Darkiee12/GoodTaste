@@ -1,11 +1,19 @@
 import { useMutation } from "@tanstack/react-query";
-import { Link, createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  getRouteApi,
+  redirect,
+  useChildMatches,
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
 import { adminDishesListFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
+import { formatAdminDate } from "@/shared/format";
+import { localeSearchSchema, messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -16,6 +24,7 @@ const dishesSearch = localeSearchSchema.extend({
 
 export const Route = createFileRoute("/admin/dishes")({
   validateSearch: dishesSearch,
+  loaderDeps: ({ search }) => ({ status: search.status, cursor: search.cursor }),
   beforeLoad: async ({ search }) => {
     const session = await getSessionFn();
 
@@ -31,7 +40,6 @@ export const Route = createFileRoute("/admin/dishes")({
 
     return {};
   },
-  loaderDeps: ({ search }) => ({ status: search.status, cursor: search.cursor }),
   loader: async ({ deps }) =>
     dishListSchema.parse(
       await adminDishesListFn({ data: { status: deps.status, limit: 20, cursor: deps.cursor } }),
@@ -73,15 +81,20 @@ const statusLabel = (status: string, copy: Messages): string => {
 
 type DisplayTimestamp = Date | string;
 
-const formatDate = (value: DisplayTimestamp): string => new Date(value).toLocaleDateString();
+const formatDate = (value: DisplayTimestamp, lang: Locale): string => formatAdminDate(value, lang);
 
 const STATUSES = ["draft", "review", "published", "archived"] as const;
 
 function AdminDishes() {
   const { lang } = rootRoute.useSearch();
   const { status } = Route.useSearch();
+  const childMatches = useChildMatches();
   const copy = messagesFor(lang);
   const initial = Route.useLoaderData();
+
+  if (childMatches.length > 0) {
+    return <Outlet />;
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -178,7 +191,7 @@ function DishRows({ initial }: { readonly initial: ReadonlyArray<DishListItem> }
                       </Link>
                     </td>
                     <td className="px-3 py-2">{statusLabel(dish.status, copy)}</td>
-                    <td className="px-3 py-2">{formatDate(dish.updated_at)}</td>
+                    <td className="px-3 py-2">{formatDate(dish.updated_at, lang)}</td>
                   </tr>
                 ))}
               </tbody>

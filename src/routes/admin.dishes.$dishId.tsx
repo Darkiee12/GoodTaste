@@ -3,12 +3,14 @@ import { Link, createFileRoute, getRouteApi, redirect } from "@tanstack/react-ro
 import { adminDishDetailFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
+import { formatAdminDate } from "@/shared/format";
+import { localeSearchSchema, messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/admin/dishes/$dishId")({
   validateSearch: localeSearchSchema,
+  loaderDeps: ({ search }) => ({ locale: search.lang }),
   beforeLoad: async ({ search }) => {
     const session = await getSessionFn();
 
@@ -27,7 +29,6 @@ export const Route = createFileRoute("/admin/dishes/$dishId")({
 
     return {};
   },
-  loaderDeps: ({ search }) => ({ locale: search.lang }),
   loader: async ({ params, deps }): Promise<DishDetailData> =>
     adminDishDetailFn({ data: { dishId: params.dishId, locale: deps.locale } }),
   component: AdminDishDetail,
@@ -77,7 +78,7 @@ const statusLabel = (status: string, copy: Messages): string => {
 
 type DisplayTimestamp = Date | string;
 
-const formatDate = (value: DisplayTimestamp): string => new Date(value).toLocaleDateString();
+const formatDate = (value: DisplayTimestamp, lang: Locale): string => formatAdminDate(value, lang);
 
 function AdminDishDetail() {
   const { lang } = rootRoute.useSearch();
@@ -246,7 +247,7 @@ function AdminDishDetail() {
             {notes.map((entry) => (
               <li key={entry.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
                 <p className="font-semibold">
-                  {entry.author} · {entry.noteKind} · {formatDate(entry.createdAt)}
+                  {entry.author} · {entry.noteKind} · {formatDate(entry.createdAt, lang)}
                 </p>
                 <p className="mt-1">{entry.note}</p>
               </li>
@@ -269,7 +270,7 @@ function AdminDishDetail() {
             {revisions.map((entry) => (
               <li key={entry.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
                 <p className="font-semibold">
-                  {entry.actor} · {entry.operation} · {formatDate(entry.createdAt)}
+                  {entry.actor} · {entry.operation} · {formatDate(entry.createdAt, lang)}
                 </p>
                 <p className="mt-1">{entry.summary}</p>
               </li>
