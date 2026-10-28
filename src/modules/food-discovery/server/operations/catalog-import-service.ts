@@ -67,6 +67,12 @@ export interface ImportApplyReport {
 export interface ImportValidateInput {
   readonly sourceName: string;
   readonly payload: unknown;
+  readonly format?: "json" | "csv";
+  readonly sourceUrl?: string | null;
+  readonly sourceVersion?: string | null;
+  readonly license?: string | null;
+  readonly attribution?: string | null;
+  readonly editorialNotes?: string | null;
 }
 
 export class CatalogImportService extends Context.Service<
@@ -323,12 +329,17 @@ export const CatalogImportServiceLive = Layer.effect(
 
         const job = yield* curation.insertImportJob({
           sourceName: trimmedSource,
-          format: "json",
+          format: input.format ?? "json",
           status: "staged",
           totalRecords: decoded.records.length,
           validRecords: 0,
           invalidRecords: 0,
           dryRun: true,
+          sourceUrl: input.sourceUrl ?? null,
+          sourceVersion: input.sourceVersion ?? null,
+          license: input.license ?? null,
+          attribution: input.attribution ?? null,
+          editorialNotes: input.editorialNotes ?? null,
         });
 
         const items: Array<ImportValidationItem> = [];
