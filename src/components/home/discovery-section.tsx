@@ -1,32 +1,45 @@
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
-import {
-  FOOD_LOCATIONS,
-  dishesInCategory,
-  localizedDishText,
-  type FoodCategory,
-} from "@/components/home/globe/food-locations";
+import { listCategoriesFn, searchDishesFn } from "@/modules/food-discovery/food.functions";
+import { SaveDishButton } from "@/routes/saved";
 import type { Locale, Messages } from "@/shared/i18n";
 
+const PAGE_SIZE = 24;
+
 /**
- * Discovery filter: "all" plus the FoodCategory TaggedEnum discriminant tags.
- * Tags (not enum instances) keep button identity and React keys on plain
- * string equality; dish matching below stays exhaustive via $match.
+ * Homepage discovery: real published catalog dishes only — no editorial
+ * fixtures, no invented availability. Every card links to its dish detail
+ * page, so the globe preview is never a dead end. Category chips come from
+ * the catalog taxonomy, never a hardcoded mapping.
  */
-type FilterId = FoodCategory["_tag"] | "all";
-
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
-  const [filter, setFilter] = useState<FilterId>("all");
+  const [category, setCategory] = useState<string | null>(null);
 
-  const filters: Array<{ id: FilterId; label: string }> = [
-    { id: "all", label: copy.discoverAll },
-    { id: "LocalFavorites", label: copy.categoryLocalFavorites },
-    { id: "StreetFood", label: copy.categoryStreetFood },
-    { id: "ComfortingBowls", label: copy.categoryComfortingBowls },
-    { id: "WorthTravelling", label: copy.categoryWorthTravelling },
-  ];
+  const categories = useQuery({
+    queryKey: ["catalog", "categories"],
+    queryFn: () => listCategoriesFn(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
 
-  const dishes = filter === "all" ? FOOD_LOCATIONS : dishesInCategory(FOOD_LOCATIONS, filter);
+  const dishes = useQuery({
+    queryKey: ["catalog", "homepage-dishes", lang, category],
+    queryFn: () => {
+      if (category === null) {
+        return searchDishesFn({ data: { locale: lang, limit: PAGE_SIZE } });
+      }
+
+      return searchDishesFn({
+        data: { locale: lang, limit: PAGE_SIZE, category: [category], category_mode: "any" },
+      });
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const options = categories.data ?? [];
 
   return (
     <section
@@ -44,45 +57,118 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
 
         <p className="mb-6 max-w-[60ch] text-lg text-muted">{copy.discoverIntro}</p>
 
+        {categories.isError ? (
+          <p role="alert" className="mb-4 text-sm font-bold text-danger">
+            Could not load dish categories — showing everything.
+          </p>
+        ) : null}
+
         <fieldset className="mb-8 flex flex-wrap gap-2 border-0 p-0">
           <legend className="sr-only">{copy.discoverHeading}</legend>
 
-          {filters.map((option) => (
+          <button
+            type="button"
+            aria-pressed={category === null}
+            onClick={() => {
+              setCategory(null);
+            }}
+            className="min-h-11 cursor-pointer rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink hover:border-food-orange aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-white"
+          >
+            {copy.discoverAll}
+          </button>
+
+          {options.map((entry) => (
             <button
-              key={option.id}
+              key={entry.slug}
               type="button"
-              aria-pressed={filter === option.id}
+              aria-pressed={category === entry.slug}
               onClick={() => {
-                setFilter(option.id);
+                setCategory(category === entry.slug ? null : entry.slug);
               }}
               className="min-h-11 cursor-pointer rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink hover:border-food-orange aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-white"
             >
-              {option.label}
+              {entry.displayName ?? entry.slug}
             </button>
           ))}
         </fieldset>
 
-        <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
-          {dishes.map((dish) => (
-            <li key={dish.id}>
-              <article className="flex h-full flex-col gap-2 rounded-2xl border border-border-soft bg-white p-6 transition hover:-translate-y-0.5 hover:border-food-orange hover:shadow-[0_12px_28px_rgba(194,65,12,0.12)]">
-                <span aria-hidden="true" className="text-4xl leading-none">
-                  {dish.emoji}
-                </span>
+        {dishes.isPending ? (
+          <output className="block text-base font-semibold text-muted">Loading dishes…</output>
+        ) : null}
 
-                <h3 className="text-lg leading-tight font-extrabold">{dish.name}</h3>
+        {dishes.isError ? (
+          <p
+            role="alert"
+            className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+          >
+            Could not load dishes from the catalog.
+          </p>
+        ) : null}
 
-                <p className="text-sm font-semibold text-food-orange-strong">
-                  {localizedDishText(dish.country, lang)} · {localizedDishText(dish.region, lang)}
-                </p>
+        {dishes.data !== undefined && dishes.data.items.length === 0 ? (
+          <p className="text-base text-muted">No dishes in the public catalog yet.</p>
+        ) : null}
 
-                <p className="text-[0.95rem] text-muted">
-                  {localizedDishText(dish.description, lang)}
-                </p>
-              </article>
-            </li>
-          ))}
-        </ul>
+        {dishes.data !== undefined && dishes.data.items.length > 0 ? (
+          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
+            {dishes.data.items.map((dish) => {
+              const title = dish.name ?? dish.englishName ?? dish.slug;
+
+              const showEnglish =
+                dish.name !== undefined &&
+                dish.englishName !== undefined &&
+                dish.name !== dish.englishName;
+
+              return (
+                <li key={dish.id}>
+                  <article className="flex h-full flex-col gap-2 rounded-2xl border border-border-soft bg-white p-6 transition hover:-translate-y-0.5 hover:border-food-orange hover:shadow-[0_12px_28px_rgba(194,65,12,0.12)]">
+                    <h3 className="text-lg leading-tight font-extrabold">
+                      <Link
+                        to="/dishes/$dishId"
+                        params={{ dishId: dish.slug }}
+                        search={{ lang }}
+                        className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
+                      >
+                        {title}
+                      </Link>
+                    </h3>
+
+                    {showEnglish ? (
+                      <p className="text-sm font-semibold text-food-orange-strong">
+                        {dish.englishName}
+                      </p>
+                    ) : null}
+
+                    {[...dish.regionNames, ...dish.categorySlugs].length > 0 ? (
+                      <ul className="flex flex-wrap gap-2" aria-label={title}>
+                        {[...dish.regionNames, ...dish.categorySlugs].map((chip) => (
+                          <li
+                            key={chip}
+                            className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted"
+                          >
+                            {chip}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+
+                    <div className="mt-auto flex flex-wrap items-center gap-3 pt-2">
+                      <Link
+                        to="/dishes/$dishId"
+                        params={{ dishId: dish.slug }}
+                        search={{ lang }}
+                        className="inline-flex min-h-11 items-center text-sm font-bold text-brand-blue-hover underline underline-offset-4"
+                      >
+                        View dish
+                      </Link>
+                      <SaveDishButton dishId={dish.id} lang={lang} returnTo="/" />
+                    </div>
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
     </section>
   );
