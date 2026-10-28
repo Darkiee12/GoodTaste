@@ -13,6 +13,7 @@ import {
 } from "@/server/auth/errors";
 import type { PermissionRequest } from "@/server/auth/permissions";
 import type { Database } from "@/server/database/client";
+import { DatabaseUnavailable } from "@/server/database/errors";
 import type { DatabaseError } from "@/server/database/query";
 
 /**
@@ -58,14 +59,18 @@ const toTrustedSession = (
 
 export const resolveSession = (
   headers: Headers,
-): Effect.Effect<TrustedSession, SignInRequired | UserSuspended> =>
+): Effect.Effect<TrustedSession, SignInRequired | UserSuspended | DatabaseUnavailable> =>
   Effect.gen(function* () {
     // SAFETY: Better Auth's client types are any-laden; ResolvedSession
     // names the documented get-session shape and every field is
-    // defensively checked (null session, banned flag).
-    const resolved = (yield* Effect.promise(() =>
-      auth.api.getSession({ headers }),
-    )) as ResolvedSession | null;
+    // defensively checked (null session, banned flag). A rejected lookup
+    // means the session store is unreachable, which is distinct from "no
+    // session": it fails as DatabaseUnavailable (503) rather than
+    // masquerading as an anonymous visitor.
+    const resolved = (yield* Effect.tryPromise({
+      try: () => auth.api.getSession({ headers }),
+      catch: () => new DatabaseUnavailable({ operation: "session/get" }),
+    })) as ResolvedSession | null;
 
     if (resolved === null) {
       return yield* new SignInRequired({ required: "member" });
@@ -74,32 +79,10 @@ export const resolveSession = (
     return yield* toTrustedSession(resolved);
   });
 
-/** Public reads: authenticated members resolve, everyone else is a guest. */
-export const resolveActor = (headers: Headers): Effect.Effect<Actor> =>
-  Effect.orElseSucceed(
-    Effect.gen(function* () {
-      // SAFETY: same documented get-session shape as above; guests are the
-      // fallback for any failure, so a shape mismatch can only demote.
-      const resolved = (yield* Effect.promise(() =>
-        auth.api.getSession({ headers }),
-      )) as ResolvedSession | null;
-
-      if (resolved === null) {
-        return Actor.Guest();
-      }
-
-      if (resolved.user.banned === true) {
-        return Actor.Guest();
-      }
-
-      return Actor.Member({ userId: resolved.user.id });
-    }),
-    () => Actor.Guest(),
-  );
-
 export const requireAuthenticatedActor = (
   headers: Headers,
-): Effect.Effect<TrustedSession, SignInRequired | UserSuspended> => resolveSession(headers);
+): Effect.Effect<TrustedSession, SignInRequired | UserSuspended | DatabaseUnavailable> =>
+  resolveSession(headers);
 
 /**
  * Three-stage gate used by every protected operation:

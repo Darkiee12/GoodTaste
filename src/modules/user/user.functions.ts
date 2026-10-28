@@ -364,7 +364,7 @@ export const revokeSessionFn = createServerFn({ method: "POST" })
       withActor(
         Actor.Member({ userId: trusted.userId }),
         effects.Effect.flatMap(SessionService, (service) =>
-          service.revokeSession(headers, data.session_token),
+          service.revokeSession(headers, data.session_id),
         ).pipe(
           effects.Effect.tap(() =>
             audit.recordAuditEvent({
