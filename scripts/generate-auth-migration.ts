@@ -2,14 +2,14 @@
  * Emits Better Auth's PostgreSQL DDL for review into a Flyway migration.
  * Codegen only: stub credentials are never used at runtime.
  *
- *   DATABASE_URL=postgres://user:pass@host:port/db bun scripts/generate-auth-migration.ts
+ *   DATABASE_URL=<connection-url-for-codegen> bun scripts/generate-auth-migration.ts
  *
  * The pool connects lazily; whether codegen touches the live database is
  * verified by running it against an unreachable host (see the migration
  * runbook). All imports are dynamic because static imports would execute
  * before the stub environment below is installed.
  */
-process.env.DATABASE_URL ??= "postgres://stub:stub@localhost:5432/stub";
+process.env.DATABASE_URL ??= "postgres://localhost:5432/stub";
 
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 
