@@ -17,3 +17,14 @@ export const authPool = createAuthPool(env.DATABASE_URL);
 export const auth = createAuth(buildAuthOptions(env, sendOutboundEmail, authPool));
 
 export type Auth = typeof auth;
+
+/**
+ * Closes the process-scoped Better Auth pool. Production keeps one pool for
+ * the process lifetime and relies on platform teardown; tests and codegen
+ * close their own isolated pools. Exported so a future supported shutdown
+ * hook can dispose it explicitly — callers must not invent process-signal
+ * handlers around it (see docs/architecture/authentication.md).
+ */
+export const closeAuthPool = async (): Promise<void> => {
+  await authPool.end();
+};
