@@ -28,7 +28,7 @@ const statements = {
   session: ["list", "revoke", "delete", "revoke-own", "revoke-any", "list-own", "list-any"],
   favorite: ["create", "read", "delete"],
   profile: ["read", "update"],
-  food: ["read", "create", "update", "publish"],
+  food: ["read", "create", "update", "publish", "import"],
   restaurant: ["read", "submit", "verify"],
   moderation: ["read", "resolve"],
   support: ["read", "manage"],
