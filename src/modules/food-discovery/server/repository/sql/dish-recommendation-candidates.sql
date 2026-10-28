@@ -2,7 +2,8 @@ WITH input AS (
   SELECT :cuisine::nullable(text) AS cuisine,
     :country::nullable(text) AS country,
     :excluded_ids::bigint[] AS excluded_ids,
-    :locale::text AS locale
+    :locale::text AS locale,
+    :meal::text AS meal
 )
 SELECT d.id::text AS id,
   d.slug AS slug,
@@ -108,5 +109,30 @@ WHERE d.status = 'published'
     FROM feastjourney.dish_ingredients AS di
     WHERE di.dish_id = d.id AND di.ingredient_id = ANY(input.excluded_ids)
   )
-ORDER BY d.id ASC
+-- Relevance-aware stable order mirroring rankDeterministic in
+-- recommendation-service.ts: cuisine match first (when requested), then
+-- meal-category match ("anything" skips), then id ASC. No ORDER BY random:
+-- the candidate window must be deterministic across seed changes.
+ORDER BY
+  CASE
+    WHEN input.cuisine IS NULL THEN 1
+    WHEN EXISTS (
+      SELECT 1
+      FROM feastjourney.dish_cuisines AS dc
+      JOIN feastjourney.cuisines AS c ON c.id = dc.cuisine_id
+      WHERE dc.dish_id = d.id AND c.slug = input.cuisine
+    ) THEN 0
+    ELSE 1
+  END ASC,
+  CASE
+    WHEN input.meal = 'anything' THEN 1
+    WHEN EXISTS (
+      SELECT 1
+      FROM feastjourney.dish_categories AS dc
+      JOIN feastjourney.categories AS c ON c.id = dc.category_id
+      WHERE dc.dish_id = d.id AND c.slug = input.meal
+    ) THEN 0
+    ELSE 1
+  END ASC,
+  d.id ASC
 LIMIT :limit::int

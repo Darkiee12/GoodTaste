@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 
 import {
   dishDetailParamsSchema,
   dishSearchQuerySchema,
+  localeSchema,
   nameSearchQuerySchema,
   recommendationQuerySchema,
   relatedQuerySchema,
 } from "@/modules/food-discovery/food.schema";
-import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 
 const loadServer = () =>
   Promise.all([
@@ -26,6 +27,10 @@ const loadRecommendServer = () =>
     import("@/server/auth/actor"),
     import("@/server/auth/current-actor"),
     import("@/server/runtime"),
+    import("@/server/http/rate-limit"),
+    import("@tanstack/react-start/server"),
+    import("@/server/http/request"),
+    import("@/server/config"),
   ]);
 
 /**
@@ -137,25 +142,90 @@ export const listCategoriesFn = createServerFn({ method: "GET" }).handler(async 
   );
 });
 
+export const listCuisinesFn = createServerFn({ method: "GET" })
+  .validator(z.object({ locale: localeSchema.optional() }))
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.listCuisines(data.locale ?? "en"),
+        ),
+      ),
+      "fn/cuisines/list",
+      15000,
+      "server-fn",
+    );
+  });
+
 /**
  * Public dish recommendations: deterministic baseline, optionally re-ranked
- * by Muse when MODEL_API_KEY is configured. No authentication needed.
- * The outcome envelope always returns HTTP 200; empty pools and
- * unresolvable allergies are honest outcomes, not errors.
+ * by Muse when RECOMMENDATION_PROVIDER is "muse" with valid credentials. No
+ * authentication needed. The outcome envelope always returns HTTP 200; empty
+ * pools and allergy refusals are honest outcomes, not errors. Auth, permanent
+ * provider, and misconfiguration failures reject and surface as HTTP 500.
  */
 export const recommendDishesFn = createServerFn({ method: "POST" })
   .validator(recommendationQuerySchema)
   .handler(async ({ data }) => {
     const [
       effects,
-      { RecommendationService, RecommendationOutcome },
+      { RecommendationService, toWireOutcome },
       { Actor },
       { withActor },
       { runApp },
+      { RateLimitPolicy },
+      server,
+      { resolveIdentityFromHeaders },
+      { appConfig },
     ] = await loadRecommendServer();
 
-    const noDishes: Array<DishSummary> = [];
-    const noNotes: Array<string> = [];
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    // Enforce the public recommendation budget BEFORE any database or model
+    // work. Thrown Responses bypass TanStack's header filtering, so the
+    // 429 status and Retry-After survive to the client (verified against
+    // the installed start-server-core handler).
+    await runApp(
+      effects.Effect.flatMap(RateLimitPolicy, (policy) =>
+        effects.Effect.flatMap(appConfig, (config) =>
+          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+            effects.Effect.catchTag("RateLimitExceeded", (failure) =>
+              effects.Effect.die(
+                new Response(
+                  JSON.stringify({
+                    error: "rate_limited",
+                    retryAfterSeconds: failure.retryAfterSeconds,
+                  }),
+                  {
+                    status: 429,
+                    headers: {
+                      "content-type": "application/json",
+                      "Retry-After": String(failure.retryAfterSeconds),
+                    },
+                  },
+                ),
+              ),
+            ),
+            effects.Effect.catchTag("StoreUnavailable", () =>
+              effects.Effect.die(
+                new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+                  status: 503,
+                  headers: { "content-type": "application/json" },
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+      "fn/dishes/recommend-rate-limit",
+      5000,
+      requestId,
+    );
 
     const outcome = await runApp(
       withActor(
@@ -177,24 +247,5 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       "server-fn",
     );
 
-    return RecommendationOutcome.$match(outcome, {
-      Ready: ({ dishes, mode, warnings }) => ({
-        mode,
-        dishes: [...dishes],
-        warnings: [...warnings],
-        reasons: noNotes,
-      }),
-      Uncertain: ({ reasons }) => ({
-        mode: "uncertain" as const,
-        dishes: noDishes,
-        warnings: noNotes,
-        reasons: [...reasons],
-      }),
-      Empty: ({ reasons }) => ({
-        mode: "empty" as const,
-        dishes: noDishes,
-        warnings: noNotes,
-        reasons: [...reasons],
-      }),
-    });
+    return toWireOutcome(outcome);
   });

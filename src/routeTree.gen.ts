@@ -23,6 +23,7 @@ import { Route as AdminImportsRouteImport } from './routes/admin.imports'
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as DishesDishIdRouteImport } from './routes/dishes.$dishId'
 import { Route as HealthLiveRouteImport } from './routes/health.live'
 import { Route as HealthReadyRouteImport } from './routes/health.ready'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
@@ -126,6 +127,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => AdminRoute,
+} as any)
+const DishesDishIdRoute = DishesDishIdRouteImport.update({
+  id: '/dishes/$dishId',
+  path: '/dishes/$dishId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const HealthLiveRoute = HealthLiveRouteImport.update({
   id: '/health/live',
@@ -315,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -363,6 +370,7 @@ export interface FileRoutesByTo {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -413,6 +421,7 @@ export interface FileRoutesById {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -464,6 +473,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
@@ -512,6 +522,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
@@ -561,6 +572,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
     | '/settings/account'
@@ -606,6 +618,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
+  DishesDishIdRoute: typeof DishesDishIdRoute
   HealthLiveRoute: typeof HealthLiveRoute
   HealthReadyRoute: typeof HealthReadyRoute
   SettingsAccountRoute: typeof SettingsAccountRoute
@@ -722,6 +735,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/dishes/$dishId': {
+      id: '/dishes/$dishId'
+      path: '/dishes/$dishId'
+      fullPath: '/dishes/$dishId'
+      preLoaderRoute: typeof DishesDishIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/health/live': {
       id: '/health/live'
@@ -1109,6 +1129,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   VerifyEmailRoute: VerifyEmailRoute,
+  DishesDishIdRoute: DishesDishIdRoute,
   HealthLiveRoute: HealthLiveRoute,
   HealthReadyRoute: HealthReadyRoute,
   SettingsAccountRoute: SettingsAccountRoute,

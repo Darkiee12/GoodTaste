@@ -1,10 +1,10 @@
 /**
- * Finite vocabularies for the public recommendation chooser.
+ * Browser-safe finite vocabularies for the public recommendation chooser.
  *
- * These are closed product vocabularies (not open strings): the transport
- * validates them with Zod enums derived from the same tuples, and the
- * application operation consumes the union types. Open-ended inputs
- * (cuisine slug, ISO country, locale tag, ingredient names) stay strings.
+ * Single source of truth shared by the Zod transport schemas, the domain
+ * input contracts, the Meta ranking context, and the UI option lists.
+ * Pure constants only: this module must stay free of server, Effect, and
+ * Zod imports so browser bundles never pull server code.
  */
 export const MEAL_OCCASIONS = [
   "breakfast",

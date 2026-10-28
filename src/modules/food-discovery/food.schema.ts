@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  MEAL_OCCASIONS,
+  RECOMMENDATION_MOODS,
+} from "@/modules/food-discovery/recommendation.constants";
+
 export const localeSchema = z
   .string()
   .regex(/^[a-z]{2,3}(-[A-Za-z]{2,8})?$/, "locale must be a BCP 47 tag")
@@ -67,13 +72,9 @@ export const placeDishesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const mealSchema = z
-  .enum(["breakfast", "lunch", "dinner", "snack", "dessert", "anything"])
-  .default("anything");
+const mealSchema = z.enum(MEAL_OCCASIONS).default("anything");
 
-const recommendationMoodSchema = z
-  .enum(["comforting", "light", "hearty", "spicy", "adventurous", "surprise", "any"])
-  .default("any");
+const recommendationMoodSchema = z.enum(RECOMMENDATION_MOODS).default("any");
 
 export const recommendationQuerySchema = z.object({
   meal: mealSchema,
