@@ -215,10 +215,9 @@ const validateRankedIds = (
 // tests). Cuisine match outranks meal-category match, then id ASC keeps
 // the order stable across seed changes. Mirrors the SQL ORDER BY so the
 // candidate window and the final slice agree.
-const rankDeterministic = (
+const rankAllDeterministic = (
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   input: RecommendDishesInput,
-  outputLimit: number,
 ): Array<RecommendationCandidateRow> => {
   const mealSlug = input.meal === "anything" ? null : input.meal;
 
@@ -240,7 +239,7 @@ const rankDeterministic = (
     (left, right) => right.score - left.score || compareIds(left.candidate.id, right.candidate.id),
   );
 
-  return scored.slice(0, outputLimit).map((entry) => entry.candidate);
+  return scored.map((entry) => entry.candidate);
 };
 
 // Auth and permanent failures are observable: error log with status only (no
@@ -340,27 +339,34 @@ interface RankingLimits {
   readonly outputLimit: number;
 }
 
-// Bounded Surprise rotation: stable order stays reproducible when the seed
-// is 0; a nonzero seed rotates the ranked slice so repeated Surprise clicks
-// vary without touching SQL eligibility, without ORDER BY random(), and
-// without fetching the catalog into JavaScript. Rotation applies after
-// ranking, so hard constraints (published, cuisine/region, ingredient
-// anti-joins) and allergy refusals are unaffected.
-const rotateForSurprise = <T>(items: ReadonlyArray<T>, seed: number): Array<T> => {
-  if (items.length < 2 || seed === 0) {
-    return [...items];
+// Bounded Surprise variety: seed 0 keeps the stable deterministic head; a
+// nonzero seed offsets a window into the ranked pool, so repeated Surprise
+// clicks surface different dishes rather than a reordered top 10. The window
+// applies after SQL eligibility and scoring, so hard constraints (published,
+// cuisine/region, ingredient anti-joins) and allergy refusals are
+// unaffected; there is no ORDER BY random() and nothing fetches the catalog
+// into JavaScript. Small pools degrade gracefully to the whole pool.
+const windowForSurprise = <T>(sorted: ReadonlyArray<T>, seed: number, limit: number): Array<T> => {
+  if (sorted.length <= limit || seed === 0) {
+    return sorted.slice(0, limit);
   }
 
-  const offset = seed % items.length;
+  const offset = seed % sorted.length;
+  const count = Math.min(limit, sorted.length);
+  const windowed: Array<T> = [];
 
-  if (offset === 0) {
-    return [...items];
+  for (let index = 0; index < count; index += 1) {
+    const entry = sorted[(offset + index) % sorted.length];
+
+    if (entry !== undefined) {
+      windowed.push(entry);
+    }
   }
 
-  return [...items.slice(offset), ...items.slice(0, offset)];
+  return windowed;
 };
 
-const SURPRISE_NOTE = "Surprise variety applied: rotated the ranked dishes.";
+const SURPRISE_NOTE = "Surprise variety applied: showing a different slice of the eligible pool.";
 
 const serveRecommendations = (
   input: RecommendDishesInput,
@@ -387,29 +393,33 @@ const serveRecommendations = (
       });
     }
 
-    const deterministicTop = rankDeterministic(candidates, input, limits.outputLimit);
+    const sortedAll = rankAllDeterministic(candidates, input);
+
+    const deterministicTop = windowForSurprise(sortedAll, input.surpriseSeed, limits.outputLimit);
     const deterministicIds = deterministicTop.map((candidate) => candidate.id);
 
     yield* Effect.logInfo("Recommendation candidates resolved").pipe(
       Effect.annotateLogs({
-        backend: muse === null ? "deterministic" : "muse",
+        backend: muse === null || input.surpriseSeed > 0 ? "deterministic" : "muse",
         candidateCount: candidates.length,
         returnedCount: deterministicTop.length,
       }),
     );
 
-    if (muse === null) {
-      const dishes = rotateForSurprise(
-        deterministicTop.map((candidate) => toSummary(candidate)),
-        input.surpriseSeed,
-      );
+    // Surprise bypasses the provider even when one is configured: the point
+    // is deterministic pool variety at no model cost, stated honestly in the
+    // warnings. The standard path below always runs with seed 0.
+    if (muse === null || input.surpriseSeed > 0) {
+      const dishes = deterministicTop.map((candidate) => toSummary(candidate));
 
       const surpriseWarnings =
-        input.surpriseSeed === 0 ? [...warnings] : [...warnings, SURPRISE_NOTE];
+        input.surpriseSeed === 0
+          ? [...warnings, ...(muse === null ? [AI_NOT_CONFIGURED_NOTE] : [])]
+          : [...warnings, SURPRISE_NOTE];
 
       return RecommendationOutcome.ReadyDeterministic({
         dishes,
-        warnings: [...surpriseWarnings, AI_NOT_CONFIGURED_NOTE],
+        warnings: surpriseWarnings,
       });
     }
 
@@ -422,7 +432,7 @@ const serveRecommendations = (
     );
 
     const byId = new Map(candidates.map((candidate) => [candidate.id, candidate] as const));
-    const hydrated: Array<DishSummary> = [];
+    const dishes: Array<DishSummary> = [];
 
     const rankedIds = MuseRankResult.$match(ranked, {
       Ranked: ({ ids }) => ids,
@@ -433,21 +443,16 @@ const serveRecommendations = (
       const row = byId.get(id);
 
       if (row !== undefined) {
-        hydrated.push(toSummary(row));
+        dishes.push(toSummary(row));
       }
     }
 
-    const dishes = rotateForSurprise(hydrated, input.surpriseSeed);
-
-    const surpriseWarnings =
-      input.surpriseSeed === 0 ? [...warnings] : [...warnings, SURPRISE_NOTE];
-
     return MuseRankResult.$match(ranked, {
-      Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: surpriseWarnings }),
+      Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: [...warnings] }),
       Degraded: ({ warning }) =>
         RecommendationOutcome.ReadyDeterministic({
           dishes,
-          warnings: [...surpriseWarnings, warning],
+          warnings: [...warnings, warning],
         }),
     });
   });

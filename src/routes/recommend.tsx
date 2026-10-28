@@ -15,6 +15,7 @@ import {
   type MealOccasion,
   type RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
+import { SaveDishButton } from "@/modules/user/components/save-dish-button";
 import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -264,11 +265,12 @@ export const removeSavedPrefs = (remove: () => void): void => {
 /**
  * Tab-scoped journey snapshot: preserves the in-progress quiz (meal, mood,
  * draft, step, submitted payload, results flag, surprise seed) across dish
- * detail visits within the same tab. Session storage, never local storage:
- * closing the tab forgets the journey, and no other tab or device sees it.
- * Corruption or schema drift restores nothing; opt-in local prefs stay separate.
+ * detail visits within the same tab. In-memory only, never written to disk:
+ * dietary text must not land in storage without the opt-in preference, and
+ * closing or reloading the tab forgets the journey. A full reload falls back
+ * to the opt-in local preferences (restrictions/region) with meal and mood
+ * at their defaults.
  */
-const JOURNEY_KEY = "feastjourney.recommend.journey.v1";
 
 const journeySnapshotSchema = z.object({
   meal: z.enum(MEAL_OCCASIONS).default("anything"),
@@ -301,26 +303,30 @@ const journeySnapshotSchema = z.object({
 
 type JourneySnapshot = z.infer<typeof journeySnapshotSchema>;
 
+// Module-scoped, client-only: the SPA keeps this module alive across
+// client-side navigation, so dish detail visits remounting this route restore
+// from here. Server rendering never touches it (window guard), so concurrent
+// requests cannot share state.
+let journeyCache: JourneySnapshot | null = null;
+
 const readJourneySnapshot = (): JourneySnapshot | null => {
   if (typeof window === "undefined") {
     return null;
   }
 
-  try {
-    const raw = window.sessionStorage.getItem(JOURNEY_KEY);
+  return journeyCache;
+};
 
-    if (raw === null) {
-      return null;
-    }
-
-    // SAFETY: session storage holds our own JSON snapshot; unknown is
-    // validated by journeySnapshotSchema below, never trusted directly.
-    const result = journeySnapshotSchema.safeParse(JSON.parse(raw) as unknown);
-
-    return result.success ? result.data : null;
-  } catch {
-    return null;
+const writeJourneySnapshot = (snapshot: JourneySnapshot): void => {
+  if (typeof window === "undefined") {
+    return;
   }
+
+  journeyCache = snapshot;
+};
+
+const clearJourneySnapshot = (): void => {
+  journeyCache = null;
 };
 
 /**
@@ -443,6 +449,7 @@ type RecommendResult = Awaited<ReturnType<typeof recommendDishesFn>>;
 
 function Recommend() {
   const { lang } = rootRoute.useSearch();
+  const { session } = rootRoute.useRouteContext();
   const copy = messagesFor(lang);
 
   const [journey] = useState<JourneySnapshot | null>(readJourneySnapshot);
@@ -488,9 +495,9 @@ function Recommend() {
     () =>
       (places.data ?? [])
         .flatMap((entry) =>
-          entry.iso3166 === null
-            ? []
-            : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
+          entry.kind === "country" && entry.iso3166 !== null
+            ? [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }]
+            : [],
         )
         .toSorted((left, right) => left.label.localeCompare(right.label)),
     [places.data],
@@ -501,29 +508,26 @@ function Recommend() {
   });
 
   const restoredRef = useRef(false);
+  const previousLangRef = useRef(lang);
+  const submittedRef = useRef(submitted);
+  submittedRef.current = submitted;
+  const showResultsRef = useRef(showResults);
+  showResultsRef.current = showResults;
 
-  // Persist the in-progress journey per tab so dish detail visits (back
+  // Persist the in-progress journey in memory so dish detail visits (back
   // navigation remounts this route) restore form, step, and results context.
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    const snapshot: JourneySnapshot = {
+      meal,
+      mood,
+      draft,
+      stepIndex,
+      submitted,
+      showResults,
+      surpriseSeed,
+    };
 
-    try {
-      const snapshot: JourneySnapshot = {
-        meal,
-        mood,
-        draft,
-        stepIndex,
-        submitted,
-        showResults,
-        surpriseSeed,
-      };
-
-      window.sessionStorage.setItem(JOURNEY_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Storage full or blocked: the journey simply does not restore.
-    }
+    writeJourneySnapshot(snapshot);
   }, [meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed]);
 
   // On remount with a restored results flag, re-run the submitted search once
@@ -541,6 +545,25 @@ function Recommend() {
     // Mount-only restore: the mutation object is stable for this purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switching language while results are visible re-runs the submitted
+  // search in the new locale instead of showing stale-language dishes.
+  useEffect(() => {
+    if (previousLangRef.current === lang) {
+      return;
+    }
+
+    previousLangRef.current = lang;
+    setStepError(null);
+
+    const active = submittedRef.current;
+
+    if (active !== null && showResultsRef.current) {
+      const relocalized: RecommendPayload = { ...active, locale: lang };
+      setSubmitted(relocalized);
+      recommend.mutate(relocalized);
+    }
+  }, [lang, recommend]);
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     persistPrefs(remember, payload.avoid, payload.allergies, payload.cuisine, payload.country);
@@ -630,8 +653,8 @@ function Recommend() {
   /**
    * Surprise keeps the current meal, mood, region, and exclusions and never
    * touches saved preferences: no persist, no clear. Each click bumps a
-   * bounded seed so the server rotates the ranked slice — same eligible
-   * pool, visibly different order. Allergies still refuse before ranking.
+   * bounded seed so the server offsets a window into the eligible pool —
+   * same filters, different dishes. Allergies still refuse before ranking.
    */
   const surprise = (): void => {
     const nextSeed = surpriseSeed + 1;
@@ -648,8 +671,9 @@ function Recommend() {
   const clearSaved = (): void => {
     if (typeof window !== "undefined") {
       removeSavedPrefs(() => window.localStorage.removeItem(PREFS_KEY));
-      window.sessionStorage.removeItem(JOURNEY_KEY);
     }
+
+    clearJourneySnapshot();
 
     recommend.reset();
     setDraft(EMPTY_DRAFT);
@@ -678,9 +702,7 @@ function Recommend() {
   };
 
   const startOver = (): void => {
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(JOURNEY_KEY);
-    }
+    clearJourneySnapshot();
 
     recommend.reset();
     setDraft(EMPTY_DRAFT);
@@ -1304,7 +1326,7 @@ function Recommend() {
                     ))}
                   </ul>
                 ) : null}
-                <p className="mt-1">
+                <p className="mt-1 flex flex-wrap items-center gap-3">
                   <Link
                     to="/dishes/$dishId"
                     params={{ dishId: dish.slug }}
@@ -1313,6 +1335,12 @@ function Recommend() {
                   >
                     {copyMessages.recViewDish}
                   </Link>
+                  <SaveDishButton
+                    dishId={dish.id}
+                    lang={lang}
+                    returnTo="/recommend"
+                    session={session}
+                  />
                 </p>
               </article>
             </li>

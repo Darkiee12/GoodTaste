@@ -526,7 +526,7 @@ describe("dish recommendations", () => {
     expect(counter.calls).toBe(0);
   });
 
-  test("surprise seed rotates the same eligible pool with an honest note", async () => {
+  test("surprise seed surfaces a different slice of the eligible pool", async () => {
     withRankingEnv({});
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
@@ -538,12 +538,49 @@ describe("dish recommendations", () => {
       (dish) => dish.id,
     );
 
-    expect([...varied].toSorted()).toEqual([...baseline].toSorted());
+    // Offset-1 window over the same ranking: drops the head, keeps the tail,
+    // pulls in the next eligible candidate.
     expect(varied).not.toEqual(baseline);
     expect(varied[0]).toBe(baseline[1]);
+    expect(varied.slice(0, baseline.length - 1)).toEqual(baseline.slice(1));
 
     const outcome = await recommendOn(runtime, { ...baseInput, surpriseSeed: 1 });
 
+    expect(warningsOf(outcome).some((warning) => warning.includes("Surprise variety"))).toBe(true);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("surprise bypasses the provider even when one is configured", async () => {
+    withRankingEnv({ provider: "muse", key: "test-key" });
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const outcome = await recommendOn(runtime, { ...baseInput, surpriseSeed: 2 });
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(warningsOf(outcome).some((warning) => warning.includes("Surprise variety"))).toBe(true);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("surprise on a small pool returns the whole pool with an honest note", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const baseline = dishesOf(await recommendOn(runtime, { ...baseInput, cuisine: "japanese" }));
+    expect(baseline.length).toBeGreaterThan(0);
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      cuisine: "japanese",
+      surpriseSeed: 5,
+    });
+
+    expect(
+      dishesOf(outcome)
+        .map((dish) => dish.id)
+        .toSorted(),
+    ).toEqual(baseline.map((dish) => dish.id).toSorted());
     expect(warningsOf(outcome).some((warning) => warning.includes("Surprise variety"))).toBe(true);
     expect(counter.calls).toBe(0);
   });

@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { getRouteApi, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { listCategoriesFn, searchDishesFn } from "@/modules/food-discovery/food.functions";
-import { SaveDishButton } from "@/routes/saved";
+import { SaveDishButton } from "@/modules/user/components/save-dish-button";
 import type { Locale, Messages } from "@/shared/i18n";
+
+const rootRoute = getRouteApi("__root__");
 
 const PAGE_SIZE = 24;
 
@@ -15,6 +17,7 @@ const PAGE_SIZE = 24;
  * the catalog taxonomy, never a hardcoded mapping.
  */
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
+  const { session } = rootRoute.useRouteContext();
   const [category, setCategory] = useState<string | null>(null);
 
   const categories = useQuery({
@@ -161,7 +164,7 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
                       >
                         View dish
                       </Link>
-                      <SaveDishButton dishId={dish.id} lang={lang} returnTo="/" />
+                      <SaveDishButton dishId={dish.id} lang={lang} returnTo="/" session={session} />
                     </div>
                   </article>
                 </li>

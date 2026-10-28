@@ -50,6 +50,11 @@ export const dishDetailParamsSchema = z.object({
   locale: localeSchema,
 });
 
+export const dishBatchQuerySchema = z.object({
+  ids: z.array(dbIdSchema).min(1).max(50),
+  locale: localeSchema,
+});
+
 export const relatedQuerySchema = z.object({
   locale: localeSchema,
   limit: z.coerce.number().int().min(1).max(20).default(8),
