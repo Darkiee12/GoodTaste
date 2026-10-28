@@ -3,7 +3,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
-import { resetPasswordFn } from "@/modules/user/user.functions";
+import { resetPasswordFn } from "@/modules/user/auth.functions";
 import { localeSearchSchema, messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");

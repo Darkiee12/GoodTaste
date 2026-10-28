@@ -2,11 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { AdminService } from "@/modules/food-discovery/server/operations/admin-service";
 import { CatalogService } from "@/modules/food-discovery/server/operations/catalog-service";
 import { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
 import { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
 import { withTransaction, Database } from "@/server/database/client";
+import { runQuery } from "@/server/database/query";
 import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
@@ -201,13 +203,27 @@ describe("publication validation", () => {
   });
 
   test("incomplete review drafts fail validation with reasons", async () => {
-    const jollof = await run(
-      Effect.flatMap(DishService, (service) =>
-        service.searchDishes({ q: "jollof", locale: "en", limit: 5 }),
+    const slug = `test-validate-${Date.now().toString(36)}`;
+    createdSlugs.push(slug);
+
+    const created = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.createDish("test", {
+          slug,
+          status: "draft",
+          names: [{ languageTag: "vi", name: "Món Thử", nameKind: "native" }],
+        }),
       ),
     );
 
-    expect(jollof.items).toHaveLength(0);
+    const check = await run(
+      Effect.flatMap(CurationService, (service) => service.validatePublication(BigInt(created.id))),
+    );
+
+    expect(check.publishable).toBe(false);
+    expect(check.reasons).toContain("published dishes require a preferred English name");
+    expect(check.reasons).toContain("published dishes require a description or summary");
+    expect(check.reasons).toContain("published dishes require at least one category");
   });
 });
 
@@ -238,22 +254,20 @@ describe("transactions", () => {
   });
 
   test("rejects place hierarchy cycles at the database boundary", async () => {
-    const exit = await appRuntime.runPromiseExit(
-      Effect.gen(function* () {
-        const db = yield* Database;
-
-        yield* Effect.tryPromise({
-          try: () =>
-            db.sql`INSERT INTO feastjourney.place_parents (place_id, parent_place_id)
-              SELECT child.id, parent.id
-              FROM feastjourney.places AS child, feastjourney.places AS parent
-              WHERE child.iso3166 = 'VN' AND parent.iso3166 = 'VN'`,
-          catch: (cause) => cause,
-        });
-      }),
+    const failure = await run(
+      Effect.flip(
+        runQuery(
+          "test/cycle",
+          (sql) =>
+            sql`INSERT INTO feastjourney.place_parents (place_id, parent_place_id)
+            SELECT child.id, parent.id
+            FROM feastjourney.places AS child, feastjourney.places AS parent
+            WHERE child.iso3166 = 'VN' AND parent.iso3166 = 'VN'`,
+        ),
+      ),
     );
 
-    expect(exit._tag).toBe("Failure");
+    expect(failure._tag).toBe("PersistenceError");
   });
 });
 
