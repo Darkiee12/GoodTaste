@@ -1,9 +1,18 @@
-import { Link, Outlet, createFileRoute, getRouteApi, redirect, useChildMatches } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  getRouteApi,
+  redirect,
+  useChildMatches,
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
 import { adminImportJobsFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
+import { formatAdminDate } from "@/shared/format";
+import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -56,12 +65,12 @@ type ImportJob = z.infer<typeof importJobSchema>;
 
 type JobStatusFilter = "all" | ImportJob["status"];
 
-const STATUS_FILTERS: ReadonlyArray<{ value: JobStatusFilter; label: string }> = [
-  { value: "all", label: "All statuses" },
-  { value: "staged", label: "Staged" },
-  { value: "validated", label: "Validated" },
-  { value: "applied", label: "Applied" },
-  { value: "failed", label: "Failed" },
+const STATUS_FILTERS: ReadonlyArray<JobStatusFilter> = [
+  "all",
+  "staged",
+  "validated",
+  "applied",
+  "failed",
 ];
 
 type CellValue = string | number | boolean | null;
@@ -76,6 +85,7 @@ const cellText = (value: CellValue): string => {
 
 function AdminImports() {
   const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
   const childMatches = useChildMatches();
   const loaded: unknown = Route.useLoaderData();
   const initial = importJobsSchema.parse(loaded);
@@ -96,10 +106,10 @@ function AdminImports() {
   });
 
   const selectStatusFilter = (value: string): void => {
-    const next = STATUS_FILTERS.find((option) => option.value === value);
+    const next = STATUS_FILTERS.find((entry) => entry === value);
 
     if (next !== undefined) {
-      setStatusFilter(next.value);
+      setStatusFilter(next);
     }
   };
 
@@ -109,100 +119,103 @@ function AdminImports() {
 
       {childMatches.length === 0 ? (
         <div>
-          <h1 className="font-display text-4xl tracking-wide">Dataset imports</h1>
+          <h1 className="font-display text-4xl tracking-wide">{copy.adminImportsTitle}</h1>
 
-      <p>
-        Review past imports. Applying an import sends records to editorial review, never to the
-        public catalog.
-      </p>
+          <p>{copy.adminImportsIntro}</p>
 
-      <p>
-        <Link
-          to="/admin/imports/new"
-          search={{ lang }}
-          className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white"
-        >
-          New import
-        </Link>
-      </p>
+          <p>
+            <Link
+              to="/admin/imports/new"
+              search={{ lang }}
+              className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white"
+            >
+              {copy.adminImportsNew}
+            </Link>
+          </p>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-        }}
-      >
-        <label>
-          Filter by status
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              selectStatusFilter(event.target.value);
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
             }}
           >
-            {STATUS_FILTERS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <label>
+              {copy.adminImportsFilterStatus}
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  selectStatusFilter(event.target.value);
+                }}
+              >
+                {STATUS_FILTERS.map((value) => (
+                  <option key={value} value={value}>
+                    {value === "all" ? copy.adminImportsAllStatuses : value}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <label>
-          Search by source name
-          <input
-            type="search"
-            value={searchText}
-            placeholder="e.g. partner dataset"
-            onChange={(event) => {
-              setSearchText(event.target.value);
-            }}
-          />
-        </label>
-      </form>
+            <label>
+              {copy.adminImportsSearchSource}
+              <input
+                type="search"
+                value={searchText}
+                placeholder={copy.adminImportsSearchPlaceholder}
+                onChange={(event) => {
+                  setSearchText(event.target.value);
+                }}
+              />
+            </label>
+          </form>
 
-      <div className="overflow-x-auto">
-        <table>
-          <caption>
-            {jobs.length} of {initial.length} import jobs
-          </caption>
+          <div className="overflow-x-auto">
+            <table>
+              <caption>
+                {jobs.length} of {initial.length} import jobs
+              </caption>
 
-          <thead>
-            <tr>
-              <th scope="col">Job</th>
-              <th scope="col">Source</th>
-              <th scope="col">Format</th>
-              <th scope="col">Status</th>
-              <th scope="col">Total</th>
-              <th scope="col">Valid</th>
-              <th scope="col">Invalid</th>
-              <th scope="col">Created</th>
-              <th scope="col">Completed</th>
-            </tr>
-          </thead>
+              <thead>
+                <tr>
+                  <th scope="col">{copy.adminImportsJob}</th>
+                  <th scope="col">{copy.adminSource}</th>
+                  <th scope="col">{copy.adminImportsFormat}</th>
+                  <th scope="col">{copy.adminStatus}</th>
+                  <th scope="col">{copy.adminImportsTotal}</th>
+                  <th scope="col">{copy.adminImportsValid}</th>
+                  <th scope="col">{copy.adminImportsInvalid}</th>
+                  <th scope="col">{copy.adminCreated}</th>
+                  <th scope="col">{copy.adminCompleted}</th>
+                </tr>
+              </thead>
 
-          <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id}>
-                <td>
-                  <Link to="/admin/imports/$jobId" params={{ jobId: job.id }} search={{ lang }}>
-                    Job {job.id}
-                  </Link>
-                </td>
-                <td>{job.source_name}</td>
-                <td>{job.format}</td>
-                <td>{job.status}</td>
-                <td>{job.total_records}</td>
-                <td>{job.valid_records}</td>
-                <td>{job.invalid_records}</td>
-                <td>{job.created_at}</td>
-                <td>{cellText(job.completed_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              <tbody>
+                {jobs.map((job) => (
+                  <tr key={job.id}>
+                    <td>
+                      <Link to="/admin/imports/$jobId" params={{ jobId: job.id }} search={{ lang }}>
+                        {copy.adminImportsJob} {job.id}
+                      </Link>
+                    </td>
+                    <td>{job.source_name}</td>
+                    <td>{job.format}</td>
+                    <td>{job.status}</td>
+                    <td>{job.total_records}</td>
+                    <td>{job.valid_records}</td>
+                    <td>{job.invalid_records}</td>
+                    <td>{formatAdminDate(job.created_at, lang)}</td>
+                    <td>
+                      {job.completed_at === null
+                        ? cellText(job.completed_at)
+                        : formatAdminDate(job.completed_at, lang)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-      {jobs.length === 0 ? <p>No import jobs match the current filters.</p> : null}
+          {jobs.length === 0 ? <p>{copy.adminImportsNoMatch}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -169,7 +169,7 @@ export const AdminDashboardServiceLive = Layer.effect(
       listDishes: (status, cursor, limit) => dishes.listAdminDishes(status, cursor, limit),
       dishDetail: (dishId, locale) =>
         Effect.gen(function* () {
-          const dish = yield* dishService.getDish(dishId, locale);
+          const dish = yield* dishService.getDishForCuration(dishId, locale);
 
           const [notes, revisions] = yield* Effect.all(
             [curationService.listNotes(dish.id, 50), curationService.listRevisions(dish.id, 50)],

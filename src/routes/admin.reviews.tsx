@@ -15,6 +15,7 @@ const reviewsSearch = localeSearchSchema.extend({
 
 export const Route = createFileRoute("/admin/reviews")({
   validateSearch: reviewsSearch,
+  loaderDeps: ({ search }) => ({ cursor: search.cursor }),
   beforeLoad: async ({ search }) => {
     const session = await getSessionFn();
 
@@ -30,7 +31,6 @@ export const Route = createFileRoute("/admin/reviews")({
 
     return {};
   },
-  loaderDeps: ({ search }) => ({ cursor: search.cursor }),
   loader: async ({ deps }): Promise<ReadonlyArray<ReviewItem>> =>
     adminReviewQueueFn({ data: { limit: 20, cursor: deps.cursor } }),
   component: AdminReviews,

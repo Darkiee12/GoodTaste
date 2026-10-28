@@ -2,7 +2,8 @@ import { Link, createFileRoute, getRouteApi, redirect } from "@tanstack/react-ro
 
 import { adminDashboardStatsFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { messagesFor, type Messages } from "@/shared/i18n";
+import { formatAdminDate } from "@/shared/format";
+import { messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -86,7 +87,7 @@ const statusLabel = (status: string, copy: Messages): string => {
 
 type DisplayTimestamp = Date | string;
 
-const formatDate = (value: DisplayTimestamp): string => new Date(value).toLocaleDateString();
+const formatDate = (value: DisplayTimestamp, lang: Locale): string => formatAdminDate(value, lang);
 
 function AdminOverview() {
   const { lang } = rootRoute.useSearch();
@@ -216,7 +217,7 @@ function AdminOverview() {
                       {job.total_records} {copy.adminRecords} · {job.valid_records}{" "}
                       {copy.adminValidRecords} · {job.invalid_records} {copy.adminInvalidRecords}
                     </td>
-                    <td className="px-2 py-2">{formatDate(job.created_at)}</td>
+                    <td className="px-2 py-2">{formatDate(job.created_at, lang)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -264,7 +265,7 @@ function AdminOverview() {
                       </Link>
                     </td>
                     <td className="px-2 py-2">{statusLabel(dish.status, copy)}</td>
-                    <td className="px-2 py-2">{formatDate(dish.updated_at)}</td>
+                    <td className="px-2 py-2">{formatDate(dish.updated_at, lang)}</td>
                   </tr>
                 ))}
               </tbody>
