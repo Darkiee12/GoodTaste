@@ -15,6 +15,19 @@ Versioned, immutable schema history for the `feastjourney` app schema:
   `catalog_import_records`).
 - `V20261028_004__catalog_additions.sql` — Phở gà variant, chicken ingredient,
   Valencia locality and associated popularity link.
+- `V20261028_005__auth_and_members.sql` — Better Auth core tables (`user`,
+  `session`, `account`, `verification`, database `rateLimit`), generated from
+  the installed better-auth version via `bun scripts/generate-auth-migration.ts`
+  and reviewed before check-in, plus application-owned `user_profiles`,
+  `favorites`, and `security_audit_events`. Regenerate and diff after any
+  better-auth upgrade; never hand-edit the generated block.
+- `V20261028_006__dynamic_rbac.sql` — database-managed authorization: `roles`,
+  `permissions`, `role_permissions`, `user_roles` with the static vocabulary
+  seeded, system roles (member/curator/moderator/support/admin/owner), their
+  initial grants, and backfill of existing users.
+- `V20261028_007__user_permission_catalog.sql` — completes the user-management
+  permission catalog omitted from V006 (`user:list`, `user:create`,
+  `user:delete`, legacy names) with least-privilege grants to admin/owner.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

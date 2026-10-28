@@ -39,10 +39,5 @@ export const appConfig: Config.Config<AppConfig> = Config.unwrap({
   searchRateWindowSeconds: Config.Int("RATE_LIMIT_SEARCH_WINDOW_S").pipe(Config.withDefault(60)),
   adminRateLimit: Config.Int("RATE_LIMIT_ADMIN").pipe(Config.withDefault(10)),
   adminRateWindowSeconds: Config.Int("RATE_LIMIT_ADMIN_WINDOW_S").pipe(Config.withDefault(60)),
-  wikidataUserAgent: Config.String("WIKIDATA_USER_AGENT").pipe(
-    Config.withDefault(
-      "FeastJourney/1.0 (culinary-discovery; contact: admin@feastjourney.example)",
-    ),
-  ),
   requestTimeoutMs: Config.Int("REQUEST_TIMEOUT_MS").pipe(Config.withDefault(15000)),
 });

@@ -28,6 +28,7 @@ import {
   type DatabaseUnavailable,
   type PersistenceConflict,
   type PersistenceError,
+  type TransactionConflict,
   type TransactionFailed,
 } from "@/server/database/errors";
 
@@ -54,6 +55,7 @@ export type AdminServiceError =
   | DatabaseUnavailable
   | PersistenceError
   | PersistenceConflict
+  | TransactionConflict
   | TransactionFailed;
 
 export interface CreateDishNameInput {

@@ -84,4 +84,50 @@ This project vendors external repositories under `repos/`
 - Do not import from `repos/` - application code should continue importing from normal package dependencies
 ## Quality gates
 
-When you edit application code, read `docs/development/quality-gates.md`, then run `bun run check` before describing the work as ready. Never lint, format, type-check or modify `repos/effect/`; vendored libraries are reference-only. Run relevant behavior/browser tests if they exist, and report what was not executed.
+When you edit application code, read `docs/development/quality-gates.md` and follow `docs/development/code-style.md`, then run `bun run check` before describing the work as ready. Never lint, format, type-check or modify `repos/effect/`; vendored libraries are reference-only. Run relevant behavior/browser tests if they exist, and report what was not executed.
+
+## Code clarity and type-driven programming
+
+### Trust established contracts
+
+- Prefer static TypeScript guarantees over runtime type checks.
+- Do not normalize values whose shape is already guaranteed.
+- Never introduce "T | T[]" compatibility helpers unless the API
+  genuinely supports both shapes.
+- Use Reylo's inferred query cardinality directly.
+- Do not turn Row, Row | null, and Row[] into interchangeable types.
+- Do not add fallbacks for impossible states merely to silence TypeScript.
+- If a contract is wrong, fix its source instead of wrapping the result.
+
+### Conditional logic
+
+- Nested ternary expressions are prohibited.
+- Prefer explicit if/return branches for errors, validation,
+  permissions, and business rules.
+- Simple ternaries are acceptable only when they improve readability.
+- Do not use fallback expressions to hide broken invariants.
+- Missing mandatory configuration must fail fast.
+
+### Abstractions
+
+- Do not create one-line helper functions that merely rename
+  standard JavaScript or library functionality.
+- Do not build generic wrappers around already strongly typed APIs.
+- Centralize behavior only when it represents a real shared contract.
+- Do not create unnecessary compatibility layers for code we control.
+- Prefer direct, readable library usage over defensive boilerplate.
+
+### Errors and safety
+
+- Runtime validation belongs at real trust boundaries:
+  network input, configuration, external services, and databases.
+- Preserve meaningful typed failures with Effect.
+- Do not silently replace unexpected errors with success defaults.
+- Do not leak raw database error messages to clients.
+
+### Before implementing
+
+- Inspect the source API and its inferred types.
+- Check existing utilities before creating new ones.
+- Prefer the simplest implementation that preserves correctness.
+- Ask whether every abstraction, cast, guard, and fallback is needed.

@@ -84,10 +84,22 @@ This repository already has `reylo/vite`, `@reylosql/postgres`, a content-mapper
 
 ## Transactions and Effect
 
-A transaction must pin one physical database connection. `src/server/database/transaction.ts` owns acquisition/commit/rollback/release and supplies a transaction-bound Reylo-compatible client to participating SQL operations. With an Effect implementation, bracket the resource (acquire/use/release) with the **current** Effect v4 API in `repos/effect/LLMS.md` and current package source; do not handwrite an unverified v3 tutorial pattern.
+All driver execution goes through `runQuery` in `src/server/database/query.ts`,
+which resolves the ambient client (the transaction connection inside
+`withTransaction`, the pool otherwise), preserves Reylo's inferred result
+type, and maps rejections to typed failures by SQLSTATE/driver code. See the
+[code style guide](../development/code-style.md) for the boundary, the error
+taxonomy, and the retry policy; this section states the transaction rules.
+
+A transaction must pin one physical database connection. `withTransaction` in
+`src/server/database/client.ts` owns acquisition/commit/rollback/release and
+supplies the transaction-bound Reylo-compatible client to participating SQL
+operations (resolved via `currentSql`). With an Effect implementation, bracket
+the resource (acquire/use/release) with the **current** Effect v4 API in
+`repos/effect/LLMS.md` and current package source; do not handwrite an unverified v3 tutorial pattern.
 
 - A coordinator in `src/server/workflows/` owns cross-domain atomic changes; a participating repository must use the supplied transaction client, not borrow a new pool connection.
-- Do not automatically retry non-idempotent writes or repeat a failed transaction without understanding whether it committed.
+- Only serialization conflicts and deadlocks retry, and only at the transaction boundary with a bounded budget (see the [code style guide](../development/code-style.md)). Do not retry non-idempotent writes, constraint violations, or connection loss, and do not repeat a failed transaction without understanding whether it committed.
 - Do not run unrelated external AI/network effects while holding a DB transaction open. Obtain outside-DB inputs first, then perform short, well-bounded updates with conflict/idempotency checks.
 - Beware parallel requests using the same transaction connection concurrently. Serialize DB statements unless the chosen driver and transaction design explicitly support a concurrency pattern.
 - Log failures with request correlation but never raw credentials, SQL parameters that contain private data, or production URLs with embedded passwords.

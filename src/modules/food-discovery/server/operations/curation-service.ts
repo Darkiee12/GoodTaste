@@ -5,23 +5,26 @@ import {
   InvalidDishData,
   type InvalidLocale,
 } from "@/modules/food-discovery/server/domain/errors";
-import {
-  encodeDbId,
-  isDbIdString,
-  isLanguageTag,
-} from "@/modules/food-discovery/server/domain/ids";
+import { encodeDbId, isDbIdString } from "@/modules/food-discovery/server/domain/ids";
 import { CurationRepository } from "@/modules/food-discovery/server/repository/curation-repository";
 import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
 import type { Database } from "@/server/database/client";
-import type { DatabaseUnavailable, PersistenceError } from "@/server/database/errors";
+import type {
+  DatabaseUnavailable,
+  PersistenceConflict,
+  PersistenceError,
+  TransactionConflict,
+} from "@/server/database/errors";
 
 export type CurationServiceError =
   | DishNotFound
   | InvalidDishData
   | InvalidLocale
   | DatabaseUnavailable
-  | PersistenceError;
+  | PersistenceError
+  | PersistenceConflict
+  | TransactionConflict;
 
 export interface PublicationCheck {
   readonly publishable: boolean;
@@ -274,5 +277,3 @@ export const CurationServiceLive = Layer.effect(
     });
   }),
 );
-
-export const validateLocaleTag = (locale: string): boolean => isLanguageTag(locale);

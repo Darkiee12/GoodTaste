@@ -10,8 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SignUpRouteImport } from './routes/sign-up'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as HealthLiveRouteImport } from './routes/health.live'
 import { Route as HealthReadyRouteImport } from './routes/health.ready'
+import { Route as SettingsAccountRouteImport } from './routes/settings.account'
+import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiV1CategoriesRouteImport } from './routes/api/v1/categories'
 import { Route as ApiV1CuisinesRouteImport } from './routes/api/v1/cuisines'
 import { Route as ApiV1DishesRouteImport } from './routes/api/v1/dishes'
@@ -43,6 +52,36 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HealthLiveRoute = HealthLiveRouteImport.update({
   id: '/health/live',
   path: '/health/live',
@@ -51,6 +90,21 @@ const HealthLiveRoute = HealthLiveRouteImport.update({
 const HealthReadyRoute = HealthReadyRouteImport.update({
   id: '/health/ready',
   path: '/health/ready',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsAccountRoute = SettingsAccountRouteImport.update({
+  id: '/settings/account',
+  path: '/settings/account',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
+  id: '/settings/security',
+  path: '/settings/security',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiV1CategoriesRoute = ApiV1CategoriesRouteImport.update({
@@ -189,8 +243,17 @@ const ApiV1AdminDishesIdStatusRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
   '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
@@ -219,8 +282,17 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
   '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
@@ -250,8 +322,17 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/users': typeof AdminUsersRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
   '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
@@ -282,8 +363,17 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/users'
     | '/health/live'
     | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
     | '/api/v1/dishes'
@@ -312,8 +402,17 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/users'
     | '/health/live'
     | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
     | '/api/v1/dishes'
@@ -342,8 +441,17 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/users'
     | '/health/live'
     | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
     | '/api/v1/dishes'
@@ -373,8 +481,17 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  SignInRoute: typeof SignInRoute
+  SignUpRoute: typeof SignUpRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
+  AdminUsersRoute: typeof AdminUsersRoute
   HealthLiveRoute: typeof HealthLiveRoute
   HealthReadyRoute: typeof HealthReadyRoute
+  SettingsAccountRoute: typeof SettingsAccountRoute
+  SettingsSecurityRoute: typeof SettingsSecurityRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiV1CategoriesRoute: typeof ApiV1CategoriesRoute
   ApiV1CuisinesRoute: typeof ApiV1CuisinesRoute
   ApiV1DishesRoute: typeof ApiV1DishesRouteWithChildren
@@ -396,6 +513,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/health/live': {
       id: '/health/live'
       path: '/health/live'
@@ -408,6 +567,27 @@ declare module '@tanstack/react-router' {
       path: '/health/ready'
       fullPath: '/health/ready'
       preLoaderRoute: typeof HealthReadyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/account': {
+      id: '/settings/account'
+      path: '/settings/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof SettingsAccountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/security': {
+      id: '/settings/security'
+      path: '/settings/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/categories': {
@@ -687,8 +867,17 @@ const ApiV1AdminDishesRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SignInRoute: SignInRoute,
+  SignUpRoute: SignUpRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
+  AdminUsersRoute: AdminUsersRoute,
   HealthLiveRoute: HealthLiveRoute,
   HealthReadyRoute: HealthReadyRoute,
+  SettingsAccountRoute: SettingsAccountRoute,
+  SettingsSecurityRoute: SettingsSecurityRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiV1CategoriesRoute: ApiV1CategoriesRoute,
   ApiV1CuisinesRoute: ApiV1CuisinesRoute,
   ApiV1DishesRoute: ApiV1DishesRouteWithChildren,

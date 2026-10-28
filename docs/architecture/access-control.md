@@ -1,92 +1,47 @@
-# Guest and authenticated-member boundaries
+# Dynamic RBAC authorization
 
 Authentication (who are you?) and authorization (what may you do?) are different. **Do not duplicate the Food Discovery or Restaurant Discovery modules into guest and member variants.** Public read operations serve both actors; member-only actions additionally require a verified session.
 
-A request-scoped actor is an **Effect v4 algebraic data type**, not a hand-maintained transport DTO. Its conceptual implementation is:
+## Three enforcement stages
 
-```ts
-// src/server/auth/actor.ts (illustrative; this source file does not yet exist)
-import { Data } from "effect";
+Every protected operation passes three gates, in order:
 
-export type Actor = Data.TaggedEnum<{
-  Guest: {};
-  Member: { readonly userId: string };
-}>;
+1. **Authentication** — a valid, non-suspended server session (`requireAuthenticatedActor`). No session → 401. Banned users fail here, before any authorization logic runs.
+2. **Authorization** — the actor's effective permissions cover the request (`requirePermission`). Effective grants are the union of all permissions attached to the user's roles, read fresh from PostgreSQL on every call. Anything not granted is denied; guests and service actors hold nothing. Failures → 403, never success defaults.
+3. **Ownership and domain policy** — resource-level checks (`checkOwnership`, dish existence, unlink-last-method guard). A permission answers whether the actor *may* act; ownership answers whether they may act *on this resource*.
 
-export const Actor = Data.taggedEnum<Actor>();
+Rate limiting and request identity run before all three (abuse protection first).
 
-const guest = Actor.Guest();
-const member = Actor.Member({ userId: "trusted-session-id" });
+## Database-managed roles (no static role grants)
 
-const label = Actor.$match(member, {
-  Guest: () => "guest",
-  Member: ({ userId }) => `member:${userId}`,
-});
-```
+Roles, grants, and assignments live in PostgreSQL (`roles`, `permissions`, `role_permissions`, `user_roles`; migrations `V006`/`V007`):
 
-`Guest()` and `Member(...)` construct the two variants and add Effect's conventional `_tag`. The `$match` handlers are exhaustive over `Guest` and `Member`. The `string` used for `userId` here is intentionally illustrative: choose and validate the real user ID contract at the session/database boundary.
+- The **permission vocabulary** is static code (`src/server/auth/permissions.ts`): `resource:action` strings such as `food:publish` or `role:assign`. Unknown keys are rejected at the management boundary, so no client can invent a grant.
+- **Roles** are rows with slug, description, color, position, and system/protected flags. Administrators create custom roles without redeploying.
+- A user may hold **multiple roles**; effective permissions are the union of their grants. Position is display/hierarchy order only — it never confers permissions.
+- Grants are resolved per request (one indexed query); there is no permission cache to invalidate. Role edits, assignments, and revocations apply to the next operation, including on already-issued sessions.
 
-This is **not input validation**. Never construct `Actor.Member` from a browser-supplied user ID, role, cookie content, or unverified JWT. Resolve and verify the session **on the server** first; only trusted identity resolution is permitted to construct `Member`. A guest has no automatic persistent User record.
+## System roles and the owner
 
-## Actor as a request-scoped Effect requirement
+Seeded roles: `member`, `curator`, `moderator`, `support`, `admin` (system, editable metadata only) and `owner` (protected). Rules:
 
-For operations spanning modules, depend on an explicit `CurrentActor` service **provided per invocation**, not mutable state inside the process-scoped `ManagedRuntime`:
+- Protected roles (`owner`) require `role:manage-protected` to touch, and the last owner assignment cannot be removed (`LastOwnerRemovalDenied`).
+- System roles cannot be deleted, only unassigned.
+- Nobody grants what they do not hold: attaching a permission requires holding it yourself (`requireDelegatable`), and assigning a role requires `role:assign` plus the target being manageable.
+- The bootstrap script creates the first owner out of band; there is no public path to ownership.
 
-```ts
-// src/server/auth/current-actor.ts (illustrative)
-import { Context, Effect } from "effect";
-import type { Actor } from "./actor";
+## Better Auth's place in the picture
 
-export class CurrentActor
-  extends Context.Service<CurrentActor, Actor>()(
-    "feastjourney/auth/CurrentActor",
-  ) {}
+Better Auth owns **authentication only**: sessions, passwords, OAuth, verification, recovery. Its admin plugin is deliberately neutralized — every role in its access-control config carries **zero grants**, so `/api/auth/admin/*` denies for everyone. All user administration (list, ban, roles, session revocation) is implemented behind our authorization boundary with Reylo queries; the plugin's passive behavior (default role on signup, banned-user session blocking) remains.
 
-export const describeActor = Effect.gen(function* () {
-  const actor = yield* CurrentActor;
-  return actor._tag === "Guest" ? "guest" : actor.userId;
-});
+This avoids two competing authorization systems: the plugin can never grant what dynamic RBAC denies, and dynamic RBAC never consults the plugin's static checks. `user.role` is kept as a display hint only and is **not** consulted for authorization.
 
-// After verifying the session at the server boundary:
-declare const verifiedActor: Actor; // illustration only; never client input
-declare const appRuntime: {
-  runPromise: <A, E>(effect: Effect.Effect<A, E>) => Promise<A>;
-};
+## Effect integration
 
-const result = await appRuntime.runPromise(
-  Effect.provideService(describeActor, CurrentActor, verifiedActor),
-);
-```
+- `Actor` is a `Data.TaggedEnum` (`Guest` | `Member` | `Admin`); construction happens only from verified sessions (members) or the admin-key path (admin). Pattern-match with `$match`, never by reading `_tag`.
+- `Authorization` is a `Context.Service` resolved per request; checks return typed failures (`InsufficientPermissions`, `ProtectedRole`, `RoleNotManageable`, `UnknownPermission`, `LastOwnerRemovalDenied`, ...), mapped to HTTP statuses in `api-error.ts`.
+- Branded `UserId`/`RoleId` (`Brand.nominal` + Zod parsing at the boundary) make swapped identifiers a compile error.
 
-The `declare` values are **illustrative types**, not runtime authorization; no input can be considered `verifiedActor` until the session has been checked server-side. Actual TanStack server handlers must resolve the trusted `Actor` and supply it before executing the Effect. A process-scoped database/AI `Layer` may remain shared, but `CurrentActor` is required and provided **once per request**. Use a single `Context.Service` for identity when nested operations need it; if only one function needs the actor, an explicit `Actor` parameter is simpler.
+## Future work
 
-Domain permissions, such as owner-only writes, can use `Actor.$match(actor, { Guest: ..., Member: ... })` to make policy decisions explicit. Treat an authenticated member with insufficient privileges as a distinct authorization failure; "member" does not imply admin.
-
-**Do not replace this ADT with a plain `{kind: string}` object or create a second Zod schema for it**. See [Effect domain modeling](domain-modeling.md) for when `Data.TaggedEnum`, `Schema.TaggedUnion`, and `Data.TaggedError` are appropriate.
-
-## Initial access matrix
-
-| Capability | Guest | Member |
-| --- | --- | --- |
-| Discover foods/cuisines and read public dish information | Allowed | Allowed |
-| Search restaurants and inspect public serving evidence | Allowed | Allowed |
-| Browse public menu descriptions and translations | Allowed | Allowed |
-| Save favorites, preferences, private lists or history | Sign-in required | Own data only |
-| Read/change profile or another member-owned object | Denied | Own data only |
-| Expensive image-menu analysis and durable photo uploads | **Policy to decide** | **Policy to decide** |
-| Submit public corrections/contributions | **Policy to decide** | **Policy to decide** |
-| Moderation/admin actions | Denied | Only with explicit authorization |
-
-The undecided rows are not implied permissions. Product, cost, privacy and anti-abuse decisions must be recorded before implementing them. Guests can hold ephemeral local choices without silently creating server accounts or persisting photos.
-
-## Enforcement
-
-1. Route redirects/hidden UI are **UX only**. TanStack `createServerFn` and raw API handlers are directly callable and each independently verifies the current actor and required capability.
-2. Shared session verification and common policy helpers live in `src/server/auth/`. Resource ownership checks are executed at the sensitive operation boundary, not assumed from the page.
-3. A session is validated server-side; never authorize private resources using client-provided `userId` or a route `beforeLoad` alone.
-4. Member-owned result caching must be private; never expose one user's preferences/history to another user or a public cache.
-5. Cross-module workflows read the trusted `Actor` as an explicit argument or `CurrentActor` Context requirement provided by the HTTP adapter with `Effect.provideService`. Never install an actor as a shared `ManagedRuntime` layer. Authorization remains enforced for every private capability.
-6. Configure safe cookies, CSRF protections and rate/abuse limits appropriate to each endpoint. If adding a custom `src/start.ts`, explicitly preserve TanStack's needed CSRF middleware behavior.
-7. HTTP queries, params, and forms use **Zod 4.6**. Reylo types database reads; AI responses/external APIs still require runtime validation at their trust boundaries.
-
-References: https://tanstack.com/start/latest/docs/framework/react/guide/authentication · https://tanstack.com/start/latest/docs/framework/react/guide/middleware
+Catalog curation still uses the admin key while its operations migrate to `food:*` role grants (the permissions already exist). API access/refresh tokens, if ever needed, must go through Better Auth's OAuth 2.1 provider capabilities — never a homemade JWT layer.
