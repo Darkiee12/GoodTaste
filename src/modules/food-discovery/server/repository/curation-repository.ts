@@ -1,6 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 
 import type { StoredImportRecord } from "@/modules/food-discovery/server/domain/schemas";
+import adminImportJobFind from "@/modules/food-discovery/server/repository/sql/admin-import-job-find.sql";
+import adminImportJobsByStatus from "@/modules/food-discovery/server/repository/sql/admin-import-jobs-by-status.sql";
+import adminImportJobsRecent from "@/modules/food-discovery/server/repository/sql/admin-import-jobs-recent.sql";
+import adminImportRecordsByJob from "@/modules/food-discovery/server/repository/sql/admin-import-records-by-job.sql";
 import importJobFindById from "@/modules/food-discovery/server/repository/sql/import-job-find-by-id.sql";
 import importJobInsert from "@/modules/food-discovery/server/repository/sql/import-job-insert.sql";
 import importJobUpdate from "@/modules/food-discovery/server/repository/sql/import-job-update.sql";
@@ -21,6 +25,14 @@ export type NoteRow = (typeof notesByDishId)["~reylo"]["element"];
 export type ImportJobRow = (typeof importJobFindById)["~reylo"]["element"];
 
 export type ImportRecordRow = (typeof importRecordsByJob)["~reylo"]["element"];
+
+export type AdminImportJobRow = (typeof adminImportJobFind)["~reylo"]["element"];
+
+export type AdminImportJobStatusRow = (typeof adminImportJobsByStatus)["~reylo"]["element"];
+
+export type AdminImportJobRecentRow = (typeof adminImportJobsRecent)["~reylo"]["element"];
+
+export type AdminImportRecordRow = (typeof adminImportRecordsByJob)["~reylo"]["element"];
 
 export class CurationRepository extends Context.Service<
   CurationRepository,
@@ -53,6 +65,11 @@ export class CurationRepository extends Context.Service<
       readonly validRecords: number;
       readonly invalidRecords: number;
       readonly dryRun: boolean;
+      readonly sourceUrl?: string | null;
+      readonly sourceVersion?: string | null;
+      readonly license?: string | null;
+      readonly attribution?: string | null;
+      readonly editorialNotes?: string | null;
     }) => Effect.Effect<ImportJobRow, DatabaseError, Database>;
     readonly updateImportJob: (input: {
       readonly id: bigint;
@@ -82,6 +99,21 @@ export class CurationRepository extends Context.Service<
       jobId: bigint,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<ImportRecordRow>, DatabaseError, Database>;
+    readonly importJobsByStatus: () => Effect.Effect<
+      ReadonlyArray<AdminImportJobStatusRow>,
+      DatabaseError,
+      Database
+    >;
+    readonly recentImportJobs: (
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<AdminImportJobRecentRow>, DatabaseError, Database>;
+    readonly adminFindImportJob: (
+      id: bigint,
+    ) => Effect.Effect<AdminImportJobRow | null, DatabaseError, Database>;
+    readonly adminRecordsByJobId: (
+      jobId: bigint,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<AdminImportRecordRow>, DatabaseError, Database>;
   }
 >()("feastjourney/food-discovery/CurationRepository") {}
 
@@ -131,6 +163,11 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
           valid_records: input.validRecords,
           invalid_records: input.invalidRecords,
           dry_run: input.dryRun,
+          source_url: input.sourceUrl ?? null,
+          source_version: input.sourceVersion ?? null,
+          license: input.license ?? null,
+          attribution: input.attribution ?? null,
+          editorial_notes: input.editorialNotes ?? null,
         }),
       );
     }),
@@ -182,4 +219,14 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
         importRecordsByJob.run(sql, { job_id: jobId, limit }),
       );
     }),
+  importJobsByStatus: () =>
+    runQuery("curation/import-jobs-by-status", (sql) => adminImportJobsByStatus.run(sql)),
+  recentImportJobs: (limit) =>
+    runQuery("curation/import-jobs-recent", (sql) => adminImportJobsRecent.run(sql, { limit })),
+  adminFindImportJob: (id) =>
+    runQuery("curation/import-job-find-admin", (sql) => adminImportJobFind.run(sql, { id })),
+  adminRecordsByJobId: (jobId, limit) =>
+    runQuery("curation/import-records-admin", (sql) =>
+      adminImportRecordsByJob.run(sql, { job_id: jobId, limit }),
+    ),
 });

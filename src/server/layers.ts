@@ -2,6 +2,10 @@ import { Layer } from "effect";
 import type * as PersistenceRateLimiter from "effect/persistence/RateLimiter";
 
 import { CatalogServicesLive, RepositoriesLive } from "@/modules/food-discovery/server/index";
+import {
+  type AdminDashboardService,
+  AdminDashboardServiceLive,
+} from "@/modules/food-discovery/server/operations/admin-dashboard-service";
 import type { AdminService } from "@/modules/food-discovery/server/operations/admin-service";
 import { CatalogImportServiceLive } from "@/modules/food-discovery/server/operations/catalog-import-service";
 import type { CatalogImportService } from "@/modules/food-discovery/server/operations/catalog-import-service";
@@ -9,6 +13,7 @@ import type { CatalogService } from "@/modules/food-discovery/server/operations/
 import { CurationServiceLive } from "@/modules/food-discovery/server/operations/curation-service";
 import type { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
 import type { DishService } from "@/modules/food-discovery/server/operations/dish-service";
+import type { CurationRepository } from "@/modules/food-discovery/server/repository/curation-repository";
 import type { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import type { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
 import type { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
@@ -42,6 +47,11 @@ const DomainLive = Layer.provide(
 
 const UserLive = Layer.provide(UserServicesLive, Layer.mergeAll(UserRepositoriesLive, DomainLive));
 
+const DashboardLive = Layer.provide(
+  AdminDashboardServiceLive,
+  Layer.mergeAll(RepositoriesLive, CurationLive, DomainLive),
+);
+
 export const AppLive = Layer.mergeAll(
   DatabaseLive,
   RateLimiterLive,
@@ -49,6 +59,7 @@ export const AppLive = Layer.mergeAll(
   RepositoriesLive,
   CurationLive,
   DomainLive,
+  DashboardLive,
   UserRepositoriesLive,
   UserLive,
 );
@@ -67,7 +78,9 @@ export type AppServices =
   | CatalogService
   | AdminService
   | CatalogImportService
+  | AdminDashboardService
   | CurationService
+  | CurationRepository
   | UserRepository
   | RoleRepository
   | Authorization

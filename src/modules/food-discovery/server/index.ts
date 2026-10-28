@@ -57,6 +57,8 @@ export const CatalogServicesLive = Layer.mergeAll(
 
 export { CatalogImportService } from "@/modules/food-discovery/server/operations/catalog-import-service";
 
+export { AdminDashboardService } from "@/modules/food-discovery/server/operations/admin-dashboard-service";
+
 export { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
 
 export {

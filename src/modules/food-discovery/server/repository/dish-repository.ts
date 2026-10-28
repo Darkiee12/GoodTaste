@@ -1,6 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 
+import adminDishesByStatus from "@/modules/food-discovery/server/repository/sql/admin-dishes-by-status.sql";
+import adminDishesMissingIngredientsCount from "@/modules/food-discovery/server/repository/sql/admin-dishes-missing-ingredients-count.sql";
+import adminDishesRecent from "@/modules/food-discovery/server/repository/sql/admin-dishes-recent.sql";
 import dishBrowse from "@/modules/food-discovery/server/repository/sql/dish-browse.sql";
+import dishCountByStatus from "@/modules/food-discovery/server/repository/sql/dish-count-by-status.sql";
 import dishFindById from "@/modules/food-discovery/server/repository/sql/dish-find-by-id.sql";
 import dishFindByIds from "@/modules/food-discovery/server/repository/sql/dish-find-by-ids.sql";
 import dishFindBySlug from "@/modules/food-discovery/server/repository/sql/dish-find-by-slug.sql";
@@ -22,6 +26,10 @@ import {
 import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type DishRow = (typeof dishFindById)["~reylo"]["element"];
+
+export type AdminDishRow = (typeof adminDishesByStatus)["~reylo"]["element"];
+
+export type AdminDishRecentRow = (typeof adminDishesRecent)["~reylo"]["element"];
 
 export interface DishRecord {
   readonly id: bigint;
@@ -59,6 +67,16 @@ export class DishRepository extends Context.Service<
       cursor: bigint,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
+    readonly countByStatus: (status: string) => Effect.Effect<number, DatabaseError, Database>;
+    readonly missingIngredientsCount: () => Effect.Effect<number, DatabaseError, Database>;
+    readonly recentAdminDishes: (
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<AdminDishRecentRow>, DatabaseError, Database>;
+    readonly listAdminDishes: (
+      status: string,
+      cursor: bigint,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<AdminDishRow>, DatabaseError, Database>;
     readonly searchIds: (input: {
       readonly q: string;
       readonly prefix: string;
@@ -180,6 +198,28 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
 
       return rows.map(toRecord);
     }),
+  countByStatus: (status) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/count-by-status", (sql) =>
+        dishCountByStatus.run(sql, { status }),
+      );
+
+      return row.total;
+    }),
+  missingIngredientsCount: () =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/missing-ingredients-count", (sql) =>
+        adminDishesMissingIngredientsCount.run(sql),
+      );
+
+      return row.total;
+    }),
+  recentAdminDishes: (limit) =>
+    runQuery("dish/admin-recent", (sql) => adminDishesRecent.run(sql, { limit })),
+  listAdminDishes: (status, cursor, limit) =>
+    runQuery("dish/admin-by-status", (sql) =>
+      adminDishesByStatus.run(sql, { status, cursor, limit }),
+    ),
   searchIds: (input) =>
     Effect.gen(function* () {
       return yield* runQuery("dish/search", (sql) =>

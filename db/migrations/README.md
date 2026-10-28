@@ -42,6 +42,11 @@ Versioned, immutable schema history for the `feastjourney` app schema:
   `user:read` key (seeded by V006 but absent from the code vocabulary and
   never checked) and grants support the vocabulary-backed `user:list` for
   its documented read-only user views.
+- `V20261028_011__import_job_source_metadata.sql` — additive nullable
+  columns on `catalog_import_jobs` (`source_url`, `source_version`,
+  `license`, `attribution`, `editorial_notes`) so the import studio keeps
+  source metadata with the job; widens the `format` check to `json`/`csv`
+  (staged payloads stay validated JSON records).
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.
