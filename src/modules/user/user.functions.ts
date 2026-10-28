@@ -11,6 +11,7 @@ import {
   sessionRevokeSchema,
   unlinkAccountSchema,
 } from "@/modules/user/user.schema";
+import { AuthProviderError } from "@/server/auth/errors";
 
 const loadServer = () =>
   Promise.all([
@@ -524,7 +525,11 @@ export const listAccountsFn = createServerFn({ method: "GET" }).handler(
       effects.Effect.flatMap(
         // SAFETY: Better Auth's endpoint types are any-laden; narrow to unknown
         // and validate the shape with Zod below instead of trusting the client.
-        effects.Effect.promise(() => auth.api.listUserAccounts({ headers }) as Promise<unknown>),
+        effects.Effect.tryPromise({
+          try: () => auth.api.listUserAccounts({ headers }) as Promise<unknown>,
+          catch: (cause) =>
+            new AuthProviderError({ operation: "auth/accounts", reason: String(cause) }),
+        }),
         (accounts) => {
           const parsed = accountListSchema.safeParse(accounts);
 
@@ -608,9 +613,11 @@ export const signUpFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() => auth.api.signUpEmail({ body: data, headers })).pipe(
-        effects.Effect.as({ ok: true as const }),
-      ),
+      effects.Effect.tryPromise({
+        try: () => auth.api.signUpEmail({ body: data, headers }),
+        catch: (cause) =>
+          new AuthProviderError({ operation: "auth/sign-up", reason: String(cause) }),
+      }).pipe(effects.Effect.as({ ok: true as const })),
       "fn/auth/sign-up",
       15000,
       requestId,
@@ -642,9 +649,12 @@ export const signInFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() =>
-        auth.api.signInEmail({ body: { email: data.email, password: data.password }, headers }),
-      ).pipe(effects.Effect.as({ ok: true as const })),
+      effects.Effect.tryPromise({
+        try: () =>
+          auth.api.signInEmail({ body: { email: data.email, password: data.password }, headers }),
+        catch: (cause) =>
+          new AuthProviderError({ operation: "auth/sign-in", reason: String(cause) }),
+      }).pipe(effects.Effect.as({ ok: true as const })),
       "fn/auth/sign-in",
       15000,
       requestId,
@@ -674,9 +684,11 @@ export const signOutFn = createServerFn({ method: "POST" }).handler(async () => 
   const requestId = crypto.randomUUID();
 
   return runApp(
-    effects.Effect.promise(() => auth.api.signOut({ headers })).pipe(
-      effects.Effect.as({ ok: true as const }),
-    ),
+    effects.Effect.tryPromise({
+      try: () => auth.api.signOut({ headers }),
+      catch: (cause) =>
+        new AuthProviderError({ operation: "auth/sign-out", reason: String(cause) }),
+    }).pipe(effects.Effect.as({ ok: true as const })),
     "fn/auth/sign-out",
     15000,
     requestId,
@@ -708,9 +720,11 @@ export const socialSignInFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() => auth.api.signInSocial({ body: data, headers })).pipe(
-        effects.Effect.map((result) => ({ url: result.url ?? "/" })),
-      ),
+      effects.Effect.tryPromise({
+        try: () => auth.api.signInSocial({ body: data, headers }),
+        catch: (cause) =>
+          new AuthProviderError({ operation: "auth/sign-in-social", reason: String(cause) }),
+      }).pipe(effects.Effect.map((result) => ({ url: result.url ?? "/" }))),
       "fn/auth/social",
       15000,
       requestId,
@@ -742,9 +756,14 @@ export const forgetPasswordFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() => auth.api.requestPasswordReset({ body: data, headers })).pipe(
-        effects.Effect.as({ ok: true as const }),
-      ),
+      effects.Effect.tryPromise({
+        try: () => auth.api.requestPasswordReset({ body: data, headers }),
+        catch: (cause) =>
+          new AuthProviderError({
+            operation: "auth/request-password-reset",
+            reason: String(cause),
+          }),
+      }).pipe(effects.Effect.as({ ok: true as const })),
       "fn/auth/forget-password",
       15000,
       requestId,
@@ -776,9 +795,11 @@ export const resetPasswordFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() => auth.api.resetPassword({ body: data, headers })).pipe(
-        effects.Effect.as({ ok: true as const }),
-      ),
+      effects.Effect.tryPromise({
+        try: () => auth.api.resetPassword({ body: data, headers }),
+        catch: (cause) =>
+          new AuthProviderError({ operation: "auth/reset-password", reason: String(cause) }),
+      }).pipe(effects.Effect.as({ ok: true as const })),
       "fn/auth/reset-password",
       15000,
       requestId,
@@ -810,9 +831,14 @@ export const resendVerificationFn = createServerFn({ method: "POST" })
     const requestId = crypto.randomUUID();
 
     return runApp(
-      effects.Effect.promise(() => auth.api.sendVerificationEmail({ body: data, headers })).pipe(
-        effects.Effect.as({ ok: true as const }),
-      ),
+      effects.Effect.tryPromise({
+        try: () => auth.api.sendVerificationEmail({ body: data, headers }),
+        catch: (cause) =>
+          new AuthProviderError({
+            operation: "auth/send-verification-email",
+            reason: String(cause),
+          }),
+      }).pipe(effects.Effect.as({ ok: true as const })),
       "fn/auth/resend-verification",
       15000,
       requestId,
@@ -851,9 +877,12 @@ export const changePasswordFn = createServerFn({ method: "POST" })
     );
 
     return runApp(
-      effects.Effect.promise(() =>
-        auth.api.changePassword({ body: { ...data, revokeOtherSessions: true }, headers }),
-      ).pipe(
+      effects.Effect.tryPromise({
+        try: () =>
+          auth.api.changePassword({ body: { ...data, revokeOtherSessions: true }, headers }),
+        catch: (cause) =>
+          new AuthProviderError({ operation: "auth/change-password", reason: String(cause) }),
+      }).pipe(
         effects.Effect.as({ ok: true as const }),
         effects.Effect.tap(() =>
           audit.recordAuditEvent({

@@ -6,6 +6,7 @@ import postgres from "postgres";
 import { Database, withTransaction } from "@/server/database/client";
 import {
   TransactionConflict,
+  TransactionFailed,
   classifyDatabaseError,
   isConnectionFailure,
 } from "@/server/database/errors";
@@ -178,6 +179,141 @@ describe("runQuery execution boundary", () => {
     expect(isConnectionFailure(postgresFailure("x", { code: "40001" }))).toBe(false);
     expect(isConnectionFailure(new Error("plain"))).toBe(false);
     expect(classifyDatabaseError("test/op", new Error("plain"))._tag).toBe("PersistenceError");
+  });
+});
+
+describe("withTransaction resource finalization", () => {
+  interface FakeReserved {
+    readonly unsafe: (query: string) => Promise<ReadonlyArray<never>>;
+    // Synchronous like postgres.js release(): void. A throwing release
+    // surfaces through the surrounding promise chain or try/finally.
+    readonly release: () => void;
+  }
+
+  const fakeLayer = (events: Array<string>, failPhase: string | null) => {
+    // Fault injection patches reserve at runtime on a real client that
+    // never connects (dead port, overridden before first use). This keeps
+    // every type precise with no assertions: the double flows through the
+    // production withTransaction path exactly as a live pool would.
+    const pooled = postgres("postgres://127.0.0.1:1/unused", { max: 1 });
+
+    const reserve = async (): Promise<FakeReserved> => {
+      events.push("reserve");
+
+      if (failPhase === "reserve") {
+        throw new Error("reserve failed");
+      }
+
+      const unsafe = async (query: string): Promise<ReadonlyArray<never>> => {
+        events.push(query);
+
+        if (query === failPhase) {
+          throw new Error(`${query} failed`);
+        }
+
+        return [];
+      };
+
+      const release = (): void => {
+        events.push("release");
+
+        if (failPhase === "release") {
+          throw new Error("release failed");
+        }
+      };
+
+      return { unsafe, release };
+    };
+
+    Object.defineProperty(pooled, "reserve", { value: reserve });
+
+    return { layer: Layer.succeed(Database, { sql: pooled }), pooled };
+  };
+
+  const runFakeFailure = async (
+    failPhase: string | null,
+    body: Effect.Effect<unknown, Error, Database>,
+  ): Promise<{ failure: Error | TransactionFailed; events: Array<string> }> => {
+    const events: Array<string> = [];
+    const { layer, pooled } = fakeLayer(events, failPhase);
+
+    try {
+      const failure = await Effect.runPromise(
+        Effect.provide(Effect.flip(withTransaction("test/finalize", body)), layer),
+      );
+
+      return { failure, events };
+    } finally {
+      await pooled.end();
+    }
+  };
+
+  test("releases the reservation when BEGIN fails", async () => {
+    const { failure, events } = await runFakeFailure("BEGIN", Effect.void);
+
+    expect(failure).toBeInstanceOf(TransactionFailed);
+    expect(events).toEqual(["reserve", "BEGIN", "release"]);
+  });
+
+  test("releases the connection when COMMIT fails", async () => {
+    const { failure, events } = await runFakeFailure("COMMIT", Effect.void);
+
+    expect(failure).toBeInstanceOf(TransactionFailed);
+    expect(events).toEqual(["reserve", "BEGIN", "COMMIT", "release"]);
+  });
+
+  test("rolls back, releases, and preserves the original failure", async () => {
+    const stable = new Error("body failed");
+    const { failure, events } = await runFakeFailure(null, Effect.fail(stable));
+
+    expect(failure).toBe(stable);
+    expect(events).toEqual(["reserve", "BEGIN", "ROLLBACK", "release"]);
+  });
+
+  test("a failed ROLLBACK cannot mask the original failure and still releases", async () => {
+    const stable = new Error("body failed");
+    const { failure, events } = await runFakeFailure("ROLLBACK", Effect.fail(stable));
+
+    expect(failure).toBe(stable);
+    expect(events).toEqual(["reserve", "BEGIN", "ROLLBACK", "release"]);
+  });
+
+  test("a failed release on the success path surfaces instead of succeeding silently", async () => {
+    const { failure, events } = await runFakeFailure("release", Effect.void);
+
+    expect(failure).toBeInstanceOf(TransactionFailed);
+    expect(events).toEqual(["reserve", "BEGIN", "COMMIT", "release"]);
+  });
+
+  test("a failed release on the rollback path still preserves the original failure", async () => {
+    const stable = new Error("body failed");
+    const { failure, events } = await runFakeFailure("release", Effect.fail(stable));
+
+    expect(failure).toBe(stable);
+    expect(events).toEqual(["reserve", "BEGIN", "ROLLBACK", "release"]);
+  });
+
+  test("a refused reservation fails without anything to release", async () => {
+    const { failure, events } = await runFakeFailure("reserve", Effect.void);
+
+    expect(failure).toBeInstanceOf(TransactionFailed);
+    expect(events).toEqual(["reserve"]);
+  });
+
+  test("the happy path issues exactly one BEGIN/COMMIT pair", async () => {
+    const events: Array<string> = [];
+    const { layer, pooled } = fakeLayer(events, null);
+
+    try {
+      const exit = await Effect.runPromise(
+        Effect.provide(Effect.exit(withTransaction("test/finalize", Effect.succeed("ok"))), layer),
+      );
+
+      expect(exit).toEqual(Exit.succeed("ok"));
+      expect(events).toEqual(["reserve", "BEGIN", "COMMIT", "release"]);
+    } finally {
+      await pooled.end();
+    }
   });
 });
 
