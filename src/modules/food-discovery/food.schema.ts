@@ -135,4 +135,9 @@ export const adminImportValidateSchema = z.object({
 
 export const adminImportApplySchema = z.object({
   job_id: dbIdSchema,
+  approvals: z.object({
+    license_ack: z.boolean(),
+    review_ack: z.boolean(),
+    duplicate_refs: z.array(z.string().min(1).max(300)),
+  }),
 });

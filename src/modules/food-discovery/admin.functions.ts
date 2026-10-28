@@ -13,6 +13,7 @@ import {
 } from "@/modules/food-discovery/admin.schema";
 import { localeSchema } from "@/modules/food-discovery/food.schema";
 import { InsufficientPermissions } from "@/server/auth/errors";
+import type { PermissionRequest } from "@/server/auth/permissions";
 
 /**
  * Food-discovery administration transport: dashboard stats, dish curation
@@ -89,6 +90,23 @@ const requireSurface = async (
     requestId,
   );
 };
+
+const adminImportApplyWithApprovalsSchema = adminImportApplySchema.extend({
+  approvals: z.object({
+    licenseAck: z.boolean(),
+    reviewAck: z.boolean(),
+    duplicateRefs: z.array(z.string().min(1).max(300)),
+  }),
+});
+
+const adminDishStatusUpdateSchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+  status: z.enum(["draft", "review", "published", "archived"]),
+});
+
+const adminPublicationCheckSchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+});
 
 export const adminSurfaceFn = createServerFn({ method: "GET" }).handler(async () => {
   const loaded = await loadServer();
@@ -426,7 +444,7 @@ export const adminImportValidateFn = createServerFn({ method: "POST" })
   });
 
 export const adminImportApplyFn = createServerFn({ method: "POST" })
-  .validator(adminImportApplySchema)
+  .validator(adminImportApplyWithApprovalsSchema)
   .handler(async ({ data }) => {
     const loaded = await loadServer();
 
@@ -455,10 +473,105 @@ export const adminImportApplyFn = createServerFn({ method: "POST" })
     return runtime.runApp(
       currentActor.withActor(
         actor.Actor.Member({ userId: trusted.userId }),
-        effects.Effect.flatMap(AdminDashboardService, (service) => service.applyImport(data.jobId)),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.applyImport({
+            jobId: data.jobId,
+            approvals: {
+              licenseAck: data.approvals.licenseAck,
+              reviewAck: data.approvals.reviewAck,
+              duplicateRefs: data.approvals.duplicateRefs,
+            },
+            actorUserId: trusted.userId,
+          }),
+        ),
       ),
       "fn/admin/import-apply",
       60000,
+      requestId,
+    );
+  });
+
+export const adminUpdateDishStatusFn = createServerFn({ method: "POST" })
+  .validator(adminDishStatusUpdateSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      dashboard: { AdminDashboardService },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/dish-status", requestId);
+
+    const permission: PermissionRequest =
+      data.status === "published"
+        ? { resource: "food", actions: ["publish"] }
+        : { resource: "food", actions: ["update"] };
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, permission),
+      "fn/admin/dish-status",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.publishDish(trusted.userId, data.dishId, data.status),
+        ),
+      ),
+      "fn/admin/dish-status",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminPublicationCheckFn = createServerFn({ method: "GET" })
+  .validator(adminPublicationCheckSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      dashboard: { AdminDashboardService },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/publication-check", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["read"] }),
+      "fn/admin/publication-check",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.publicationCheck(data.dishId),
+        ),
+      ),
+      "fn/admin/publication-check",
+      15000,
       requestId,
     );
   });

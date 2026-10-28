@@ -73,7 +73,7 @@ const LICENSES: ReadonlyArray<ImportLicense> = [
 ];
 
 const SAMPLE_CSV = `slug,status,parent_slug,name,language_tag,name_kind,description,ingredients,places,cuisines,categories,editorial_note
-pho-bo-vietnam,review,,Beef pho,en,localized,Vietnamese beef noodle soup with flat rice noodles.,rice noodles;beef,VN,vietnamese,noodles,Verify ingredients with a local cook.
+pho-bo-vietnam,review,,Beef pho,en,localized,Vietnamese beef noodle soup with flat rice noodles.,rice noodles;beef,VN:origin;FR:popular,vietnamese,noodles,Verify ingredients with a local cook.
 `;
 
 interface DatasetFile {
@@ -300,7 +300,22 @@ function AdminImportWizard() {
   });
 
   const applyMutation = useMutation({
-    mutationFn: (jobId: string) => adminImportApplyFn({ data: { jobId } }),
+    mutationFn: (input: {
+      jobId: string;
+      licenseAck: boolean;
+      reviewAck: boolean;
+      duplicateRefs: ReadonlyArray<string>;
+    }) =>
+      adminImportApplyFn({
+        data: {
+          jobId: input.jobId,
+          approvals: {
+            licenseAck: input.licenseAck,
+            reviewAck: input.reviewAck,
+            duplicateRefs: [...input.duplicateRefs],
+          },
+        },
+      }),
     onSuccess: (result) => {
       setApplyResult(result);
       goto("apply");
@@ -357,7 +372,12 @@ function AdminImportWizard() {
       return;
     }
 
-    applyMutation.mutate(report.jobId);
+    applyMutation.mutate({
+      jobId: report.jobId,
+      licenseAck: !licenseReview || licenseAck,
+      reviewAck,
+      duplicateRefs: acknowledgedDuplicates,
+    });
   };
 
   const openFilePicker = (): void => {
@@ -410,6 +430,8 @@ function AdminImportWizard() {
           <h2 className="font-display text-2xl tracking-wide">{copy.adminImportStepUpload}</h2>
 
           <p>{copy.adminImportUploadHint}</p>
+
+          <p>{copy.adminImportPlacesFormat}</p>
 
           <p>
             <button

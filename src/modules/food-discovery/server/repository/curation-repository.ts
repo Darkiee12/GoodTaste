@@ -5,7 +5,9 @@ import adminImportJobFind from "@/modules/food-discovery/server/repository/sql/a
 import adminImportJobsByStatus from "@/modules/food-discovery/server/repository/sql/admin-import-jobs-by-status.sql";
 import adminImportJobsRecent from "@/modules/food-discovery/server/repository/sql/admin-import-jobs-recent.sql";
 import adminImportRecordsByJob from "@/modules/food-discovery/server/repository/sql/admin-import-records-by-job.sql";
+import importJobApprove from "@/modules/food-discovery/server/repository/sql/import-job-approve.sql";
 import importJobFindById from "@/modules/food-discovery/server/repository/sql/import-job-find-by-id.sql";
+import importJobFindWithSource from "@/modules/food-discovery/server/repository/sql/import-job-find-with-source.sql";
 import importJobInsert from "@/modules/food-discovery/server/repository/sql/import-job-insert.sql";
 import importJobUpdate from "@/modules/food-discovery/server/repository/sql/import-job-update.sql";
 import importRecordInsert from "@/modules/food-discovery/server/repository/sql/import-record-insert.sql";
@@ -23,6 +25,10 @@ export type RevisionRow = (typeof revisionsByDishId)["~reylo"]["element"];
 export type NoteRow = (typeof notesByDishId)["~reylo"]["element"];
 
 export type ImportJobRow = (typeof importJobFindById)["~reylo"]["element"];
+
+export type ImportJobApprovalRow = (typeof importJobApprove)["~reylo"]["element"];
+
+export type ImportJobWithSourceRow = (typeof importJobFindWithSource)["~reylo"]["element"];
 
 export type ImportRecordRow = (typeof importRecordsByJob)["~reylo"]["element"];
 
@@ -77,7 +83,19 @@ export class CurationRepository extends Context.Service<
       readonly validRecords: number;
       readonly invalidRecords: number;
       readonly completedAt: string | null;
+      readonly dryRun?: boolean | undefined;
     }) => Effect.Effect<ImportJobRow | null, DatabaseError, Database>;
+    readonly approveImportJob: (input: {
+      readonly id: bigint;
+      readonly approvedBy: string;
+      readonly approvedAt: string;
+      readonly licenseAck: boolean;
+      readonly reviewAck: boolean;
+      readonly duplicateRefs: ReadonlyArray<string>;
+    }) => Effect.Effect<ImportJobApprovalRow | null, DatabaseError, Database>;
+    readonly findImportJobForApply: (
+      id: bigint,
+    ) => Effect.Effect<ImportJobWithSourceRow | null, DatabaseError, Database>;
     readonly findImportJob: (
       id: bigint,
     ) => Effect.Effect<ImportJobRow | null, DatabaseError, Database>;
@@ -180,7 +198,27 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
           valid_records: input.validRecords,
           invalid_records: input.invalidRecords,
           completed_at: input.completedAt,
+          dry_run: input.dryRun ?? null,
         }),
+      );
+    }),
+  approveImportJob: (input) =>
+    Effect.gen(function* () {
+      return yield* runQuery("curation/import-job-approve", (sql) =>
+        importJobApprove.run(sql, {
+          id: input.id,
+          approved_by: input.approvedBy,
+          approved_at: input.approvedAt,
+          license_ack: input.licenseAck,
+          review_ack: input.reviewAck,
+          acknowledged_duplicates: [...input.duplicateRefs],
+        }),
+      );
+    }),
+  findImportJobForApply: (id) =>
+    Effect.gen(function* () {
+      return yield* runQuery("curation/import-job-find-with-source", (sql) =>
+        importJobFindWithSource.run(sql, { id }),
       );
     }),
   findImportJob: (id) =>
