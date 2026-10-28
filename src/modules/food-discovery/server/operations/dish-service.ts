@@ -156,6 +156,17 @@ export class DishService extends Context.Service<
       locale: string,
       limit: number | undefined,
     ) => Effect.Effect<ReadonlyArray<DishSummary>, DishServiceError, Database>;
+    /**
+     * Batch card projection for member-owned lists (e.g. saved dishes): one
+     * round of batched queries for up to 50 ids, published dishes only, in
+     * request order. Unknown, malformed, or unpublished ids are skipped —
+     * the caller renders an explicit unavailable row for them instead of
+     * inventing content.
+     */
+    readonly getDishSummaries: (
+      ids: ReadonlyArray<string>,
+      locale: string,
+    ) => Effect.Effect<ReadonlyArray<DishSummary>, DishServiceError, Database>;
   }
 >()("feastjourney/food-discovery/DishService") {}
 
@@ -811,6 +822,44 @@ export const DishServiceLive = Layer.effect(
         return toSummaries(records, ids, summaryRelations, checkedLocale);
       });
 
-    return DishService.of({ getDish, getDishForCuration, searchDishes, getRelated });
+    const getDishSummaries = (
+      ids: ReadonlyArray<string>,
+      locale: string,
+    ): Effect.Effect<ReadonlyArray<DishSummary>, DishServiceError, Database> =>
+      Effect.gen(function* () {
+        const checkedLocale = yield* checkLocale(locale);
+
+        const numericIds: Array<bigint> = [];
+
+        for (const id of ids.slice(0, 50)) {
+          if (isDbIdString(id)) {
+            numericIds.push(BigInt(id));
+          }
+        }
+
+        const records = yield* recordsByIds(numericIds);
+
+        const orderedIds: Array<bigint> = [];
+
+        for (const id of numericIds) {
+          const record = records.get(id.toString());
+
+          if (record !== undefined && record.status === "published" && !orderedIds.includes(id)) {
+            orderedIds.push(id);
+          }
+        }
+
+        const summaryRelations = yield* fetchSummaryRelations(orderedIds);
+
+        return toSummaries(records, orderedIds, summaryRelations, checkedLocale);
+      });
+
+    return DishService.of({
+      getDish,
+      getDishForCuration,
+      searchDishes,
+      getRelated,
+      getDishSummaries,
+    });
   }),
 );

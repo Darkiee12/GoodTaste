@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { getDishFn } from "@/modules/food-discovery/food.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
-import { SaveDishButton } from "@/routes/saved";
+import { SaveDishButton } from "@/modules/user/components/save-dish-button";
 import { localeSearchSchema, messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -151,6 +151,7 @@ function DishMissing() {
 
 function DishDetail() {
   const { lang } = rootRoute.useSearch();
+  const { session } = rootRoute.useRouteContext();
   const copy = messagesFor(lang);
   const dish = Route.useLoaderData();
 
@@ -194,7 +195,12 @@ function DishDetail() {
       </p>
 
       <div className="mt-5">
-        <SaveDishButton dishId={dish.id} lang={lang} returnTo={`/dishes/${dish.slug}`} />
+        <SaveDishButton
+          dishId={dish.id}
+          lang={lang}
+          returnTo={`/dishes/${dish.slug}`}
+          session={session}
+        />
       </div>
 
       {dish.description !== null ? (
