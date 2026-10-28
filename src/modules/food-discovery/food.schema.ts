@@ -67,6 +67,29 @@ export const placeDishesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const mealSchema = z
+  .enum(["breakfast", "lunch", "dinner", "snack", "dessert", "anything"])
+  .default("anything");
+
+const recommendationMoodSchema = z
+  .enum(["comforting", "light", "hearty", "spicy", "adventurous", "surprise", "any"])
+  .default("any");
+
+export const recommendationQuerySchema = z.object({
+  meal: mealSchema,
+  avoid: z.array(z.string().max(100)).max(20).default([]),
+  allergies: z.array(z.string().max(100)).max(20).default([]),
+  cuisine: z.string().max(80).optional(),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
+    .optional(),
+  mood: recommendationMoodSchema,
+  locale: localeSchema,
+});
+
+export type RecommendationQuery = z.infer<typeof recommendationQuerySchema>;
+
 const nameKindSchema = z.enum(["native", "localized", "alias", "transliteration"]);
 
 export const adminNameSchema = z.object({

@@ -17,6 +17,7 @@
 - [Maps and geosearch](architecture/maps.md): PostGIS, MapLibre React, TanStack SSR, tile/Places separation.
 - [Effect domain modeling](architecture/domain-modeling.md): ADTs, tagged errors, request-scoped Actor and codec boundaries.
 - [Authentication](architecture/authentication.md): Better Auth sessions, RBAC, token categories, revocation.
+- [Recommendations](architecture/recommendations.md): public chooser pipeline, deterministic eligibility, Muse ranking, fallback semantics.
 - [Trust and safety](architecture/trust-and-safety.md): food claims, privacy, media and AI risks.
 
 ## Infrastructure

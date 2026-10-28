@@ -35,10 +35,11 @@ The default production build targets Bun. For Node, rebuild with `bun run build:
 ## Routes
 
 - `/` — public landing page with dish discovery (English default, `?lang=` switch for vi/hi/es/zh, validated by Zod; no cookie persistence).
+- `/recommend` — public food chooser: meal → avoidances → region → mood → results (max 10 published dishes, deterministic fallback labeled honestly, opt-in device-local preference memory).
 - `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/verify-email` — Better Auth email + Google/Facebook OAuth.
 - `/settings/account`, `/settings/security` — profile, linked accounts, sessions, password change.
 - `/admin`, `/admin/dishes`, `/admin/dishes/$dishId`, `/admin/imports`, `/admin/imports/new`, `/admin/imports/$jobId`, `/admin/reviews`, `/admin/users`, `/admin/roles` — administration shell (session + `admin:access`/`food:import`/`moderation:read` surface gate; every operation re-checks its own grant).
-- `/api/v1/*` — public discovery reads (`dishes`, `ingredients`, `categories`, `cuisines`, `places`) and session-authorized admin endpoints (`admin.dishes.*`, `admin.imports.validate|apply`, `admin.review-queue`). No API keys: all admin access resolves the Better Auth session against database RBAC grants.
+- `/api/v1/*` — public discovery reads (`dishes`, `ingredients`, `categories`, `cuisines`, `places`) and session-authorized admin endpoints (`admin.dishes.*`, `admin.imports.validate|apply`, `admin.review-queue`). No API keys: all admin access resolves the Better Auth session against database RBAC grants. Public recommendations (`recommendDishesFn`) return up to 10 published dishes with explicit `ai`/`deterministic`/`uncertain`/`empty` modes; see `docs/architecture/recommendations.md`.
 
 See `docs/architecture/access-control.md` (permission vocabulary, system roles, owner safeguards) and `docs/architecture/admin-dashboard.md` (dashboard routes, contracts, import lifecycle).
 
