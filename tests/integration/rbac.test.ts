@@ -3,15 +3,20 @@ import "./cleanup";
 import { afterAll, describe, expect, test } from "bun:test";
 
 import { SQL } from "bun";
-import { Effect } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import postgres from "postgres";
 
 import { RoleId, UserId } from "@/modules/user/server/domain/identifiers";
 import { UserAdminService } from "@/modules/user/server/operations/admin-service";
-import { Authorization } from "@/modules/user/server/operations/authorization";
+import { Authorization, AuthorizationLive } from "@/modules/user/server/operations/authorization";
 import { RoleService } from "@/modules/user/server/operations/role-service";
-import { RoleRepository } from "@/modules/user/server/repository/role-repository";
+import {
+  RoleRepository,
+  RoleRepositoryLive,
+} from "@/modules/user/server/repository/role-repository";
 import { Actor } from "@/server/auth/actor";
 import type { PermissionRequest } from "@/server/auth/permissions";
+import { Database } from "@/server/database/client";
 import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
@@ -937,5 +942,42 @@ describe("dynamic authorization", () => {
     );
 
     expect(await has(userId, { resource: "restaurant", actions: ["verify"] })).toBe(true);
+  });
+});
+
+describe("authorization fails closed without the database", () => {
+  test("permission checks surface DatabaseUnavailable instead of granting", async () => {
+    const down = postgres("postgres://127.0.0.1:1/unused", { max: 1, connect_timeout: 2 });
+
+    try {
+      const broken = Layer.mergeAll(
+        AuthorizationLive,
+        RoleRepositoryLive,
+        Layer.succeed(Database, { sql: down }),
+      );
+
+      const runtime = ManagedRuntime.make(broken);
+
+      try {
+        const failure = await runtime.runPromise(
+          Effect.flip(
+            Effect.flatMap(Authorization, (authorization) =>
+              authorization.require(actorOf("anyone"), {
+                resource: "food",
+                actions: ["read"],
+              }),
+            ),
+          ),
+        );
+
+        // An unreachable authorization database must never read as an empty
+        // grant set or an anonymous guest: the typed failure propagates.
+        expect(failure._tag).toBe("DatabaseUnavailable");
+      } finally {
+        await runtime.dispose();
+      }
+    } finally {
+      await down.end();
+    }
   });
 });
