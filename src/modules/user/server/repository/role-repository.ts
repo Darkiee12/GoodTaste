@@ -1,6 +1,8 @@
-import { Context, type Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 
+import activeOwnerCount from "@/modules/user/server/repository/sql/active-owner-count.sql";
 import ownerCount from "@/modules/user/server/repository/sql/owner-count.sql";
+import ownerGuardLock from "@/modules/user/server/repository/sql/owner-guard-lock.sql";
 import roleById from "@/modules/user/server/repository/sql/role-by-id.sql";
 import roleDelete from "@/modules/user/server/repository/sql/role-delete.sql";
 import roleInsert from "@/modules/user/server/repository/sql/role-insert.sql";
@@ -12,6 +14,7 @@ import roleUpdate from "@/modules/user/server/repository/sql/role-update.sql";
 import rolesList from "@/modules/user/server/repository/sql/roles-list.sql";
 import sessionsDeleteByUser from "@/modules/user/server/repository/sql/sessions-delete-by-user.sql";
 import userBan from "@/modules/user/server/repository/sql/user-ban.sql";
+import userBannedById from "@/modules/user/server/repository/sql/user-banned-by-id.sql";
 import userRoleAssign from "@/modules/user/server/repository/sql/user-role-assign.sql";
 import userRoleRemove from "@/modules/user/server/repository/sql/user-role-remove.sql";
 import userRolesByUser from "@/modules/user/server/repository/sql/user-roles-by-user.sql";
@@ -78,6 +81,15 @@ export class RoleRepository extends Context.Service<
       roleId: string,
     ) => Effect.Effect<void, DatabaseError, Database>;
     readonly ownerCount: () => Effect.Effect<bigint, DatabaseError, Database>;
+    readonly activeOwnerCount: () => Effect.Effect<bigint, DatabaseError, Database>;
+    /**
+     * Row-level lock serializing owner-membership changes. Every operation
+     * that can remove the last active Owner takes this lock before counting,
+     * so two concurrent removals cannot both observe two owners and commit.
+     * Unrelated role changes never take it.
+     */
+    readonly lockOwnerGuard: () => Effect.Effect<void, DatabaseError, Database>;
+    readonly isUserBanned: (userId: string) => Effect.Effect<boolean, DatabaseError, Database>;
     readonly usersList: (
       limit: number,
       offset: number,
@@ -149,6 +161,20 @@ export const RoleRepositoryLive = Layer.succeed(RoleRepository, {
       const row = await ownerCount.run(sql);
 
       return row.owner_count;
+    }),
+  activeOwnerCount: () =>
+    runQuery("user/active-owner-count", async (sql) => {
+      const row = await activeOwnerCount.run(sql);
+
+      return row.owner_count;
+    }),
+  lockOwnerGuard: () =>
+    runQuery("user/owner-guard-lock", (sql) => ownerGuardLock.run(sql)).pipe(Effect.asVoid),
+  isUserBanned: (userId) =>
+    runQuery("user/user-banned-by-id", async (sql) => {
+      const row = await userBannedById.run(sql, { user_id: userId });
+
+      return row?.banned ?? false;
     }),
   usersList: (limit, offset) =>
     runQuery("user/users-list", (sql) => usersList.run(sql, { limit, offset })),

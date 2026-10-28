@@ -160,6 +160,7 @@ export class RoleService extends Context.Service<
       | ProtectedRole
       | InsufficientPermissions
       | LastOwnerRemovalDenied
+      | TransactionFailed
       | DatabaseError,
       Database | RoleRepository | Authorization
     >;
@@ -310,34 +311,62 @@ export const RoleServiceLive = Layer.succeed(RoleService, {
     }),
 
   removeRole: (actor, userId, roleId) =>
-    Effect.gen(function* () {
-      const authorization = yield* Authorization;
-      const repository = yield* RoleRepository;
-      const manageable = yield* authorization.requireManageableRole(actor, roleId);
+    // Only owner-membership changes take the guard lock: counting and
+    // mutation happen inside one transaction while holding
+    // `lockOwnerGuard`, so concurrent removals serialize and the second
+    // one observes the first one's commit. Unrelated role changes skip
+    // both the lock and the transaction entirely.
+    roleId === SYSTEM_ROLES.owner
+      ? withTransaction(
+          "user/role-remove-owner",
+          Effect.gen(function* () {
+            const authorization = yield* Authorization;
+            const repository = yield* RoleRepository;
+            const manageable = yield* authorization.requireManageableRole(actor, roleId);
 
-      yield* authorization.require(actor, { resource: "role", actions: ["assign"] });
+            yield* authorization.require(actor, { resource: "role", actions: ["assign"] });
 
-      if (manageable.isProtected) {
-        yield* authorization.require(actor, { resource: "role", actions: ["manage-protected"] });
-      }
+            if (manageable.isProtected) {
+              yield* authorization.require(actor, {
+                resource: "role",
+                actions: ["manage-protected"],
+              });
+            }
 
-      if (roleId === SYSTEM_ROLES.owner) {
-        const remaining = yield* repository.ownerCount();
+            yield* repository.lockOwnerGuard();
 
-        if (remaining <= BigInt(1)) {
-          const assignments = yield* repository.rolesOfUser(userId);
-          const holds = assignments.some((entry) => entry.role_id === SYSTEM_ROLES.owner);
+            const remaining = yield* repository.activeOwnerCount();
 
-          if (holds) {
-            return yield* new LastOwnerRemovalDenied({
-              reason: "cannot remove the last owner",
+            if (remaining <= BigInt(1)) {
+              const assignments = yield* repository.rolesOfUser(userId);
+              const holds = assignments.some((entry) => entry.role_id === SYSTEM_ROLES.owner);
+
+              if (holds) {
+                return yield* new LastOwnerRemovalDenied({
+                  reason: "cannot remove the last active owner",
+                });
+              }
+            }
+
+            return yield* repository.removeRole(userId, roleId);
+          }),
+        )
+      : Effect.gen(function* () {
+          const authorization = yield* Authorization;
+          const repository = yield* RoleRepository;
+          const manageable = yield* authorization.requireManageableRole(actor, roleId);
+
+          yield* authorization.require(actor, { resource: "role", actions: ["assign"] });
+
+          if (manageable.isProtected) {
+            yield* authorization.require(actor, {
+              resource: "role",
+              actions: ["manage-protected"],
             });
           }
-        }
-      }
 
-      return yield* repository.removeRole(userId, roleId);
-    }),
+          return yield* repository.removeRole(userId, roleId);
+        }),
 });
 
 const actorLabel = (actor: Actor): string | null =>
