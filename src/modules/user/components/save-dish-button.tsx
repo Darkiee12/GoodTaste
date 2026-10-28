@@ -146,12 +146,19 @@ export const applyMembershipToIds = (
 export interface SaveButtonState {
   readonly owner: string | null;
   readonly confirmed: boolean | undefined;
+  /** dataUpdatedAt of the query snapshot that produced `confirmed`. */
+  readonly updatedAt: number;
   readonly pending: "save" | "unsave" | null;
   readonly failedAction: "save" | "unsave" | null;
 }
 
 export type SaveButtonEvent =
-  | { readonly type: "resolved"; readonly owner: string; readonly saved: boolean }
+  | {
+      readonly type: "resolved";
+      readonly owner: string;
+      readonly saved: boolean;
+      readonly updatedAt: number;
+    }
   | { readonly type: "identity-changed"; readonly owner: string | null }
   | { readonly type: "save-requested" }
   | { readonly type: "unsave-requested" }
@@ -164,6 +171,7 @@ export type SaveButtonEvent =
 export const initialSaveButtonState: SaveButtonState = {
   owner: null,
   confirmed: undefined,
+  updatedAt: 0,
   pending: null,
   failedAction: null,
 };
@@ -175,11 +183,26 @@ export const saveButtonTransition = (
   switch (event.type) {
     case "resolved": {
       if (event.owner !== state.owner) {
-        return { owner: event.owner, confirmed: event.saved, pending: null, failedAction: null };
+        return {
+          owner: event.owner,
+          confirmed: event.saved,
+          updatedAt: event.updatedAt,
+          pending: null,
+          failedAction: null,
+        };
       }
 
       if (state.confirmed === undefined && state.pending === null) {
-        return { ...state, confirmed: event.saved };
+        return { ...state, confirmed: event.saved, updatedAt: event.updatedAt };
+      }
+
+      // Adopt only snapshots newer than the one behind `confirmed`: this is
+      // what lets a second mounted button follow the first button's
+      // server-confirmed action, while a stale in-flight refetch (older
+      // fetch timestamp) can never paint over a newer value. Equal or older
+      // timestamps are ignored; the next refetch converges.
+      if (state.pending === null && event.updatedAt > state.updatedAt) {
+        return { ...state, confirmed: event.saved, updatedAt: event.updatedAt };
       }
 
       return state;
@@ -190,7 +213,13 @@ export const saveButtonTransition = (
         return state;
       }
 
-      return { owner: event.owner, confirmed: undefined, pending: null, failedAction: null };
+      return {
+        owner: event.owner,
+        confirmed: undefined,
+        updatedAt: 0,
+        pending: null,
+        failedAction: null,
+      };
     }
 
     case "save-requested": {
@@ -269,6 +298,8 @@ export interface SaveButtonStatus {
   readonly pending: boolean;
   readonly failed: boolean;
   readonly refetch: () => void;
+  /** dataUpdatedAt of the query snapshot behind `saved`. */
+  readonly updatedAt: number;
 }
 
 export interface FavoriteStatusQuery {
@@ -276,6 +307,7 @@ export interface FavoriteStatusQuery {
   readonly isPending: boolean;
   readonly isError: boolean;
   readonly refetch: () => void;
+  readonly dataUpdatedAt: number;
 }
 
 /** Project one dish's button status out of a list-level batched query. */
@@ -286,6 +318,7 @@ export const statusForDish = (query: FavoriteStatusQuery, dishId: string): SaveB
   refetch: () => {
     query.refetch();
   },
+  updatedAt: query.dataUpdatedAt,
 });
 
 export function SaveDishButton({
@@ -314,9 +347,14 @@ export function SaveDishButton({
 
   useEffect(() => {
     if (status.saved !== undefined && userId !== null) {
-      dispatch({ type: "resolved", owner: userId, saved: status.saved });
+      dispatch({
+        type: "resolved",
+        owner: userId,
+        saved: status.saved,
+        updatedAt: status.updatedAt,
+      });
     }
-  }, [status.saved, userId]);
+  }, [status.saved, status.updatedAt, userId]);
 
   const confirmSave = (): void => {
     if (userId !== null) {
