@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { z } from "zod";
 
@@ -49,9 +49,13 @@ function ResetPassword() {
           >
             <p>{copy.authResetNoToken}</p>
             <p className="mt-2">
-              <a href="/forgot-password" className="font-medium underline hover:no-underline">
+              <Link
+                to="/forgot-password"
+                search={{ lang }}
+                className="font-medium underline hover:no-underline"
+              >
                 {copy.authRequestNewLink}
-              </a>
+              </Link>
             </p>
           </div>
         ) : (
@@ -96,9 +100,13 @@ function ResetPassword() {
                   >
                     {copy.commonRetry}
                   </button>
-                  <a href="/forgot-password" className="font-medium underline hover:no-underline">
+                  <Link
+                    to="/forgot-password"
+                    search={{ lang }}
+                    className="font-medium underline hover:no-underline"
+                  >
                     {copy.authRequestNewLink}
-                  </a>
+                  </Link>
                 </p>
               </div>
             ) : null}

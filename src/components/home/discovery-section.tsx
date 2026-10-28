@@ -3,7 +3,11 @@ import { getRouteApi, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { listCategoriesFn, searchDishesFn } from "@/modules/food-discovery/food.functions";
-import { SaveDishButton } from "@/modules/user/components/save-dish-button";
+import {
+  SaveDishButton,
+  statusForDish,
+  useFavoriteStatus,
+} from "@/modules/user/components/save-dish-button";
 import type { Locale, Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -43,6 +47,9 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
   });
 
   const options = categories.data ?? [];
+  const visibleIds = (dishes.data?.items ?? []).map((dish) => dish.id);
+  const userId = session.status === "signed-in" ? session.user.id : null;
+  const favoriteStatus = useFavoriteStatus(visibleIds, userId);
 
   return (
     <section
@@ -164,7 +171,13 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
                       >
                         View dish
                       </Link>
-                      <SaveDishButton dishId={dish.id} lang={lang} returnTo="/" session={session} />
+                      <SaveDishButton
+                        dishId={dish.id}
+                        lang={lang}
+                        returnTo="/"
+                        session={session}
+                        status={statusForDish(favoriteStatus, dish.id)}
+                      />
                     </div>
                   </article>
                 </li>

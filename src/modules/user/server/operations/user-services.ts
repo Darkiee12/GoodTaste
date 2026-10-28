@@ -45,7 +45,17 @@ export class FavoritesService extends Context.Service<
     readonly listFavorites: (
       userId: string,
       limit: number,
+      offset: number,
     ) => Effect.Effect<ReadonlyArray<FavoriteRow>, DatabaseError, Database>;
+    /**
+     * Membership probe for visible dish ids: returns the subset that is
+     * actually saved, so cards stay correct no matter how many favorites
+     * the account holds in total. Malformed ids are skipped, never fatal.
+     */
+    readonly favoriteStatus: (
+      userId: string,
+      ids: ReadonlyArray<string>,
+    ) => Effect.Effect<Array<string>, DatabaseError, Database>;
     readonly addFavorite: (
       userId: string,
       dishId: string,
@@ -68,7 +78,25 @@ export const FavoritesServiceLive = Layer.effect(
     const repository = yield* UserRepository;
 
     return FavoritesService.of({
-      listFavorites: (userId, limit) => repository.favoritesByUserId(userId, limit),
+      listFavorites: (userId, limit, offset) => repository.favoritesByUserId(userId, limit, offset),
+      favoriteStatus: (userId, ids) =>
+        Effect.gen(function* () {
+          const numericIds: Array<bigint> = [];
+
+          for (const id of ids.slice(0, 50)) {
+            if (/^[0-9]+$/.test(id)) {
+              numericIds.push(BigInt(id));
+            }
+          }
+
+          if (numericIds.length === 0) {
+            return [];
+          }
+
+          const rows = yield* repository.favoriteStatusByDishIds(userId, numericIds);
+
+          return rows.map((row) => row.dish_id);
+        }),
       addFavorite: (userId, dishId) =>
         Effect.gen(function* () {
           yield* dishes.getDish(dishId, "en");

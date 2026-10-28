@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import {
+  listCountriesFn,
   listCuisinesFn,
-  listPlacesFn,
   recommendDishesFn,
 } from "@/modules/food-discovery/food.functions";
 import {
@@ -15,7 +15,11 @@ import {
   type MealOccasion,
   type RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
-import { SaveDishButton } from "@/modules/user/components/save-dish-button";
+import {
+  SaveDishButton,
+  statusForDish,
+  useFavoriteStatus,
+} from "@/modules/user/components/save-dish-button";
 import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -484,23 +488,23 @@ function Recommend() {
     [cuisines.data],
   );
 
-  const places = useQuery({
-    queryKey: ["catalog", "places", lang],
-    queryFn: () => listPlacesFn({ data: { locale: lang, limit: 100 } }),
+  const countries = useQuery({
+    queryKey: ["catalog", "countries", lang],
+    queryFn: () => listCountriesFn({ data: { locale: lang } }),
     staleTime: 5 * 60_000,
     retry: 1,
   });
 
   const countryOptions = useMemo<ReadonlyArray<{ code: string; label: string }>>(
     () =>
-      (places.data ?? [])
+      (countries.data ?? [])
         .flatMap((entry) =>
-          entry.kind === "country" && entry.iso3166 !== null
-            ? [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }]
-            : [],
+          entry.iso3166 === null
+            ? []
+            : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
         )
         .toSorted((left, right) => left.label.localeCompare(right.label)),
-    [places.data],
+    [countries.data],
   );
 
   const recommend = useMutation({
@@ -509,10 +513,6 @@ function Recommend() {
 
   const restoredRef = useRef(false);
   const previousLangRef = useRef(lang);
-  const submittedRef = useRef(submitted);
-  submittedRef.current = submitted;
-  const showResultsRef = useRef(showResults);
-  showResultsRef.current = showResults;
 
   // Persist the in-progress journey in memory so dish detail visits (back
   // navigation remounts this route) restore form, step, and results context.
@@ -547,7 +547,8 @@ function Recommend() {
   }, []);
 
   // Switching language while results are visible re-runs the submitted
-  // search in the new locale instead of showing stale-language dishes.
+  // search in the new locale instead of showing stale-language dishes. The
+  // lang guard keeps unrelated state updates from re-firing the search.
   useEffect(() => {
     if (previousLangRef.current === lang) {
       return;
@@ -556,14 +557,12 @@ function Recommend() {
     previousLangRef.current = lang;
     setStepError(null);
 
-    const active = submittedRef.current;
-
-    if (active !== null && showResultsRef.current) {
-      const relocalized: RecommendPayload = { ...active, locale: lang };
+    if (submitted !== null && showResults) {
+      const relocalized: RecommendPayload = { ...submitted, locale: lang };
       setSubmitted(relocalized);
       recommend.mutate(relocalized);
     }
-  }, [lang, recommend]);
+  }, [lang, submitted, showResults, recommend]);
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     persistPrefs(remember, payload.avoid, payload.allergies, payload.cuisine, payload.country);
@@ -719,6 +718,17 @@ function Recommend() {
   const outcome: RecommendResult | null = recommend.data ?? null;
   const hasAllergies = submitted !== null && submitted.allergies.length > 0;
   const stepLabel = `${copy.recStep} ${stepIndex + 1} ${copy.recOf} ${QUIZ_STEPS}`;
+  const resultUserId = session.status === "signed-in" ? session.user.id : null;
+
+  const resultIds = useMemo(
+    () =>
+      outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic")
+        ? outcome.dishes.map((dish) => dish.id)
+        : [],
+    [outcome],
+  );
+
+  const resultFavorites = useFavoriteStatus(resultIds, resultUserId);
 
   return (
     <div
@@ -988,10 +998,10 @@ function Recommend() {
                   <label htmlFor="rec-country" className="mb-2 block text-sm font-bold text-ink">
                     {copy.recCountryLabel}
                   </label>
-                  {places.isPending ? (
+                  {countries.isPending ? (
                     <output className="block text-sm text-muted">{copy.recCuisineLoading}</output>
                   ) : null}
-                  {places.isError ? (
+                  {countries.isError ? (
                     <div>
                       <p
                         role="alert"
@@ -1002,7 +1012,7 @@ function Recommend() {
                       <button
                         type="button"
                         onClick={() => {
-                          void places.refetch();
+                          void countries.refetch();
                         }}
                         className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
                       >
@@ -1010,7 +1020,7 @@ function Recommend() {
                       </button>
                     </div>
                   ) : null}
-                  {places.data !== undefined ? (
+                  {countries.data !== undefined ? (
                     <select
                       id="rec-country"
                       value={draft.country}
@@ -1340,6 +1350,7 @@ function Recommend() {
                     lang={lang}
                     returnTo="/recommend"
                     session={session}
+                    status={statusForDish(resultFavorites, dish.id)}
                   />
                 </p>
               </article>
