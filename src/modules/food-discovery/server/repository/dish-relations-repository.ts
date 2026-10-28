@@ -16,13 +16,9 @@ import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/
 import dishSourceLink from "@/modules/food-discovery/server/repository/sql/dish-source-link.sql";
 import dishSourcesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-sources-by-dish-ids.sql";
 import ingredientNameInsert from "@/modules/food-discovery/server/repository/sql/ingredient-name-insert.sql";
-import { currentSql, isConnectionFailure } from "@/server/database/client";
 import type { Database, DbClient } from "@/server/database/client";
-import {
-  DatabaseUnavailable,
-  PersistenceConflict,
-  PersistenceError,
-} from "@/server/database/errors";
+import { PersistenceConflict, classifyDatabaseError } from "@/server/database/errors";
+import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type DishNameRow = (typeof dishNamesByDishIds)["~reylo"]["element"];
 
@@ -38,72 +34,30 @@ export type DishCuisineRow = (typeof dishCuisinesByDishIds)["~reylo"]["element"]
 
 export type DishSourceRow = (typeof dishSourcesByDishIds)["~reylo"]["element"];
 
-const isReadonlyArray = <Row>(value: Row | ReadonlyArray<Row>): value is ReadonlyArray<Row> =>
-  Array.isArray(value);
-
-const toArray = <Row>(value: Row | ReadonlyArray<Row>): Array<Row> =>
-  isReadonlyArray(value) ? [...value] : [value];
-
-const readFailure = (operation: string, cause: unknown): DatabaseUnavailable | PersistenceError =>
-  isConnectionFailure(cause)
-    ? new DatabaseUnavailable({ operation })
-    : new PersistenceError({
-        operation,
-        cause: cause instanceof Error ? cause.message : String(cause),
-      });
-
 export class DishRelationsRepository extends Context.Service<
   DishRelationsRepository,
   {
     readonly namesByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishNameRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishNameRow>, DatabaseError, Database>;
     readonly descriptionsByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishDescriptionRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishDescriptionRow>, DatabaseError, Database>;
     readonly ingredientsByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishIngredientRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishIngredientRow>, DatabaseError, Database>;
     readonly placesByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishPlaceRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishPlaceRow>, DatabaseError, Database>;
     readonly categoriesByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishCategoryRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishCategoryRow>, DatabaseError, Database>;
     readonly cuisinesByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishCuisineRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishCuisineRow>, DatabaseError, Database>;
     readonly sourcesByDishIds: (
       ids: ReadonlyArray<bigint>,
-    ) => Effect.Effect<
-      ReadonlyArray<DishSourceRow>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<DishSourceRow>, DatabaseError, Database>;
     readonly filterIds: (input: {
       readonly ingredientIds: ReadonlyArray<bigint>;
       readonly categoryIds: ReadonlyArray<bigint>;
@@ -115,7 +69,7 @@ export class DishRelationsRepository extends Context.Service<
       readonly status: string;
       readonly cursor: bigint;
       readonly limit: number;
-    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly insertName: (input: {
       readonly dishId: bigint;
       readonly languageTag: string;
@@ -123,41 +77,37 @@ export class DishRelationsRepository extends Context.Service<
       readonly nameKind: string;
       readonly isPreferred: boolean;
       readonly searchKey: string;
-    }) => Effect.Effect<
-      DishNameRow,
-      DatabaseUnavailable | PersistenceError | PersistenceConflict,
-      Database
-    >;
+    }) => Effect.Effect<DishNameRow, DatabaseError, Database>;
     readonly upsertDescription: (input: {
       readonly dishId: bigint;
       readonly languageTag: string;
       readonly description: string;
       readonly summary: string | null;
-    }) => Effect.Effect<DishDescriptionRow, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<DishDescriptionRow, DatabaseError, Database>;
     readonly linkDishSource: (
       dishId: bigint,
       sourceRecordId: bigint,
-    ) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<void, DatabaseError, Database>;
     readonly linkIngredient: (
       dishId: bigint,
       ingredientId: bigint,
       role: string,
-    ) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<void, DatabaseError, Database>;
     readonly linkPlace: (input: {
       readonly dishId: bigint;
       readonly placeId: bigint;
       readonly association: string;
       readonly isDisputed: boolean;
       readonly note: string | null;
-    }) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<void, DatabaseError, Database>;
     readonly linkCategory: (
       dishId: bigint,
       categoryId: bigint,
-    ) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<void, DatabaseError, Database>;
     readonly linkCuisine: (
       dishId: bigint,
       cuisineId: bigint,
-    ) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    ) => Effect.Effect<void, DatabaseError, Database>;
     readonly insertIngredientName: (input: {
       readonly ingredientId: bigint;
       readonly languageTag: string;
@@ -165,139 +115,89 @@ export class DishRelationsRepository extends Context.Service<
       readonly nameKind: string;
       readonly isPreferred: boolean;
       readonly searchKey: string;
-    }) => Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database>;
+    }) => Effect.Effect<void, DatabaseError, Database>;
   }
 >()("feastjourney/food-discovery/DishRelationsRepository") {}
 
-const runVoid = (
+const runVoid = <A>(
   operation: string,
-  task: (sql: DbClient) => Promise<void>,
-): Effect.Effect<void, DatabaseUnavailable | PersistenceError, Database> =>
-  Effect.gen(function* () {
-    const sql = yield* currentSql;
-    yield* Effect.tryPromise({
-      try: () => task(sql),
-      catch: (cause) => readFailure(operation, cause),
-    });
-  });
+  task: (sql: DbClient) => Promise<A>,
+): Effect.Effect<void, DatabaseError, Database> => Effect.asVoid(runQuery(operation, task));
 
 export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository, {
   namesByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishNamesByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/names-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/names-by-ids", (sql) =>
+        dishNamesByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   descriptionsByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishDescriptionsByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/descriptions-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/descriptions-by-ids", (sql) =>
+        dishDescriptionsByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   ingredientsByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishIngredientsByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/ingredients-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/ingredients-by-ids", (sql) =>
+        dishIngredientsByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   placesByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishPlacesByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/places-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/places-by-ids", (sql) =>
+        dishPlacesByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   categoriesByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishCategoriesByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/categories-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/categories-by-ids", (sql) =>
+        dishCategoriesByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   cuisinesByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishCuisinesByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/cuisines-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/cuisines-by-ids", (sql) =>
+        dishCuisinesByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   sourcesByDishIds: (ids) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const rows = yield* Effect.tryPromise({
-        try: () => dishSourcesByDishIds.run(sql, { ids: [...ids] }),
-        catch: (cause) => readFailure("dish/sources-by-ids", cause),
-      });
-
-      return toArray(rows);
+      return yield* runQuery("dish/sources-by-ids", (sql) =>
+        dishSourcesByDishIds.run(sql, { ids: [...ids] }),
+      );
     }),
   filterIds: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
+      const rows = yield* runQuery("dish/filter", (sql) =>
+        dishFilter.run(sql, {
+          ingredient_ids: [...input.ingredientIds],
+          category_ids: [...input.categoryIds],
+          place_ids: [...input.placeIds],
+          ingredient_mode: input.ingredientMode,
+          category_mode: input.categoryMode,
+          cuisine: input.cuisine,
+          association: input.association,
+          status: input.status,
+          cursor: input.cursor,
+          limit: input.limit,
+        }),
+      );
 
-      const rows = yield* Effect.tryPromise({
-        try: () =>
-          dishFilter.run(sql, {
-            ingredient_ids: [...input.ingredientIds],
-            category_ids: [...input.categoryIds],
-            place_ids: [...input.placeIds],
-            ingredient_mode: input.ingredientMode,
-            category_mode: input.categoryMode,
-            cuisine: input.cuisine,
-            association: input.association,
-            status: input.status,
-            cursor: input.cursor,
-            limit: input.limit,
-          }),
-        catch: (cause) => readFailure("dish/filter", cause),
-      });
-
-      return toArray(rows).map((row) => row.id);
+      return rows.map((row) => row.id);
     }),
   insertName: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const outcome = yield* Effect.tryPromise({
-        try: () =>
-          dishNameInsert.try(sql, {
-            dish_id: input.dishId,
-            language_tag: input.languageTag,
-            name: input.name,
-            name_kind: input.nameKind,
-            is_preferred: input.isPreferred,
-            search_key: input.searchKey,
-          }),
-        catch: (cause) => readFailure("dish/name-insert", cause),
-      });
+      const outcome = yield* runQuery("dish/name-insert", (sql) =>
+        dishNameInsert.try(sql, {
+          dish_id: input.dishId,
+          language_tag: input.languageTag,
+          name: input.name,
+          name_kind: input.nameKind,
+          is_preferred: input.isPreferred,
+          search_key: input.searchKey,
+        }),
+      );
 
       if (outcome.error !== undefined) {
         if (outcome.error.condition === "unique_violation") {
@@ -307,47 +207,21 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
           });
         }
 
-        return yield* readFailure("dish/name-insert", outcome.error.cause);
+        return yield* classifyDatabaseError("dish/name-insert", outcome.error.cause);
       }
 
-      const created = toArray(outcome.value);
-      const first = created[0];
-
-      if (first === undefined) {
-        return yield* new PersistenceError({
-          operation: "dish/name-insert",
-          cause: "insert returned no row",
-        });
-      }
-
-      return first;
+      return outcome.value;
     }),
   upsertDescription: (input) =>
     Effect.gen(function* () {
-      const sql = yield* currentSql;
-
-      const row = yield* Effect.tryPromise({
-        try: () =>
-          dishDescriptionUpsert.run(sql, {
-            dish_id: input.dishId,
-            language_tag: input.languageTag,
-            description: input.description,
-            summary: input.summary,
-          }),
-        catch: (cause) => readFailure("dish/description-upsert", cause),
-      });
-
-      const created = toArray(row);
-      const first = created[0];
-
-      if (first === undefined) {
-        return yield* new PersistenceError({
-          operation: "dish/description-upsert",
-          cause: "upsert returned no row",
-        });
-      }
-
-      return first;
+      return yield* runQuery("dish/description-upsert", (sql) =>
+        dishDescriptionUpsert.run(sql, {
+          dish_id: input.dishId,
+          language_tag: input.languageTag,
+          description: input.description,
+          summary: input.summary,
+        }),
+      );
     }),
   linkDishSource: (dishId, sourceRecordId) =>
     runVoid("dish/source-link", (sql) =>
@@ -380,19 +254,14 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
       dishCuisineLink.run(sql, { dish_id: dishId, cuisine_id: cuisineId }),
     ),
   insertIngredientName: (input) =>
-    Effect.gen(function* () {
-      const sql = yield* currentSql;
-      yield* Effect.tryPromise({
-        try: () =>
-          ingredientNameInsert.run(sql, {
-            ingredient_id: input.ingredientId,
-            language_tag: input.languageTag,
-            name: input.name,
-            name_kind: input.nameKind,
-            is_preferred: input.isPreferred,
-            search_key: input.searchKey,
-          }),
-        catch: (cause) => readFailure("ingredient/name-insert", cause),
-      });
-    }),
+    runVoid("ingredient/name-insert", (sql) =>
+      ingredientNameInsert.run(sql, {
+        ingredient_id: input.ingredientId,
+        language_tag: input.languageTag,
+        name: input.name,
+        name_kind: input.nameKind,
+        is_preferred: input.isPreferred,
+        search_key: input.searchKey,
+      }),
+    ),
 });

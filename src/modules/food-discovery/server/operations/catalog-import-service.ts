@@ -19,15 +19,16 @@ import { DishRepository } from "@/modules/food-discovery/server/repository/dish-
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
 import { TaxonomyRepository } from "@/modules/food-discovery/server/repository/taxonomy-repository";
-import { appConfig } from "@/server/config";
 import type { Database } from "@/server/database/client";
 import { withTransaction } from "@/server/database/client";
 import type {
   DatabaseUnavailable,
   PersistenceConflict,
   PersistenceError,
+  TransactionConflict,
   TransactionFailed,
 } from "@/server/database/errors";
+import type { DatabaseError } from "@/server/database/query";
 
 export type CatalogImportError =
   | CatalogConflict
@@ -37,6 +38,7 @@ export type CatalogImportError =
   | DatabaseUnavailable
   | PersistenceError
   | PersistenceConflict
+  | TransactionConflict
   | TransactionFailed;
 
 export interface ImportValidationItem {
@@ -90,13 +92,8 @@ export const CatalogImportServiceLive = Layer.effect(
     const placeRepository = yield* PlaceRepository;
     const taxonomy = yield* TaxonomyRepository;
     const curation = yield* CurationRepository;
-    const config = yield* appConfig;
 
-    void config;
-
-    const uniqueSlug = (
-      base: string,
-    ): Effect.Effect<string, DatabaseUnavailable | PersistenceError, Database> =>
+    const uniqueSlug = (base: string): Effect.Effect<string, DatabaseError, Database> =>
       Effect.gen(function* () {
         if ((yield* dishes.findBySlug(base)) === null) {
           return base;
@@ -197,7 +194,7 @@ export const CatalogImportServiceLive = Layer.effect(
       record: AuthoringDish,
       placeIds: ReadonlyArray<bigint>,
       cuisineSlugs: ReadonlyArray<string>,
-    ): Effect.Effect<string | null, DatabaseUnavailable | PersistenceError, Database> =>
+    ): Effect.Effect<string | null, DatabaseError, Database> =>
       Effect.gen(function* () {
         for (const name of record.names) {
           if (!isSearchableQuery(name.name)) {
@@ -249,7 +246,7 @@ export const CatalogImportServiceLive = Layer.effect(
         readonly slug: string | null;
         readonly duplicateOf: string | null;
       },
-      DatabaseUnavailable | PersistenceError,
+      DatabaseError,
       Database
     > =>
       Effect.gen(function* () {
@@ -264,22 +261,15 @@ export const CatalogImportServiceLive = Layer.effect(
           }
         }
 
-        let parentId: bigint | null = null;
-
         if (record.parent_slug !== undefined) {
           const parent = yield* dishes.findBySlug(record.parent_slug);
 
           if (parent === null) {
             errors.push(`unknown parent slug "${record.parent_slug}"`);
-          } else {
-            parentId = parent.id;
           }
         }
 
-        void parentId;
-
-        const { resolved: ingredientIds, errors: ingredientErrors } =
-          yield* resolveIngredients(record);
+        const { errors: ingredientErrors } = yield* resolveIngredients(record);
 
         const { resolved: placeIds, errors: placeErrors } = yield* resolvePlaces(record);
 
@@ -311,8 +301,6 @@ export const CatalogImportServiceLive = Layer.effect(
                 cuisineSlugs,
               )
             : null;
-
-        void ingredientIds;
 
         return { externalRef, errors, slug: record.slug ?? null, duplicateOf };
       });
@@ -400,7 +388,7 @@ export const CatalogImportServiceLive = Layer.effect(
       withTransaction(
         `import/${jobId.toString()}`,
         Effect.gen(function* () {
-          const baseSlug = record.slug ?? slugifyName(record.names[0]?.name ?? "dish");
+          const baseSlug = record.slug ?? slugifyName(record.names[0].name);
           const slug = yield* uniqueSlug(baseSlug);
           let parentId: bigint | null = null;
 

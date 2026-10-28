@@ -96,6 +96,7 @@ import type {
   DatabaseUnavailable,
   PersistenceConflict,
   PersistenceError,
+  TransactionConflict,
   TransactionFailed,
 } from "@/server/database/errors";
 
@@ -123,6 +124,7 @@ type ApiFailure =
   | ConflictingDish
   | CatalogConflict
   | PersistenceConflict
+  | TransactionConflict
   | AdminRequired
   | DatabaseUnavailable
   | PersistenceError

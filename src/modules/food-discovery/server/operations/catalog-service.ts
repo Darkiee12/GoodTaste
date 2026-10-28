@@ -23,7 +23,12 @@ import { IngredientRepository } from "@/modules/food-discovery/server/repository
 import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
 import { TaxonomyRepository } from "@/modules/food-discovery/server/repository/taxonomy-repository";
 import type { Database } from "@/server/database/client";
-import type { DatabaseUnavailable, PersistenceError } from "@/server/database/errors";
+import type {
+  DatabaseUnavailable,
+  PersistenceConflict,
+  PersistenceError,
+  TransactionConflict,
+} from "@/server/database/errors";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -45,7 +50,9 @@ export type CatalogServiceError =
   | InvalidSearchFilter
   | PlaceNotFound
   | DatabaseUnavailable
-  | PersistenceError;
+  | PersistenceError
+  | PersistenceConflict
+  | TransactionConflict;
 
 export interface IngredientSummary {
   readonly id: string;

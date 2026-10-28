@@ -39,7 +39,13 @@ import type { PlaceNameRow } from "@/modules/food-discovery/server/repository/pl
 import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
 import { TaxonomyRepository } from "@/modules/food-discovery/server/repository/taxonomy-repository";
 import type { Database } from "@/server/database/client";
-import type { DatabaseUnavailable, PersistenceError } from "@/server/database/errors";
+import type {
+  DatabaseUnavailable,
+  PersistenceConflict,
+  PersistenceError,
+  TransactionConflict,
+} from "@/server/database/errors";
+import type { DatabaseError } from "@/server/database/query";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -100,7 +106,9 @@ export type DishServiceError =
   | InvalidSearchFilter
   | PlaceNotFound
   | DatabaseUnavailable
-  | PersistenceError;
+  | PersistenceError
+  | PersistenceConflict
+  | TransactionConflict;
 
 export interface SearchDishesInput {
   readonly q?: string | undefined;
@@ -210,7 +218,7 @@ export const DishServiceLive = Layer.effect(
         readonly placeNamesByPlace: ReadonlyMap<string, Array<PlaceNameRow>>;
         readonly categorySlugsByDish: ReadonlyMap<string, Array<string>>;
       },
-      DatabaseUnavailable | PersistenceError,
+      DatabaseError,
       Database
     > =>
       Effect.gen(function* () {
@@ -261,11 +269,7 @@ export const DishServiceLive = Layer.effect(
 
     const recordsByIds = (
       ids: ReadonlyArray<bigint>,
-    ): Effect.Effect<
-      ReadonlyMap<string, DishRecord>,
-      DatabaseUnavailable | PersistenceError,
-      Database
-    > =>
+    ): Effect.Effect<ReadonlyMap<string, DishRecord>, DatabaseError, Database> =>
       Effect.gen(function* () {
         const records = new Map<string, DishRecord>();
 
@@ -605,8 +609,8 @@ export const DishServiceLive = Layer.effect(
             const summaryRelations = yield* fetchSummaryRelations(page);
             const items = toSummaries(records, page, summaryRelations, locale);
 
-            const lastRecord =
-              page.length > 0 ? records.get(page[page.length - 1]?.toString() ?? "") : undefined;
+            const lastId = page.length > 0 ? page[page.length - 1] : undefined;
+            const lastRecord = lastId === undefined ? undefined : records.get(lastId.toString());
 
             const nextCursor =
               ids.length > limit && lastRecord !== undefined
@@ -722,8 +726,8 @@ export const DishServiceLive = Layer.effect(
         const summaryRelations = yield* fetchSummaryRelations(page);
         const items = toSummaries(records, page, summaryRelations, locale);
 
-        const lastRecord =
-          page.length > 0 ? records.get(page[page.length - 1]?.toString() ?? "") : undefined;
+        const lastId = page.length > 0 ? page[page.length - 1] : undefined;
+        const lastRecord = lastId === undefined ? undefined : records.get(lastId.toString());
 
         const nextCursor =
           ids.length > limit && lastRecord !== undefined
