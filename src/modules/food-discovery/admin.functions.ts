@@ -9,6 +9,7 @@ import {
   adminReviewsQuerySchema,
   csvToRecords,
   jsonToRecords,
+  MAX_IMPORT_FILE_BYTES,
   needsLicenseReview,
 } from "@/modules/food-discovery/admin.schema";
 import { localeSchema } from "@/modules/food-discovery/food.schema";
@@ -389,6 +390,15 @@ export const adminImportValidateFn = createServerFn({ method: "POST" })
 
     let records: Array<unknown>;
 
+    const contentBytes = Buffer.byteLength(data.contentText, "utf8");
+
+    if (contentBytes > MAX_IMPORT_FILE_BYTES) {
+      return {
+        ok: false as const,
+        reason: `file exceeds ${MAX_IMPORT_FILE_BYTES} byte limit (${contentBytes} bytes)`,
+      };
+    }
+
     try {
       const parsed =
         data.fileType === "json" ? jsonToRecords(data.contentText) : csvToRecords(data.contentText);
@@ -511,10 +521,7 @@ export const adminUpdateDishStatusFn = createServerFn({ method: "POST" })
 
     await requireSurface(loaded, headers, "fn/admin/dish-status", requestId);
 
-    const permission: PermissionRequest =
-      data.status === "published"
-        ? { resource: "food", actions: ["publish"] }
-        : { resource: "food", actions: ["update"] };
+    const permission: PermissionRequest = { resource: "food", actions: ["publish"] };
 
     const trusted = await runtime.runApp(
       session.requirePermission(headers, permission),

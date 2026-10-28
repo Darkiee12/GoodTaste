@@ -130,6 +130,18 @@ const CSV_COLUMNS: ReadonlySet<string> = new Set([
  * Minimal RFC 4180 reader: quoted fields, escaped double quotes, CRLF.
  * Deliberately small — the import studio documents exactly one CSV shape,
  * so the parser only needs to handle that shape correctly.
+ *
+ * Strictness (editorial imports must fail loudly, never corrupt silently):
+ * - A `"` opening a quoted field must be the first character of the field;
+ *   a stray `"` mid-field is rejected.
+ * - A closing `"` must be followed by comma, CRLF/LF, or EOF; anything
+ *   else (e.g. `"abc"def`) is rejected. Doubled `""` inside quoted fields
+ *   stays legal as an escaped quote.
+ * - A row that parses to a single empty/whitespace-only field is treated
+ *   as a blank line and skipped (covers the trailing newline and stray
+ *   blank lines); any other all-empty row (e.g. `,,` under a 2-column
+ *   header) keeps its field count and fails the exact-width check in
+ *   `csvToRecords` instead of being silently dropped.
  */
 const parseCsvRows = (text: string): Array<Array<string>> => {
   const rows: Array<Array<string>> = [];
@@ -137,6 +149,8 @@ const parseCsvRows = (text: string): Array<Array<string>> => {
   let field = "";
   let quoted = false;
   let index = 0;
+
+  const sheetRow = (): number => rows.length + 1;
 
   const pushField = (): void => {
     current.push(field);
@@ -163,7 +177,22 @@ const parseCsvRows = (text: string): Array<Array<string>> => {
 
         quoted = false;
         index += 1;
-        continue;
+
+        const next = index >= text.length ? null : text[index];
+
+        if (next === null) {
+          continue;
+        }
+
+        if (next === "," || next === "\n") {
+          continue;
+        }
+
+        if (next === "\r" && text[index + 1] === "\n") {
+          continue;
+        }
+
+        throw new Error(`row ${sheetRow()}: invalid quote placement`);
       }
 
       field += char;
@@ -172,6 +201,10 @@ const parseCsvRows = (text: string): Array<Array<string>> => {
     }
 
     if (char === '"') {
+      if (field.length > 0) {
+        throw new Error(`row ${sheetRow()}: invalid quote placement`);
+      }
+
       quoted = true;
       index += 1;
       continue;
@@ -200,7 +233,7 @@ const parseCsvRows = (text: string): Array<Array<string>> => {
   }
 
   if (quoted) {
-    throw new Error("unterminated quoted field");
+    throw new Error(`row ${sheetRow()}: unterminated quoted field`);
   }
 
   if (field.length > 0 || current.length > 0) {
@@ -278,6 +311,16 @@ export const csvToRecords = (text: string): Array<unknown> => {
     throw new Error(`CSV has ${header.length} columns; at most ${MAX_CSV_FIELDS} are supported`);
   }
 
+  const seenColumns = new Set<string>();
+
+  for (const column of header) {
+    if (seenColumns.has(column)) {
+      throw new Error(`duplicate CSV column "${column}"`);
+    }
+
+    seenColumns.add(column);
+  }
+
   const nameIndex = header.indexOf("name");
 
   if (nameIndex === -1) {
@@ -291,6 +334,16 @@ export const csvToRecords = (text: string): Array<unknown> => {
   }
 
   return rows.slice(1).map((row, rowNumber) => {
+    // Every data row must match the header width exactly: too few or too
+    // many fields is malformed (e.g. an extra unescaped comma), never
+    // silently truncated or padded. Blank single-field lines were already
+    // skipped by parseCsvRows; wider all-empty rows fail here by design.
+    if (row.length !== header.length) {
+      throw new Error(
+        `row ${rowNumber + 2}: expected ${header.length} columns but found ${row.length}`,
+      );
+    }
+
     const cell = (column: string): string => {
       const position = header.indexOf(column);
 

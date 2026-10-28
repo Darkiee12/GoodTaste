@@ -1,3 +1,3 @@
-SELECT id, slug, parent_dish_id, status, created_at, updated_at
+SELECT id, slug, parent_dish_id AS "parentDishId", status, created_at AS "createdAt", updated_at AS "updatedAt"
 FROM feastjourney.dishes
 WHERE slug = :slug::text

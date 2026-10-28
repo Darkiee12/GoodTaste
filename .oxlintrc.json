@@ -115,6 +115,8 @@
     // client-safe shapes, e.g. dish_id::text); tsc is the authority that
     // the projection matches the consumer contract.
     // The auth integration test asserts on profile/favorite rows.
+    // Catalog, admin-dashboard and admin-import tests assert on
+    // Reylo-derived dish/import rows for the same reason.
     // TanStack server-function client types do not resolve inside Oxlint's
     // engine (route loaders calling user.functions); tsc checks them fully.
     // Operational scripts
@@ -130,6 +132,7 @@
         "tests/integration/auth.test.ts",
         "tests/integration/admin-dashboard.test.ts",
         "tests/integration/admin-import-journey.test.ts",
+        "tests/integration/catalog.test.ts",
         "src/modules/user/*.functions.ts",
         "src/modules/food-discovery/*.functions.ts",
         "src/routes/settings.account.tsx",

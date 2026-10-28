@@ -25,29 +25,11 @@ import {
 } from "@/server/database/errors";
 import { type DatabaseError, runQuery } from "@/server/database/query";
 
-export type DishRow = (typeof dishFindById)["~reylo"]["element"];
+export type DishRecord = (typeof dishFindById)["~reylo"]["element"];
 
 export type AdminDishRow = (typeof adminDishesByStatus)["~reylo"]["element"];
 
 export type AdminDishRecentRow = (typeof adminDishesRecent)["~reylo"]["element"];
-
-export interface DishRecord {
-  readonly id: bigint;
-  readonly slug: string;
-  readonly parentDishId: bigint | null;
-  readonly status: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
-const toRecord = (row: DishRow): DishRecord => ({
-  id: row.id,
-  slug: row.slug,
-  parentDishId: row.parent_dish_id,
-  status: row.status,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
 
 export class DishRepository extends Context.Service<
   DishRepository,
@@ -166,13 +148,13 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
     Effect.gen(function* () {
       const row = yield* runQuery("dish/find-by-id", (sql) => dishFindById.run(sql, { id }));
 
-      return row === null ? null : toRecord(row);
+      return row;
     }),
   findBySlug: (slug) =>
     Effect.gen(function* () {
       const row = yield* runQuery("dish/find-by-slug", (sql) => dishFindBySlug.run(sql, { slug }));
 
-      return row === null ? null : toRecord(row);
+      return row;
     }),
   findByIds: (ids) =>
     Effect.gen(function* () {
@@ -188,7 +170,7 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
         dishRecordsByIds.run(sql, { ids: [...ids] }),
       );
 
-      return rows.map(toRecord);
+      return rows;
     }),
   listByStatus: (status, cursor, limit) =>
     Effect.gen(function* () {
@@ -196,7 +178,7 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
         dishListByStatus.run(sql, { status, cursor, limit }),
       );
 
-      return rows.map(toRecord);
+      return rows;
     }),
   countByStatus: (status) =>
     Effect.gen(function* () {
@@ -289,7 +271,7 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
         return yield* insertConflict("dish/insert", outcome);
       }
 
-      return toRecord(outcome.value);
+      return outcome.value;
     }),
   update: (input) =>
     Effect.gen(function* () {
@@ -306,7 +288,7 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
         return yield* insertConflict("dish/update", outcome);
       }
 
-      return outcome.value === null ? null : toRecord(outcome.value);
+      return outcome.value;
     }),
   updateStatus: (id, status) =>
     Effect.gen(function* () {
@@ -314,6 +296,6 @@ export const DishRepositoryLive = Layer.succeed(DishRepository, {
         dishUpdateStatus.run(sql, { id, status }),
       );
 
-      return row === null ? null : toRecord(row);
+      return row;
     }),
 });

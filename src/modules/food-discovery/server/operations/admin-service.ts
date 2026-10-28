@@ -6,6 +6,7 @@ import {
   DishNotFound,
   InvalidDishData,
   InvalidLocale,
+  InvalidRelationship,
   InvalidSearchFilter,
 } from "@/modules/food-discovery/server/domain/errors";
 import {
@@ -45,12 +46,19 @@ const ROLES: ReadonlySet<string> = new Set(["core", "common", "optional", "garni
 const ASSOCIATIONS: ReadonlySet<string> = new Set(["origin", "associated", "popular"]);
 const MAX_SLUG_ATTEMPTS = 20;
 
+// Single-parent dish-family trees stay shallow (seed data uses depth 1).
+// The ancestor walk below is bounded so a crafted or legacy deep chain
+// cannot turn parent assignment into an unbounded traversal: chains longer
+// than this fail closed with InvalidRelationship.
+const MAX_PARENT_CHAIN_DEPTH = 25;
+
 export type AdminServiceError =
   | CatalogConflict
   | ConflictingDish
   | DishNotFound
   | InvalidDishData
   | InvalidLocale
+  | InvalidRelationship
   | InvalidSearchFilter
   | DatabaseUnavailable
   | PersistenceError
@@ -269,11 +277,51 @@ export const AdminServiceLive = Layer.effect(
         return parent.id;
       });
 
+    // Rejects any parent assignment that would place the dish inside its own
+    // ancestor chain (two-node and longer cycles, not just self-parenting).
+    // A null childId covers freshly created dishes, which cannot appear in an
+    // existing chain yet; the walk then only enforces the depth bound.
+    const assertNoParentCycle = (childId: bigint | null, parentDishId: bigint | null) =>
+      Effect.gen(function* () {
+        let current = parentDishId;
+
+        for (let depth = 0; depth <= MAX_PARENT_CHAIN_DEPTH; depth += 1) {
+          if (current === null) {
+            return;
+          }
+
+          if (childId !== null && current === childId) {
+            yield* new InvalidRelationship({
+              reason: "dish parent assignment would create a cycle",
+            });
+
+            return;
+          }
+
+          if (depth === MAX_PARENT_CHAIN_DEPTH) {
+            yield* new InvalidRelationship({
+              reason: `dish parent chain exceeds maximum depth of ${MAX_PARENT_CHAIN_DEPTH}`,
+            });
+
+            return;
+          }
+
+          const ancestor = yield* dishes.findById(current);
+
+          if (ancestor === null) {
+            return;
+          }
+
+          current = ancestor.parentDishId;
+        }
+      });
+
     const createDish = (actor: string, input: CreateDishInput) =>
       Effect.gen(function* () {
         const status = yield* checkStatus(input.status ?? "draft");
         const names = yield* preparedNames(input.names);
         const parentDishId = yield* resolveParent(input.parentSlug);
+        yield* assertNoParentCycle(null, parentDishId);
 
         const baseSlug =
           input.slug !== undefined
@@ -339,6 +387,10 @@ export const AdminServiceLive = Layer.effect(
 
         if (parentDishId !== null && parentDishId === record.id) {
           return yield* new InvalidDishData({ reason: "a dish cannot be its own parent" });
+        }
+
+        if (input.parentSlug !== undefined) {
+          yield* assertNoParentCycle(record.id, parentDishId);
         }
 
         if (status === "published" && record.status !== "published") {
