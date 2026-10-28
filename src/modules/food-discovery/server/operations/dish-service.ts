@@ -139,6 +139,15 @@ export class DishService extends Context.Service<
       idOrSlug: string,
       locale: string,
     ) => Effect.Effect<DishProfile, DishServiceError, Database>;
+    /**
+     * Status-agnostic read for curation surfaces. Same profile assembly as
+     * {@link getDish} but without the publication gate, so drafts and
+     * review candidates are inspectable. Never use for public discovery.
+     */
+    readonly getDishForCuration: (
+      idOrSlug: string,
+      locale: string,
+    ) => Effect.Effect<DishProfile, DishServiceError, Database>;
     readonly searchDishes: (
       input: SearchDishesInput,
     ) => Effect.Effect<SearchDishesOutput, DishServiceError, Database>;
@@ -311,6 +320,31 @@ export const DishServiceLive = Layer.effect(
         return record;
       });
 
+    const resolveAnyRecord = (idOrSlug: string) =>
+      Effect.gen(function* () {
+        if (isDbIdString(idOrSlug)) {
+          const record = yield* dishes.findById(BigInt(idOrSlug));
+
+          if (record === null) {
+            return yield* new DishNotFound({ dishId: idOrSlug });
+          }
+
+          return record;
+        }
+
+        if (!isSlug(idOrSlug)) {
+          return yield* new DishNotFound({ dishId: idOrSlug });
+        }
+
+        const record = yield* dishes.findBySlug(idOrSlug);
+
+        if (record === null) {
+          return yield* new DishNotFound({ dishId: idOrSlug });
+        }
+
+        return record;
+      });
+
     const getDish = (
       idOrSlug: string,
       locale: string,
@@ -318,6 +352,27 @@ export const DishServiceLive = Layer.effect(
       Effect.gen(function* () {
         const checkedLocale = yield* checkLocale(locale);
         const record = yield* resolveRecord(idOrSlug);
+
+        return yield* assembleProfile(record, checkedLocale, true);
+      });
+
+    const getDishForCuration = (
+      idOrSlug: string,
+      locale: string,
+    ): Effect.Effect<DishProfile, DishServiceError, Database> =>
+      Effect.gen(function* () {
+        const checkedLocale = yield* checkLocale(locale);
+        const record = yield* resolveAnyRecord(idOrSlug);
+
+        return yield* assembleProfile(record, checkedLocale, false);
+      });
+
+    const assembleProfile = (
+      record: DishRecord,
+      checkedLocale: string,
+      parentPublishedOnly: boolean,
+    ): Effect.Effect<DishProfile, DishServiceError, Database> =>
+      Effect.gen(function* () {
         const dishId = record.id;
 
         const [names, descriptions, dishIngredients, dishPlaces, categories, cuisines, sources] =
@@ -405,7 +460,10 @@ export const DishServiceLive = Layer.effect(
         if (record.parentDishId !== null) {
           const parentRecord = yield* dishes.findById(record.parentDishId);
 
-          if (parentRecord !== null && parentRecord.status === "published") {
+          if (
+            parentRecord !== null &&
+            (!parentPublishedOnly || parentRecord.status === "published")
+          ) {
             parent = { id: encodeDbId(parentRecord.id), slug: parentRecord.slug };
           }
         }
@@ -753,6 +811,6 @@ export const DishServiceLive = Layer.effect(
         return toSummaries(records, ids, summaryRelations, checkedLocale);
       });
 
-    return DishService.of({ getDish, searchDishes, getRelated });
+    return DishService.of({ getDish, getDishForCuration, searchDishes, getRelated });
   }),
 );
