@@ -1,6 +1,13 @@
-import { Link, createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, createFileRoute, getRouteApi, redirect, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
-import { adminDishDetailFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
+import {
+  adminDishDetailFn,
+  adminPublicationCheckFn,
+  adminSurfaceFn,
+  adminUpdateDishStatusFn,
+} from "@/modules/food-discovery/admin.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { getSessionFn } from "@/modules/user/session.functions";
 import { formatAdminDate } from "@/shared/format";
@@ -78,7 +85,169 @@ const statusLabel = (status: string, copy: Messages): string => {
 
 type DisplayTimestamp = Date | string;
 
+const DISH_STATUSES = ["draft", "review", "published", "archived"] as const;
+
 const formatDate = (value: DisplayTimestamp, lang: Locale): string => formatAdminDate(value, lang);
+
+function DishStatusEditor({
+  dishId,
+  initialStatus,
+}: {
+  readonly dishId: string;
+  readonly initialStatus: string;
+}) {
+  const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
+  const router = useRouter();
+  const [selected, setSelected] = useState(initialStatus);
+  const [applied, setApplied] = useState(initialStatus);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const publication = useQuery({
+    queryKey: ["admin", "publication-check", dishId],
+    queryFn: () => adminPublicationCheckFn({ data: { dishId } }),
+    staleTime: 30_000,
+  });
+
+  const save = useMutation({
+    mutationFn: (next: string) => {
+      const status = DISH_STATUSES.find((entry) => entry === next) ?? "draft";
+
+      return adminUpdateDishStatusFn({ data: { dishId, status } });
+    },
+    onSuccess: (result) => {
+      setApplied(result.status);
+      setSaved(true);
+      setSaveError(null);
+      void router.invalidate();
+    },
+    onError: (error) => {
+      setSaved(false);
+      setSaveError(error instanceof Error ? error.message : copy.adminStatusUpdateFailed);
+    },
+  });
+
+  const check = publication.data ?? null;
+  const publishBlocked = selected === "published" && check !== null && !check.publishable;
+  const checkingPublish = selected === "published" && publication.isPending;
+  const saveDisabled = save.isPending || publishBlocked || checkingPublish;
+
+  const handleSave = (): void => {
+    if (selected === "published" && applied !== "published") {
+      const confirmed = window.confirm(copy.adminPublishConfirm);
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setSaved(false);
+    setSaveError(null);
+    save.mutate(selected);
+  };
+
+  return (
+    <section
+      aria-labelledby="admin-dish-status"
+      className="rounded-2xl border border-border-soft bg-white p-4"
+    >
+      <h2 id="admin-dish-status" className="text-lg font-bold">
+        {copy.adminStatus}
+      </h2>
+
+      <div className="mt-2 flex flex-col gap-2">
+        <label htmlFor="admin-dish-status-select" className="text-sm font-semibold">
+          {copy.adminStatus}
+        </label>
+
+        <select
+          id="admin-dish-status-select"
+          value={selected}
+          onChange={(event) => {
+            const next = DISH_STATUSES.find((entry) => entry === event.target.value);
+
+            if (next !== undefined) {
+              setSelected(next);
+            }
+          }}
+          className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm"
+        >
+          {DISH_STATUSES.map((entry) => (
+            <option key={entry} value={entry}>
+              {statusLabel(entry, copy)}
+            </option>
+          ))}
+        </select>
+
+        {selected === "published" ? (
+          <div className="rounded-lg bg-cream px-3 py-2 text-sm" aria-live="polite">
+            <p className="font-semibold">{copy.adminPublicationChecklist}</p>
+
+            {publication.isPending ? <p>{copy.adminCheckingPublication}</p> : null}
+
+            {publication.isError ? (
+              <div>
+                <p role="alert">{copy.adminLoadFailed}</p>
+
+                <p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void publication.refetch();
+                    }}
+                    className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-border-soft bg-white px-4 py-2 text-sm font-semibold hover:bg-cream"
+                  >
+                    {copy.adminRetryChecklist}
+                  </button>
+                </p>
+              </div>
+            ) : null}
+
+            {check !== null && check.publishable ? <p>{copy.adminPublicationReady}</p> : null}
+
+            {check !== null && !check.publishable ? (
+              <div>
+                <p>{copy.adminPublishBlocked}</p>
+
+                <ul className="mt-1 list-disc pl-5">
+                  {check.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={saveDisabled}
+            aria-busy={save.isPending}
+            onClick={handleSave}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-lg bg-brand-blue px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+          >
+            {copy.authSave}
+          </button>
+        </div>
+
+        <div aria-live="polite">
+          {saved ? <p className="text-sm font-semibold">{copy.authSaved}</p> : null}
+
+          {saveError !== null ? (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
+            >
+              {saveError}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function AdminDishDetail() {
   const { lang } = rootRoute.useSearch();
@@ -103,6 +272,8 @@ function AdminDishDetail() {
           {copy.adminStatus}: {statusLabel(dish.status, copy)}
         </p>
       </div>
+
+      <DishStatusEditor key={dish.id} dishId={dish.id} initialStatus={dish.status} />
 
       <section
         aria-labelledby="admin-dish-names"

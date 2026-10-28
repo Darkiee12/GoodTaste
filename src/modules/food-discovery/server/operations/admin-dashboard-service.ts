@@ -4,8 +4,13 @@ import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { DishNotFound } from "@/modules/food-discovery/server/domain/errors";
 import { isDbIdString } from "@/modules/food-discovery/server/domain/ids";
 import {
+  type AdminServiceError,
+  AdminService,
+} from "@/modules/food-discovery/server/operations/admin-service";
+import {
   type CatalogImportError,
   CatalogImportService,
+  type ImportApplyInput,
   type ImportApplyReport,
   type ImportValidateInput,
   type ImportValidationReport,
@@ -13,6 +18,7 @@ import {
 import {
   CurationService,
   type CurationServiceError,
+  type PublicationCheck,
 } from "@/modules/food-discovery/server/operations/curation-service";
 import {
   DishService,
@@ -123,8 +129,20 @@ export class AdminDashboardService extends Context.Service<
       input: ImportValidateInput,
     ) => Effect.Effect<ImportValidationReport, CatalogImportError, Database | CatalogImportService>;
     readonly applyImport: (
-      jobId: string,
+      input: ImportApplyInput,
     ) => Effect.Effect<ImportApplyReport, CatalogImportError, Database | CatalogImportService>;
+    readonly publishDish: (
+      userId: string,
+      dishId: string,
+      status: string,
+    ) => Effect.Effect<
+      { readonly id: string; readonly status: string },
+      AdminServiceError,
+      Database | AdminService
+    >;
+    readonly publicationCheck: (
+      dishId: string,
+    ) => Effect.Effect<PublicationCheck, CurationServiceError, Database | CurationService>;
   }
 >()("feastjourney/food-discovery/AdminDashboardService") {}
 
@@ -136,6 +154,7 @@ export const AdminDashboardServiceLive = Layer.effect(
     const dishService = yield* DishService;
     const curationService = yield* CurationService;
     const importService = yield* CatalogImportService;
+    const adminService = yield* AdminService;
 
     return AdminDashboardService.of({
       dashboardStats: () =>
@@ -197,7 +216,13 @@ export const AdminDashboardServiceLive = Layer.effect(
           return { job, records };
         }),
       validateImport: (input) => importService.validateImport(input),
-      applyImport: (jobId) => importService.applyImport(jobId),
+      applyImport: (input) => importService.applyImport(input),
+      publishDish: (userId, dishId, status) =>
+        adminService.updateDishStatus(`admin:${userId}`, dishId, status),
+      publicationCheck: (dishId) =>
+        isDbIdString(dishId)
+          ? curationService.validatePublication(BigInt(dishId))
+          : Effect.fail(new DishNotFound({ dishId })),
     });
   }),
 );

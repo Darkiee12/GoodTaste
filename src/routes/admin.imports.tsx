@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import {
   Link,
   Outlet,
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/admin/imports")({
 
     return {};
   },
-  loader: async () => adminImportJobsFn({ data: { limit: 50 } }),
+  loader: async () => adminImportJobsFn({ data: { limit: 20 } }),
   component: AdminImports,
 });
 
@@ -91,9 +92,28 @@ function AdminImports() {
   const initial = importJobsSchema.parse(loaded);
   const [statusFilter, setStatusFilter] = useState<JobStatusFilter>("all");
   const [searchText, setSearchText] = useState("");
+  const [jobs, setJobs] = useState<ReadonlyArray<ImportJob>>(initial);
+  const [loadedLimit, setLoadedLimit] = useState(20);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const query = searchText.trim().toLowerCase();
 
-  const jobs = initial.filter((job) => {
+  const loadMore = useMutation({
+    mutationFn: (nextLimit: number) => adminImportJobsFn({ data: { limit: nextLimit } }),
+    onSuccess: (page, nextLimit) => {
+      setJobs(importJobsSchema.parse(page));
+      setLoadedLimit(nextLimit);
+      setLoadError(null);
+    },
+    onError: () => {
+      setLoadError(copy.adminLoadFailed);
+    },
+  });
+
+  // Follow-up: import history supports limit-only refetch (20, then 50 max);
+  // add cursor-based server paging for large histories instead of raising limits.
+  const nextLimit = loadedLimit >= 50 ? null : 50;
+
+  const filtered = jobs.filter((job) => {
     if (statusFilter !== "all" && job.status !== statusFilter) {
       return false;
     }
@@ -167,10 +187,21 @@ function AdminImports() {
             </label>
           </form>
 
+          <div aria-live="polite">
+            {loadError !== null ? (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
+              >
+                {loadError}
+              </p>
+            ) : null}
+          </div>
+
           <div className="overflow-x-auto">
             <table>
               <caption>
-                {jobs.length} of {initial.length} import jobs
+                {filtered.length} of {jobs.length} import jobs
               </caption>
 
               <thead>
@@ -188,7 +219,7 @@ function AdminImports() {
               </thead>
 
               <tbody>
-                {jobs.map((job) => (
+                {filtered.map((job) => (
                   <tr key={job.id}>
                     <td>
                       <Link to="/admin/imports/$jobId" params={{ jobId: job.id }} search={{ lang }}>
@@ -213,7 +244,23 @@ function AdminImports() {
             </table>
           </div>
 
-          {jobs.length === 0 ? <p>{copy.adminImportsNoMatch}</p> : null}
+          {filtered.length === 0 ? <p>{copy.adminImportsNoMatch}</p> : null}
+
+          {nextLimit !== null ? (
+            <div>
+              <button
+                type="button"
+                disabled={loadMore.isPending}
+                aria-busy={loadMore.isPending}
+                onClick={() => {
+                  loadMore.mutate(nextLimit);
+                }}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-border-soft bg-white px-4 py-2 text-sm font-semibold hover:bg-cream disabled:opacity-50"
+              >
+                {copy.adminNextPage}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

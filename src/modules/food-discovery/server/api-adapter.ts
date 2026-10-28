@@ -1407,11 +1407,26 @@ export const handleAdminImportApply = (
           Effect.gen(function* () {
             const body = yield* parseJsonBody(request, adminImportApplySchema);
 
+            const actorUserId = ActorConstructors.$match(actor, {
+              Guest: () => _actorLabel,
+              Member: ({ userId }) => userId,
+            });
+
             return yield* runOperation(
               guard,
               "admin/imports/apply",
               actor,
-              Effect.flatMap(CatalogImportService, (service) => service.applyImport(body.job_id)),
+              Effect.flatMap(CatalogImportService, (service) =>
+                service.applyImport({
+                  jobId: body.job_id,
+                  approvals: {
+                    licenseAck: body.approvals.license_ack,
+                    reviewAck: body.approvals.review_ack,
+                    duplicateRefs: body.approvals.duplicate_refs,
+                  },
+                  actorUserId,
+                }),
+              ),
               (report) => okResponse(request, guard, report),
             );
           }),

@@ -359,7 +359,10 @@ describe("bulk import", () => {
         api("/api/v1/admin/imports/apply", {
           method: "POST",
           headers: sessionHeaders(importer.cookies),
-          body: JSON.stringify({ job_id: body.jobId }),
+          body: JSON.stringify({
+            job_id: body.jobId,
+            approvals: { license_ack: true, review_ack: true, duplicate_refs: [] },
+          }),
         }),
       ),
     );
