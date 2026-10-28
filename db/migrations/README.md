@@ -38,6 +38,10 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 - `V20261028_009__default_member_role.sql` — AFTER INSERT trigger on `user`
   assigning the `member` role in the same transaction (email/OAuth/admin
   creation paths), idempotent via ON CONFLICT DO NOTHING.
+- `V20261028_010__remove_orphan_user_read.sql` — removes the orphaned
+  `user:read` key (seeded by V006 but absent from the code vocabulary and
+  never checked) and grants support the vocabulary-backed `user:list` for
+  its documented read-only user views.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

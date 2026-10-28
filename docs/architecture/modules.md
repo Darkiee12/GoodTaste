@@ -9,7 +9,10 @@ src/
 │   ├── user/
 │   │   ├── components/
 │   │   ├── user.schema.ts            # Client-safe Zod 4.6 transport schemas
-│   │   ├── user.functions.ts         # createServerFn wrappers
+│   │   ├── profile.functions.ts      # createServerFn wrappers: profile, favorites
+│   │   ├── session.functions.ts      # createServerFn wrappers: sessions, accounts
+│   │   ├── auth.functions.ts         # createServerFn wrappers: signup/in/out, recovery
+│   │   ├── admin.functions.ts        # createServerFn wrappers: users, roles, bans
 │   │   └── server/
 │   │       ├── index.ts              # Intentional server-only public module API
 │   │       ├── operations/
