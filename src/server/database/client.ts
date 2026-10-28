@@ -86,13 +86,56 @@ const TRANSACTION_RETRY_ATTEMPTS = 2;
 
 const TRANSACTION_RETRY_SCHEDULE = Schedule.exponential("100 millis");
 
+const releaseQuietly = (tx: postgres.ReservedSql): void => {
+  try {
+    tx.release();
+  } catch {
+    // The reservation is already being torn down; a release failure here
+    // must not mask the original error, so it is deliberately dropped.
+  }
+};
+
+/**
+ * Reserves one connection and opens a transaction on it. A failed `BEGIN`
+ * releases the reservation before propagating, so callers of
+ * `Effect.acquireUseRelease` never receive a connection they must clean up
+ * after a failed acquire. `release` is synchronous in postgres.js; the quiet
+ * release above keeps a release failure from masking the BEGIN error.
+ */
+const beginTransaction = async (sql: postgres.Sql): Promise<postgres.ReservedSql> => {
+  const tx = await sql.reserve();
+
+  try {
+    await tx.unsafe("BEGIN");
+  } catch (beginCause: unknown) {
+    releaseQuietly(tx);
+    throw beginCause;
+  }
+
+  return tx;
+};
+
 /**
  * Runs `effect` inside a single postgres.js transaction on one reserved
  * connection. Participating repositories resolve the transaction client
  * through `currentSql`, so no statement silently uses the pool mid-transaction.
- * The connection is released on success, failure, or interruption; commit
- * failures surface as `TransactionFailed`, while rollback failures are logged
- * and swallowed so the original failure is preserved.
+ *
+ * Resource guarantees, per reserved connection:
+ *
+ * - Reservation failure: nothing is held; the attempt fails.
+ * - `BEGIN` failure after reservation: the connection is released before
+ *   the attempt fails, so a failed BEGIN cannot leak it.
+ * - Query failure, typed Effect failure, defect, or interruption: `ROLLBACK`
+ *   issues and the connection is released. A failed `ROLLBACK` (for example
+ *   a dead connection) can never mask the original failure and the release
+ *   is still attempted.
+ * - `COMMIT` failure: the connection is still released, and the failure
+ *   surfaces as `TransactionFailed`. Commit failures are never retried: the
+ *   commit may have succeeded server-side, so retrying could double-apply.
+ * - Successful `COMMIT` with a failed release surfaces as
+ *   `TransactionFailed` rather than a silent success.
+ * - Release runs as an uninterruptible finalizer, so interruption of the
+ *   transaction body cannot strand the connection.
  *
  * A serialization conflict or deadlock aborts the whole transaction, so the
  * retry wraps the full acquire/use/release attempt: each attempt reserves a
@@ -100,8 +143,8 @@ const TRANSACTION_RETRY_SCHEDULE = Schedule.exponential("100 millis");
  * (TRANSACTION_RETRY_ATTEMPTS with exponential backoff); an exhausted conflict
  * propagates as `TransactionConflict`, which maps to 503 like other transient
  * database failures. Only `TransactionConflict` retries — constraint
- * violations, invalid SQL, and connection loss fail immediately, and
- * interruptions never retry.
+ * violations, invalid SQL, connection loss, and `TransactionFailed` fail
+ * immediately, and interruptions never retry.
  */
 export const withTransaction = <A, E, R>(
   operation: string,
@@ -110,12 +153,7 @@ export const withTransaction = <A, E, R>(
   Effect.flatMap(Database, (db) => {
     const attempt = Effect.acquireUseRelease(
       Effect.tryPromise({
-        try: async () => {
-          const tx = await db.sql.reserve();
-          await tx.unsafe("BEGIN");
-
-          return tx;
-        },
+        try: () => beginTransaction(db.sql),
         catch: (cause) =>
           new TransactionFailed({
             operation,
@@ -126,21 +164,26 @@ export const withTransaction = <A, E, R>(
       (tx, exit) =>
         Exit.isSuccess(exit)
           ? Effect.tryPromise({
-              try: () => tx.unsafe("COMMIT").then(() => tx.release()),
+              try: async () => {
+                try {
+                  await tx.unsafe("COMMIT");
+                } finally {
+                  tx.release();
+                }
+              },
               catch: (cause) =>
                 new TransactionFailed({
                   operation,
                   cause: describeCause(cause),
                 }),
             })
-          : Effect.tryPromise({
-              try: () => tx.unsafe("ROLLBACK").then(() => tx.release()),
-              catch: (cause) =>
-                new TransactionFailed({
-                  operation,
-                  cause: describeCause(cause),
-                }),
-            }).pipe(Effect.ignore, Effect.andThen(Effect.void)),
+          : Effect.promise(() =>
+              tx
+                .unsafe("ROLLBACK")
+                .catch(() => undefined)
+                .then(() => tx.release())
+                .catch(() => undefined),
+            ).pipe(Effect.ignore, Effect.andThen(Effect.void)),
     );
 
     return Effect.retry(attempt, {
