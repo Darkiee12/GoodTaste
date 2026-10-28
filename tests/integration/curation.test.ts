@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import type { Effect } from "effect";
 import { z } from "zod";
@@ -18,8 +18,11 @@ import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
 import { createdSlugs } from "./cleanup";
+import { createFoodAuth, sessionHeaders } from "./food-auth";
 
-process.env.DATABASE_URL ??= "postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney";
+const foodAuth = createFoodAuth();
+
+afterAll(() => foodAuth.close());
 
 const run = <A, E, R extends AppServices>(effect: Effect.Effect<A, E, R>): Promise<A> =>
   appRuntime.runPromise(effect);
@@ -27,10 +30,20 @@ const run = <A, E, R extends AppServices>(effect: Effect.Effect<A, E, R>): Promi
 const api = (path: string, init?: RequestInit): Request =>
   new Request(`http://localhost${path}`, init);
 
-const adminHeaders = {
-  "x-admin-key": process.env.ADMIN_API_KEY ?? "missing-admin-key",
-  "content-type": "application/json",
-};
+let curator: Record<string, string> = {};
+let moderator: Record<string, string> = {};
+
+beforeAll(async () => {
+  expect(process.env.DATABASE_URL).toBeTruthy();
+
+  const curatorSession = await foodAuth.signupSignin("curation-curator");
+  await foodAuth.grantRole(curatorSession.userId, "curator");
+  curator = sessionHeaders(curatorSession.cookies);
+
+  const moderatorSession = await foodAuth.signupSignin("curation-moderator");
+  await foodAuth.grantRole(moderatorSession.userId, "moderator");
+  moderator = sessionHeaders(moderatorSession.cookies);
+});
 
 const idSchema = z.object({ id: z.string(), slug: z.string().optional() });
 
@@ -61,7 +74,7 @@ describe("curated authoring workflow", () => {
       handleAdminCreateDish(
         api("/api/v1/admin/dishes", {
           method: "POST",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({
             slug,
             status: "draft",
@@ -82,7 +95,7 @@ describe("curated authoring workflow", () => {
       handleAdminUpdateDish(
         api(`/api/v1/admin/dishes/${dishId}`, {
           method: "PUT",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({ status: "published" }),
         }),
         { id: dishId },
@@ -97,7 +110,7 @@ describe("curated authoring workflow", () => {
       handleAdminAddDishName(
         api(`/api/v1/admin/dishes/${dishId}/names`, {
           method: "POST",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({
             language_tag: "en",
             name: "Test Dish",
@@ -114,7 +127,7 @@ describe("curated authoring workflow", () => {
       handleAdminLinkDishCategory(
         api(`/api/v1/admin/dishes/${dishId}/categories`, {
           method: "POST",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({ category_slug: "soup" }),
         }),
         { id: dishId },
@@ -127,7 +140,7 @@ describe("curated authoring workflow", () => {
       handleAdminUpsertDishDescription(
         api(`/api/v1/admin/dishes/${dishId}/description`, {
           method: "PUT",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({
             language_tag: "en",
             description: "A test dish used to verify the publication workflow.",
@@ -144,7 +157,7 @@ describe("curated authoring workflow", () => {
       handleAdminUpdateDish(
         api(`/api/v1/admin/dishes/${dishId}`, {
           method: "PUT",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({ status: "published" }),
         }),
         { id: dishId },
@@ -155,7 +168,7 @@ describe("curated authoring workflow", () => {
 
     const revisions = await run(
       handleAdminListRevisions(
-        api(`/api/v1/admin/dishes/${dishId}/revisions`, { headers: adminHeaders }),
+        api(`/api/v1/admin/dishes/${dishId}/revisions`, { headers: curator }),
         { id: dishId },
       ),
     );
@@ -174,7 +187,7 @@ describe("curated authoring workflow", () => {
 
   test("stores and lists curation notes", async () => {
     const noted = await run(
-      handleAdminReviewQueue(api("/api/v1/admin/review-queue?limit=5", { headers: adminHeaders })),
+      handleAdminReviewQueue(api("/api/v1/admin/review-queue?limit=5", { headers: moderator })),
     );
 
     expect(noted.status).toBe(200);
@@ -187,7 +200,7 @@ describe("curation notes", () => {
       handleAdminAddNote(
         api("/api/v1/admin/dishes/1/notes", {
           method: "POST",
-          headers: adminHeaders,
+          headers: curator,
           body: JSON.stringify({
             author: "test-curator",
             note_kind: "review",
@@ -201,15 +214,11 @@ describe("curation notes", () => {
     expect(response.status).toBe(201);
 
     const listed = await run(
-      handleAdminListNotes(api("/api/v1/admin/dishes/1/notes", { headers: adminHeaders }), {
+      handleAdminListNotes(api("/api/v1/admin/dishes/1/notes", { headers: curator }), {
         id: "1",
       }),
     );
 
     expect(listed.status).toBe(200);
   });
-});
-
-beforeAll(() => {
-  expect(process.env.ADMIN_API_KEY).toBeTruthy();
 });

@@ -1,8 +1,10 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
+import { SQL } from "bun";
 import { z } from "zod";
 
 import { createdSlugs } from "./cleanup";
+import { createFoodAuth, sessionHeaders } from "./food-auth";
 
 const searchResultSchema = z.object({
   items: z.array(z.object({ slug: z.string() })),
@@ -44,6 +46,8 @@ import {
   handleAdminImportApply,
   handleAdminImportValidate,
   handleAdminReviewQueue,
+  handleAdminUpdateDish,
+  handleAdminUpdateDishStatus,
   handleDishDetail,
   handleDishSearch,
   handleHealthLive,
@@ -58,10 +62,9 @@ const run = <A, E, R extends AppServices>(effect: Effect.Effect<A, E, R>): Promi
 const api = (path: string, init?: RequestInit): Request =>
   new Request(`http://localhost${path}`, init);
 
-const adminHeaders = {
-  "x-admin-key": process.env.ADMIN_API_KEY ?? "missing-admin-key",
-  "content-type": "application/json",
-};
+const foodAuth = createFoodAuth();
+
+afterAll(() => foodAuth.close());
 
 describe("public HTTP", () => {
   test("health endpoints report live and ready", async () => {
@@ -122,7 +125,88 @@ describe("admin HTTP", () => {
     expect(response.status).toBe(401);
   });
 
-  test("creates, publishes, and inspects a dish through the full workflow", async () => {
+  test("the legacy admin key cannot bypass RBAC", async () => {
+    const response = await run(
+      handleAdminCreateDish(
+        api("/api/v1/admin/dishes", {
+          method: "POST",
+          headers: {
+            "x-admin-key": "test-admin-key",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            status: "draft",
+            names: [{ language_tag: "en", name: "Nope", name_kind: "localized" }],
+          }),
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  test("rejects forged session cookies with 401", async () => {
+    const response = await run(
+      handleAdminCreateDish(
+        api("/api/v1/admin/dishes", {
+          method: "POST",
+          headers: sessionHeaders("better-auth.session_token=forged-token"),
+          body: JSON.stringify({
+            status: "draft",
+            names: [{ language_tag: "en", name: "Nope", name_kind: "localized" }],
+          }),
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  test("denies members without catalog grants with 403", async () => {
+    const member = await foodAuth.signupSignin("api-member");
+    await foodAuth.grantRole(member.userId, "member");
+
+    const response = await run(
+      handleAdminCreateDish(
+        api("/api/v1/admin/dishes", {
+          method: "POST",
+          headers: sessionHeaders(member.cookies),
+          body: JSON.stringify({
+            status: "draft",
+            names: [{ language_tag: "en", name: "Nope", name_kind: "localized" }],
+          }),
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  test("denies suspended curators with 403", async () => {
+    const curator = await foodAuth.signupSignin("api-suspended");
+    await foodAuth.grantRole(curator.userId, "curator");
+    await foodAuth.suspendUser(curator.userId);
+
+    const response = await run(
+      handleAdminReviewQueue(
+        api("/api/v1/admin/review-queue", { headers: sessionHeaders(curator.cookies) }),
+      ),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  test("denies publication without food:publish while allowing updates", async () => {
+    const sql = new SQL(process.env.DATABASE_URL ?? "");
+    const roleId = `test-update-only-${Date.now().toString(36)}`;
+
+    await sql`INSERT INTO feastjourney.roles (id, slug, name) VALUES (${roleId}, ${roleId}, 'Update only') ON CONFLICT DO NOTHING`;
+    await sql`INSERT INTO feastjourney.role_permissions (role_id, permission_key) VALUES (${roleId}, 'food:create'), (${roleId}, 'food:update') ON CONFLICT DO NOTHING`;
+    await sql.end();
+
+    const editor = await foodAuth.signupSignin("api-editor");
+    await foodAuth.grantRole(editor.userId, roleId);
+
     const slug = `test-http-${Date.now().toString(36)}`;
     createdSlugs.push(slug);
 
@@ -130,7 +214,7 @@ describe("admin HTTP", () => {
       handleAdminCreateDish(
         api("/api/v1/admin/dishes", {
           method: "POST",
-          headers: adminHeaders,
+          headers: sessionHeaders(editor.cookies),
           body: JSON.stringify({
             slug,
             status: "draft",
@@ -142,16 +226,105 @@ describe("admin HTTP", () => {
 
     expect(created.status).toBe(201);
 
+    const createdBody = z.object({ id: z.string() }).parse(await created.json());
+
+    const renamed = await run(
+      handleAdminUpdateDish(
+        api(`/api/v1/admin/dishes/${createdBody.id}`, {
+          method: "PUT",
+          headers: sessionHeaders(editor.cookies),
+          body: JSON.stringify({ slug: `${slug}-renamed` }),
+        }),
+        { id: createdBody.id },
+      ),
+    );
+
+    expect(renamed.status).toBe(200);
+
+    const publishDenied = await run(
+      handleAdminUpdateDishStatus(
+        api(`/api/v1/admin/dishes/${createdBody.id}/status`, {
+          method: "PUT",
+          headers: sessionHeaders(editor.cookies),
+          body: JSON.stringify({ status: "published" }),
+        }),
+        { id: createdBody.id },
+      ),
+    );
+
+    expect(publishDenied.status).toBe(403);
+
+    const cleanup = new SQL(process.env.DATABASE_URL ?? "");
+    await cleanup`DELETE FROM feastjourney.roles WHERE id = ${roleId}`;
+    await cleanup.end();
+  });
+
+  test("curators create dishes; revoked roles lose access immediately", async () => {
+    const curator = await foodAuth.signupSignin("api-curator");
+    await foodAuth.grantRole(curator.userId, "curator");
+
+    const slug = `test-http-${Date.now().toString(36)}`;
+    createdSlugs.push(slug);
+
+    const created = await run(
+      handleAdminCreateDish(
+        api("/api/v1/admin/dishes", {
+          method: "POST",
+          headers: sessionHeaders(curator.cookies),
+          body: JSON.stringify({
+            slug,
+            status: "draft",
+            names: [{ language_tag: "en", name: "Test Dish", name_kind: "localized" }],
+          }),
+        }),
+      ),
+    );
+
+    expect(created.status).toBe(201);
+
+    const moderator = await foodAuth.signupSignin("api-moderator");
+    await foodAuth.grantRole(moderator.userId, "moderator");
+
     const reviewQueue = await run(
-      handleAdminReviewQueue(api("/api/v1/admin/review-queue", { headers: adminHeaders })),
+      handleAdminReviewQueue(
+        api("/api/v1/admin/review-queue", { headers: sessionHeaders(moderator.cookies) }),
+      ),
     );
 
     expect(reviewQueue.status).toBe(200);
+
+    const curatorQueue = await run(
+      handleAdminReviewQueue(
+        api("/api/v1/admin/review-queue", { headers: sessionHeaders(curator.cookies) }),
+      ),
+    );
+
+    expect(curatorQueue.status).toBe(403);
+
+    await foodAuth.revokeRole(curator.userId, "curator");
+
+    const afterRevoke = await run(
+      handleAdminCreateDish(
+        api("/api/v1/admin/dishes", {
+          method: "POST",
+          headers: sessionHeaders(curator.cookies),
+          body: JSON.stringify({
+            status: "draft",
+            names: [{ language_tag: "en", name: "Nope", name_kind: "localized" }],
+          }),
+        }),
+      ),
+    );
+
+    expect(afterRevoke.status).toBe(403);
   });
 });
 
 describe("bulk import", () => {
   test("validates a staged import without applying", async () => {
+    const importer = await foodAuth.signupSignin("api-importer");
+    await foodAuth.grantRole(importer.userId, "curator");
+
     const slug = `test-import-${Date.now().toString(36)}`;
     createdSlugs.push(slug);
 
@@ -159,7 +332,7 @@ describe("bulk import", () => {
       handleAdminImportValidate(
         api("/api/v1/admin/imports/validate", {
           method: "POST",
-          headers: adminHeaders,
+          headers: sessionHeaders(importer.cookies),
           body: JSON.stringify({
             source_name: "test-seed",
             records: [
@@ -185,7 +358,7 @@ describe("bulk import", () => {
       handleAdminImportApply(
         api("/api/v1/admin/imports/apply", {
           method: "POST",
-          headers: adminHeaders,
+          headers: sessionHeaders(importer.cookies),
           body: JSON.stringify({ job_id: body.jobId }),
         }),
       ),
@@ -198,11 +371,14 @@ describe("bulk import", () => {
   });
 
   test("rejects unknown ingredients without touching the catalog", async () => {
+    const importer = await foodAuth.signupSignin("api-importer-bad");
+    await foodAuth.grantRole(importer.userId, "curator");
+
     const response = await run(
       handleAdminImportValidate(
         api("/api/v1/admin/imports/validate", {
           method: "POST",
-          headers: adminHeaders,
+          headers: sessionHeaders(importer.cookies),
           body: JSON.stringify({
             source_name: "test-seed",
             records: [
@@ -221,8 +397,28 @@ describe("bulk import", () => {
     expect(body.validRecords).toBe(0);
     expect(body.invalidRecords).toBe(1);
   });
+
+  test("denies import validate/apply without food:import", async () => {
+    const member = await foodAuth.signupSignin("api-import-member");
+    await foodAuth.grantRole(member.userId, "member");
+
+    const response = await run(
+      handleAdminImportValidate(
+        api("/api/v1/admin/imports/validate", {
+          method: "POST",
+          headers: sessionHeaders(member.cookies),
+          body: JSON.stringify({
+            source_name: "test-seed",
+            records: [],
+          }),
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(403);
+  });
 });
 
 beforeAll(() => {
-  expect(process.env.ADMIN_API_KEY).toBeTruthy();
+  expect(process.env.DATABASE_URL).toBeTruthy();
 });

@@ -4,7 +4,6 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databaseDirectUrl: string | undefined;
   readonly poolMax: number;
-  readonly adminApiKey: string | undefined;
   readonly corsOrigins: ReadonlyArray<string>;
   readonly trustedProxies: ReadonlyArray<string>;
   readonly publicRateLimit: number;
@@ -28,9 +27,6 @@ export const appConfig: Config.Config<AppConfig> = Config.unwrap({
     Config.map(Option.getOrUndefined),
   ),
   poolMax: Config.Int("DATABASE_POOL_MAX").pipe(Config.withDefault(10)),
-  adminApiKey: Config.option(Config.String("ADMIN_API_KEY")).pipe(
-    Config.map(Option.getOrUndefined),
-  ),
   corsOrigins: Config.String("CORS_ORIGINS").pipe(Config.map(csv), Config.withDefault([])),
   trustedProxies: Config.String("TRUSTED_PROXIES").pipe(Config.map(csv), Config.withDefault([])),
   publicRateLimit: Config.Int("RATE_LIMIT_PUBLIC").pipe(Config.withDefault(60)),

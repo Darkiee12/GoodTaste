@@ -1,7 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
-
-import type { Actor } from "@/server/auth/actor";
-import { Actor as ActorConstructors } from "@/server/auth/actor";
 import type { AppConfig } from "@/server/config";
 import { apiErrorBody, troubleCodeFor } from "@/server/http/api-error";
 
@@ -17,47 +13,7 @@ export const requestIdFromHeaders = (headers: Headers): string => {
   return crypto.randomUUID();
 };
 
-const hashIdentity = (value: string): string => {
-  let hash = 5381;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
-  }
-
-  return `h${(hash >>> 0).toString(16)}`;
-};
-
-const adminKeyMatches = (received: string | null, expected: string | undefined): boolean => {
-  if (received === null || expected === undefined || expected.length === 0) {
-    return false;
-  }
-
-  const receivedBytes = Buffer.from(received, "utf8");
-  const expectedBytes = Buffer.from(expected, "utf8");
-
-  if (receivedBytes.length !== expectedBytes.length) {
-    return false;
-  }
-
-  return timingSafeEqual(receivedBytes, expectedBytes);
-};
-
-export const resolveAdmin = (request: Request, config: AppConfig): boolean =>
-  adminKeyMatches(request.headers.get("x-admin-key"), config.adminApiKey);
-
-/**
- * Stable per-client identity for rate-limit buckets. Authenticated admins are
- * keyed by a hash of their credential; behind a configured trusted proxy the
- * first X-Forwarded-For entry is used; otherwise the header is ignored so
- * arbitrary callers cannot spoof another client's quota.
- */
 export const resolveClientIdentity = (request: Request, config: AppConfig): string => {
-  const adminKey = request.headers.get("x-admin-key");
-
-  if (adminKeyMatches(adminKey, config.adminApiKey)) {
-    return `admin:${hashIdentity(adminKey ?? "")}`;
-  }
-
   if (config.trustedProxies.length > 0) {
     const forwarded = request.headers.get("x-forwarded-for");
     const first = forwarded?.split(",")[0]?.trim() ?? "";
@@ -68,14 +24,6 @@ export const resolveClientIdentity = (request: Request, config: AppConfig): stri
   }
 
   return "net:direct";
-};
-
-export const resolveActor = (request: Request, config: AppConfig): Actor => {
-  if (resolveAdmin(request, config)) {
-    return ActorConstructors.Admin({ userId: "admin" });
-  }
-
-  return ActorConstructors.Guest();
 };
 
 export const corsPreflight = (request: Request, config: AppConfig): Response | null => {
@@ -92,7 +40,7 @@ export const corsPreflight = (request: Request, config: AppConfig): Response | n
   }
 
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key, X-Request-Id");
+  headers.set("Access-Control-Allow-Headers", "Content-Type, X-Request-Id");
   headers.set("Access-Control-Max-Age", "86400");
 
   return new Response(null, { status: 204, headers });

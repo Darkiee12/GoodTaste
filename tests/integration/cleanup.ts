@@ -4,8 +4,6 @@
 // runtime; these values only keep unrelated integration tests independent.
 process.env.DATABASE_URL ||= "postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney";
 
-process.env.ADMIN_API_KEY ||= "test-admin-key";
-
 process.env.RATE_LIMIT_PUBLIC ||= "1000";
 
 process.env.RATE_LIMIT_SEARCH ||= "1000";

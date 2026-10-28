@@ -13,7 +13,7 @@ import type { ServerEnv } from "@/server/env";
 const env: ServerEnv = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",
   BETTER_AUTH_URL: "http://localhost:3000",
-  BETTER_AUTH_SECRET: "test-secret-with-at-least-32-characters",
+  BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "",
   GOOGLE_CLIENT_ID: "stub",
   GOOGLE_CLIENT_SECRET: "stub",
   FACEBOOK_CLIENT_ID: "stub",
