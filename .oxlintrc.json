@@ -111,7 +111,9 @@
     // compile error there. These rules stay on everywhere else. The
     // database-boundary integration test reads Reylo-derived rows for the
     // same reason and is covered for the same rules. The user transport
-    // adapter projects Reylo-derived rows into client-safe shapes.
+    // functions pass Reylo-derived rows through (SQL already projects
+    // client-safe shapes, e.g. dish_id::text); tsc is the authority that
+    // the projection matches the consumer contract.
     // The auth integration test asserts on profile/favorite rows.
     // TanStack server-function client types do not resolve inside Oxlint's
     // engine (route loaders calling user.functions); tsc checks them fully.
@@ -126,7 +128,7 @@
         "src/modules/user/server/operations/*.ts",
         "tests/integration/database-boundary.test.ts",
         "tests/integration/auth.test.ts",
-        "src/modules/user/user.functions.ts",
+        "src/modules/user/*.functions.ts",
         "src/routes/settings.account.tsx",
         "scripts/**/*.ts"
       ],
