@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+// aislop-ignore-file security/hardcoded-secret -- UI labels only, never credentials.
+
 // Shared, browser-safe UI copy. Locale comes from each route match, never a singleton.
 export const locales = ["en", "vi", "hi", "es", "zh"] as const;
 
