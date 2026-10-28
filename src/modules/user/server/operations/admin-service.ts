@@ -4,8 +4,11 @@ import type { UserId } from "@/modules/user/server/domain/identifiers";
 import { Authorization } from "@/modules/user/server/operations/authorization";
 import { RoleRepository } from "@/modules/user/server/repository/role-repository";
 import type { Actor } from "@/server/auth/actor";
-import { type InsufficientPermissions } from "@/server/auth/errors";
+import { type InsufficientPermissions, LastOwnerRemovalDenied } from "@/server/auth/errors";
+import { SYSTEM_ROLES } from "@/server/auth/permissions";
 import type { Database } from "@/server/database/client";
+import { withTransaction } from "@/server/database/client";
+import type { TransactionFailed } from "@/server/database/errors";
 import type { DatabaseError } from "@/server/database/query";
 
 export interface AdminUserSummary {
@@ -17,7 +20,11 @@ export interface AdminUserSummary {
   readonly roles: ReadonlyArray<string>;
 }
 
-type AdminFailure = InsufficientPermissions | DatabaseError;
+type AdminFailure =
+  | InsufficientPermissions
+  | LastOwnerRemovalDenied
+  | TransactionFailed
+  | DatabaseError;
 
 /**
  * User account administration behind dynamic RBAC. All reads and writes go
@@ -79,8 +86,43 @@ export const UserAdminServiceLive = Layer.succeed(UserAdminService, {
       const repository = yield* RoleRepository;
 
       yield* authorization.require(actor, { resource: "user", actions: ["ban"] });
-      yield* repository.banUser(userId, reason);
-      yield* repository.deleteSessionsOfUser(userId);
+
+      return yield* withTransaction(
+        "user/ban",
+        Effect.gen(function* () {
+          // Target protection: ordinary administrators can never disable a
+          // protected account. Owners are manageable only with
+          // `role:manage-protected`, and even then the last active Owner
+          // cannot be banned: the count and the mutation share one
+          // transaction under the owner guard lock.
+          const assignments = yield* repository.rolesOfUser(userId);
+
+          if (assignments.some((entry) => entry.role_id === SYSTEM_ROLES.owner)) {
+            yield* authorization.require(actor, {
+              resource: "role",
+              actions: ["manage-protected"],
+            });
+
+            const alreadyBanned = yield* repository.isUserBanned(userId);
+
+            if (!alreadyBanned) {
+              yield* repository.lockOwnerGuard();
+
+              const remaining = yield* repository.activeOwnerCount();
+
+              if (remaining <= BigInt(1)) {
+                return yield* new LastOwnerRemovalDenied({
+                  reason: "cannot ban the last active owner",
+                });
+              }
+            }
+          }
+
+          yield* repository.banUser(userId, reason);
+
+          return yield* repository.deleteSessionsOfUser(userId);
+        }),
+      );
     }),
 
   unbanUser: (actor, userId) =>
