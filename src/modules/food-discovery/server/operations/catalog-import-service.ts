@@ -440,6 +440,12 @@ export const CatalogImportServiceLive = Layer.effect(
       readonly attribution: string | null;
     }
 
+    // Provenance provider: the admin studio stores `<sourceId>:<license>`
+    // in the job license column, so the prefix is the registry source id
+    // (manual/partner/community/other, seeded by V013) — never the license
+    // text after the colon. Prefix-less jobs (for example the public API
+    // path, which stores no license) fall back to a slugified source name
+    // and usually resolve no provider, in which case provenance is skipped.
     const providerSlugForJob = (job: ApplyJobProvenance): string | null => {
       const licenseRaw = job.license ?? "";
       const separator = licenseRaw.indexOf(":");
@@ -513,9 +519,19 @@ export const CatalogImportServiceLive = Layer.effect(
             const provider = yield* sources.providerBySlug(providerSlug);
 
             if (provider !== null) {
+              // Source identity: a record slug is a globally unique dish
+              // handle, so a slugged record reuses its slug as the source
+              // external_id. Slugless records use job-relative `record-N`
+              // refs that repeat in every job, so scope them with the job
+              // id (`<jobId>:record-N`): stable across resume retries of
+              // the same job, yet never colliding across jobs, so a later
+              // job can no longer overwrite an earlier job's source payload
+              // through the (provider_id, external_id) upsert.
+              const sourceExternalId = record.slug ?? `${job.id.toString()}:${externalRef}`;
+
               const stored = yield* sources.upsertRecord({
                 providerId: provider.id,
-                externalId: externalRef,
+                externalId: sourceExternalId,
                 canonicalUrl: job.sourceUrl,
                 retrievedAt: new Date().toISOString(),
                 revision: job.sourceVersion,
@@ -710,7 +726,7 @@ export const CatalogImportServiceLive = Layer.effect(
           return yield* new DishNotFound({ dishId: input.jobId });
         }
 
-        if (job.status !== "validated") {
+        if (job.status !== "validated" && job.status !== "applying") {
           return yield* new CatalogConflict({
             reason: `import job ${input.jobId} is ${job.status}, only validated jobs can be applied`,
           });
@@ -734,114 +750,165 @@ export const CatalogImportServiceLive = Layer.effect(
           });
         }
 
-        const rows = yield* curation.recordsByJobId(job.id, 1000);
-        const acknowledged = new Set(input.approvals.duplicateRefs);
+        // Guarded apply: the whole claim-and-finish sequence runs in one
+        // short guard transaction that holds an exclusive row lock on the
+        // job from the SELECT ... FOR UPDATE below until commit. The lock —
+        // not the status flip — is the mutual-exclusion mechanism: a
+        // concurrent apply blocks on the lock, then sees the finished state
+        // and fails with a typed conflict, so exactly one worker processes
+        // each job. Under our own lock, observing `applying` can only mean
+        // crash residue (a live worker would hold the lock), so resume is
+        // safe. Record writes still commit in their own per-record
+        // transactions on separate connections (withTransaction always
+        // reserves a fresh connection), so a crash keeps applied records and
+        // resume skips them by row status; only the job-row guard aborts.
+        // The pending set is rebuilt inside from current row statuses, so a
+        // guard-transaction retry never replays an already-applied record.
+        return yield* withTransaction(
+          "import/apply",
+          Effect.gen(function* () {
+            const locked = yield* curation.lockImportJobForApply(job.id);
 
-        const pending: Array<{
-          readonly rowId: bigint;
-          readonly externalRef: string;
-          readonly record: AuthoringDish;
-          readonly duplicateOf: string | null;
-        }> = [];
+            if (locked === null) {
+              return yield* new DishNotFound({ dishId: input.jobId });
+            }
 
-        for (const row of rows) {
-          if (row.status !== "valid") {
-            continue;
-          }
+            if (locked.status !== "validated" && locked.status !== "applying") {
+              return yield* new CatalogConflict({
+                reason: `import job ${input.jobId} is ${locked.status}, only validated jobs can be applied`,
+              });
+            }
 
-          const raw: unknown = JSON.parse(row.payload);
+            const rows = yield* curation.recordsByJobId(locked.id, 1000);
+            const acknowledged = new Set(input.approvals.duplicateRefs);
 
-          const stored = yield* Option.match(Schema.decodeUnknownOption(StoredImportRecord)(raw), {
-            onNone: () =>
-              Effect.fail(new InvalidDishData({ reason: "stored import record is corrupt" })),
-            onSome: (value) => Effect.succeed(value),
-          });
+            const pending: Array<{
+              readonly rowId: bigint;
+              readonly externalRef: string;
+              readonly record: AuthoringDish;
+              readonly duplicateOf: string | null;
+            }> = [];
 
-          if (stored.duplicateOf !== null && !acknowledged.has(row.external_ref)) {
-            return yield* new InvalidDishData({
-              reason: `duplicate "${row.external_ref}" requires acknowledgement before apply`,
+            for (const row of rows) {
+              if (row.status !== "valid") {
+                continue;
+              }
+
+              const raw: unknown = JSON.parse(row.payload);
+
+              const stored = yield* Option.match(
+                Schema.decodeUnknownOption(StoredImportRecord)(raw),
+                {
+                  onNone: () =>
+                    Effect.fail(new InvalidDishData({ reason: "stored import record is corrupt" })),
+                  onSome: (value) => Effect.succeed(value),
+                },
+              );
+
+              if (stored.duplicateOf !== null && !acknowledged.has(row.external_ref)) {
+                return yield* new InvalidDishData({
+                  reason: `duplicate "${row.external_ref}" requires acknowledgement before apply`,
+                });
+              }
+
+              pending.push({
+                rowId: row.id,
+                externalRef: row.external_ref,
+                record: stored.record,
+                duplicateOf: stored.duplicateOf,
+              });
+            }
+
+            // Atomic apply claim: one conditional UPDATE moves validated ->
+            // applying (and re-admits applying for crash resume) while
+            // clearing dry_run. Under the guard lock above this always
+            // matches; a zero-row result is reported with the current state.
+            const claimed = yield* curation.claimImportJobForApply(job.id);
+
+            if (claimed === null) {
+              const current = yield* curation.findImportJobForApply(job.id);
+
+              if (current === null) {
+                return yield* new DishNotFound({ dishId: input.jobId });
+              }
+
+              return yield* new CatalogConflict({
+                reason: `import job ${input.jobId} is ${current.status}, only validated jobs can be applied`,
+              });
+            }
+
+            const provenance: ApplyJobProvenance = {
+              id: claimed.id,
+              sourceName: claimed.source_name,
+              sourceUrl: claimed.source_url,
+              sourceVersion: claimed.source_version,
+              license: claimed.license,
+              attribution: claimed.attribution,
+            };
+
+            let applied = 0;
+            let skippedDuplicate = 0;
+            let failed = 0;
+
+            for (const entry of pending) {
+              const outcome = yield* applyRecord(
+                provenance,
+                entry.rowId,
+                entry.externalRef,
+                entry.record,
+                entry.duplicateOf,
+              ).pipe(
+                Effect.matchEffect({
+                  onFailure: () =>
+                    Effect.succeed({ applied: false as const, skipped: false as const }),
+                  onSuccess: (result) =>
+                    Effect.succeed({ applied: result.applied, skipped: !result.applied }),
+                }),
+              );
+
+              if (outcome.applied) {
+                applied += 1;
+              } else if (outcome.skipped) {
+                skippedDuplicate += 1;
+              } else {
+                failed += 1;
+
+                yield* curation.updateImportRecord({
+                  id: entry.rowId,
+                  status: "invalid",
+                  errors: JSON.stringify(["apply failed"]),
+                  dishId: null,
+                });
+              }
+            }
+
+            yield* curation.approveImportJob({
+              id: claimed.id,
+              approvedBy: actor,
+              approvedAt: new Date().toISOString(),
+              licenseAck: input.approvals.licenseAck,
+              reviewAck: input.approvals.reviewAck,
+              duplicateRefs: [...input.approvals.duplicateRefs],
             });
-          }
 
-          pending.push({
-            rowId: row.id,
-            externalRef: row.external_ref,
-            record: stored.record,
-            duplicateOf: stored.duplicateOf,
-          });
-        }
-
-        yield* curation.updateImportJob({
-          id: job.id,
-          status: job.status,
-          validRecords: job.valid_records,
-          invalidRecords: job.invalid_records,
-          completedAt: job.completed_at,
-          dryRun: false,
-        });
-
-        const provenance: ApplyJobProvenance = {
-          id: job.id,
-          sourceName: job.source_name,
-          sourceUrl: job.source_url,
-          sourceVersion: job.source_version,
-          license: job.license,
-          attribution: job.attribution,
-        };
-
-        let applied = 0;
-        let skippedDuplicate = 0;
-        let failed = 0;
-
-        for (const entry of pending) {
-          const outcome = yield* applyRecord(
-            provenance,
-            entry.rowId,
-            entry.externalRef,
-            entry.record,
-            entry.duplicateOf,
-          ).pipe(
-            Effect.matchEffect({
-              onFailure: () => Effect.succeed({ applied: false as const, skipped: false as const }),
-              onSuccess: (result) =>
-                Effect.succeed({ applied: result.applied, skipped: !result.applied }),
-            }),
-          );
-
-          if (outcome.applied) {
-            applied += 1;
-          } else if (outcome.skipped) {
-            skippedDuplicate += 1;
-          } else {
-            failed += 1;
-
-            yield* curation.updateImportRecord({
-              id: entry.rowId,
-              status: "invalid",
-              errors: JSON.stringify(["apply failed"]),
-              dishId: null,
+            // Job counters keep validation semantics: valid_records/invalid_records
+            // stay frozen at their validation values (so total == valid + invalid
+            // still holds for the dashboard, and valid >= applied), while apply
+            // outcomes live on the per-record rows (applied/skipped_duplicate/
+            // invalid) and in the returned report. The recompute here reuses the
+            // claimed validation counts rather than overwriting them with apply
+            // outcomes.
+            yield* curation.updateImportJob({
+              id: claimed.id,
+              status: "applied",
+              validRecords: claimed.valid_records,
+              invalidRecords: claimed.invalid_records,
+              completedAt: new Date().toISOString(),
             });
-          }
-        }
 
-        yield* curation.approveImportJob({
-          id: job.id,
-          approvedBy: actor,
-          approvedAt: new Date().toISOString(),
-          licenseAck: input.approvals.licenseAck,
-          reviewAck: input.approvals.reviewAck,
-          duplicateRefs: [...input.approvals.duplicateRefs],
-        });
-
-        yield* curation.updateImportJob({
-          id: job.id,
-          status: "applied",
-          validRecords: applied,
-          invalidRecords: failed + skippedDuplicate,
-          completedAt: new Date().toISOString(),
-        });
-
-        return { jobId: input.jobId, applied, skippedDuplicate, failed };
+            return { jobId: input.jobId, applied, skippedDuplicate, failed };
+          }),
+        );
       });
 
     return CatalogImportService.of({ validateImport, applyImport });

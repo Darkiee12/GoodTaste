@@ -6,9 +6,11 @@ import adminImportJobsByStatus from "@/modules/food-discovery/server/repository/
 import adminImportJobsRecent from "@/modules/food-discovery/server/repository/sql/admin-import-jobs-recent.sql";
 import adminImportRecordsByJob from "@/modules/food-discovery/server/repository/sql/admin-import-records-by-job.sql";
 import importJobApprove from "@/modules/food-discovery/server/repository/sql/import-job-approve.sql";
+import importJobClaimForApply from "@/modules/food-discovery/server/repository/sql/import-job-claim-for-apply.sql";
 import importJobFindById from "@/modules/food-discovery/server/repository/sql/import-job-find-by-id.sql";
 import importJobFindWithSource from "@/modules/food-discovery/server/repository/sql/import-job-find-with-source.sql";
 import importJobInsert from "@/modules/food-discovery/server/repository/sql/import-job-insert.sql";
+import importJobLockForApply from "@/modules/food-discovery/server/repository/sql/import-job-lock-for-apply.sql";
 import importJobUpdate from "@/modules/food-discovery/server/repository/sql/import-job-update.sql";
 import importRecordInsert from "@/modules/food-discovery/server/repository/sql/import-record-insert.sql";
 import importRecordUpdate from "@/modules/food-discovery/server/repository/sql/import-record-update.sql";
@@ -94,6 +96,12 @@ export class CurationRepository extends Context.Service<
       readonly duplicateRefs: ReadonlyArray<string>;
     }) => Effect.Effect<ImportJobApprovalRow | null, DatabaseError, Database>;
     readonly findImportJobForApply: (
+      id: bigint,
+    ) => Effect.Effect<ImportJobWithSourceRow | null, DatabaseError, Database>;
+    readonly claimImportJobForApply: (
+      id: bigint,
+    ) => Effect.Effect<ImportJobWithSourceRow | null, DatabaseError, Database>;
+    readonly lockImportJobForApply: (
       id: bigint,
     ) => Effect.Effect<ImportJobWithSourceRow | null, DatabaseError, Database>;
     readonly findImportJob: (
@@ -219,6 +227,18 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
     Effect.gen(function* () {
       return yield* runQuery("curation/import-job-find-with-source", (sql) =>
         importJobFindWithSource.run(sql, { id }),
+      );
+    }),
+  claimImportJobForApply: (id) =>
+    Effect.gen(function* () {
+      return yield* runQuery("curation/import-job-claim-for-apply", (sql) =>
+        importJobClaimForApply.run(sql, { id }),
+      );
+    }),
+  lockImportJobForApply: (id) =>
+    Effect.gen(function* () {
+      return yield* runQuery("curation/import-job-lock-for-apply", (sql) =>
+        importJobLockForApply.run(sql, { id }),
       );
     }),
   findImportJob: (id) =>
