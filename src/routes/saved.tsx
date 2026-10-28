@@ -274,6 +274,7 @@ function SavedPages({
         void page.refetch();
       }
     },
+    dataUpdatedAt: firstPage.dataUpdatedAt,
   };
 
   return (
