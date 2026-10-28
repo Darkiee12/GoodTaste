@@ -12,6 +12,7 @@ import { RoleService } from "@/modules/user/server/operations/role-service";
 import { SessionService } from "@/modules/user/server/operations/session-service";
 import { FavoritesService, ProfileService } from "@/modules/user/server/operations/user-services";
 import { Actor } from "@/server/auth/actor";
+import { createAuthPool } from "@/server/auth/database";
 import { createAuth, buildAuthOptions } from "@/server/auth/options";
 import { requireAuthenticatedActor, requirePermission } from "@/server/auth/session";
 import type { ServerEnv } from "@/server/env";
@@ -42,12 +43,15 @@ interface SentEmail {
 
 const sent: Array<SentEmail> = [];
 
+const testPool = createAuthPool(process.env.DATABASE_URL ?? "");
+
 const testAuth = createAuth({
   ...buildAuthOptions(
     testEnv,
     async (email) => {
       sent.push(email);
     },
+    testPool,
     false,
   ),
   rateLimit: { enabled: false },
@@ -160,6 +164,7 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
+  await testPool.end();
   const sql = new SQL(process.env.DATABASE_URL ?? "");
 
   await Promise.all(
