@@ -1,0 +1,229 @@
+# Release: quality gate -> verified artifact -> GHCR image -> (manual) staging.
+#
+# What this workflow is and is NOT:
+# - It DUPLICATES the quality.yml backend flow on purpose (same disposable
+#   PG18+PostGIS, same migrate -> validate -> check-types -> tests -> build)
+#   so the published image always embeds the .output artifact that the gate
+#   verified, from the same commit. It never edits quality.yml.
+# - Triggers: version tags (v*.*.*) and workflow_dispatch ONLY. There is no
+#   pull_request trigger, so fork PRs can neither run this workflow nor reach
+#   its secrets. Staging deploys ONLY via explicit workflow_dispatch with
+#   deploy_staging=true. Production deploys are NEVER automated: after staging
+#   verification a human promotes the SHA tag in Dokploy.
+# - The builder never touches the production database (disposable CI Postgres
+#   only). No privileged secret is available to untrusted code paths.
+#
+# Required repository setup (operator, once):
+# - GitHub environment `staging` with secrets: DOKPLOY_URL,
+#   DOKPLOY_API_TOKEN (deploy-scoped x-api-key), DOKPLOY_STAGING_APP_ID,
+#   CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET (Cloudflare Access service
+#   token allowed ONLY on the Dokploy dashboard path), STAGING_HEALTH_URL
+#   (default https://staging.feastjourney.world/health/ready).
+# - GHCR: nothing to configure; GITHUB_TOKEN with job-level packages:write
+#   publishes ghcr.io/<owner-lowercase>/feastjourney. Consumers pull anonymously
+#   or with a read-only token — never the publish token.
+
+name: Release
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      deploy_staging:
+        description: "After publishing, trigger the Dokploy staging rollout (human-gated)."
+        required: false
+        default: "false"
+      image_tag:
+        description: "Redeploy an existing image tag to staging instead of the just-built SHA (rollback path). Empty = use the just-built SHA."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.4.4
+  GHCR_REGISTRY: ghcr.io
+
+jobs:
+  quality:
+    name: Quality gate and verified build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Disposable CI-only values (fresh Postgres per run).
+      DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
+      BETTER_AUTH_URL: http://localhost:3000
+      TRUSTED_PROXIES: ""
+      # Fill under Settings -> Secrets and variables -> Actions. Unset secrets
+      # arrive empty and the test setup substitutes documented non-secret stubs
+      # (tests use an in-memory mail sender and never call real providers).
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      FACEBOOK_CLIENT_ID: ${{ secrets.FACEBOOK_CLIENT_ID }}
+      FACEBOOK_CLIENT_SECRET: ${{ secrets.FACEBOOK_CLIENT_SECRET }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Start disposable PostgreSQL with loopback access
+        run: |
+          cp infra/.env.example infra/.env
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+      - name: Run Flyway migrations
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
+      - name: Validate Flyway migration history
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+      - name: Reylo-aware TypeScript
+        run: bun run check-types
+      - name: Unit and integration tests
+        run: bun test tests/
+      - name: Production build
+        run: bun run build
+      - name: Prove the build artifact is self-contained
+        run: |
+          test -f .output/server/index.mjs
+          test -d .output/public
+      - name: Upload verified build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-output-${{ github.sha }}
+          path: .output
+          retention-days: 14
+      - name: Failure diagnostics (no secrets)
+        if: failure()
+        run: |
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml ps
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator info || true
+          ls .output/server 2>/dev/null || echo "no .output/server (build never completed)"
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml down --remove-orphans
+
+  publish:
+    name: Build and push production image
+    needs: quality
+    # Tags publish automatically; manual runs publish the dispatched ref for
+    # staging verification. PRs cannot reach this job (no PR trigger above).
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-output-${{ github.sha }}
+          path: .output
+      - name: Prove artifact integrity before packaging
+        run: test -f .output/server/index.mjs
+      - name: Resolve image name (lowercase, SHA tags only — never latest)
+        id: meta
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.GHCR_REGISTRY }}/${owner}/feastjourney"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${image}:sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "ref_tag=${image}:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref_tag=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.GHCR_REGISTRY }} -u ${{ github.actor }} --password-stdin
+      - name: Build production image (verified artifact only)
+        run: |
+          tags="-t ${{ steps.meta.outputs.sha_tag }}"
+          if [ -n "${{ steps.meta.outputs.ref_tag }}" ]; then
+            tags="$tags -t ${{ steps.meta.outputs.ref_tag }}"
+          fi
+          # shellcheck disable=SC2086
+          docker build -f infra/Dockerfile.prod $tags .
+      - name: Push image
+        run: |
+          docker push ${{ steps.meta.outputs.sha_tag }}
+          if [ -n "${{ steps.meta.outputs.ref_tag }}" ]; then
+            docker push ${{ steps.meta.outputs.ref_tag }}
+          fi
+      - name: Failure diagnostics (no secrets)
+        if: failure()
+        run: |
+          docker images "${{ steps.meta.outputs.image }}" || true
+          ls .output/server 2>/dev/null || echo "no .output/server"
+
+  deploy-staging:
+    name: Staging rollout (human-gated)
+    needs: publish
+    # workflow_dispatch ONLY, and only with the explicit opt-in flag. Tag
+    # pushes, branch pushes, and PRs never reach this job.
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_staging == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+    env:
+      STAGING_HEALTH_URL: https://staging.feastjourney.world/health/ready
+    steps:
+      - name: Resolve image tag (fresh SHA or operator rollback tag)
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            echo "Rollback redeploy requested: ${{ inputs.image_tag }} (quality gate for that tag ran when it was published)"
+          else
+            echo "value=${{ needs.publish.outputs.image }}:sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Trigger Dokploy staging deploy through Cloudflare Access
+        # Dokploy dashboard sits behind Cloudflare Access; CI authenticates
+        # with a service token (NOT a user login, NOT a weakened policy) plus
+        # a deploy-scoped Dokploy API token. Endpoint path verified against
+        # YOUR Dokploy version before first use — see the runbook.
+        run: |
+          response="$(mktemp)"
+          code="$(curl -sS -o "$response" -w '%{http_code}' --max-time 60 \
+            -H "CF-Access-Client-Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}" \
+            -H "CF-Access-Client-Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
+            -H "x-api-key: ${{ secrets.DOKPLOY_API_TOKEN }}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"applicationId\":\"${{ secrets.DOKPLOY_STAGING_APP_ID }}\",\"imageTag\":\"${{ steps.tag.outputs.value }}\"}" \
+            "${{ secrets.DOKPLOY_URL }}/api/application.deploy")"
+          echo "Dokploy deploy HTTP status: ${code}"
+          if [ "${code}" -lt 200 ] || [ "${code}" -ge 300 ]; then
+            echo "Deploy trigger failed; response body (secrets never printed):"
+            cat "$response"
+            exit 1
+          fi
+      - name: Wait for staging readiness (bounded DB check, no leaks)
+        run: |
+          deadline=$((SECONDS + 600))
+          until [ $SECONDS -ge $deadline ]; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 '${{ env.STAGING_HEALTH_URL }}' || true)"
+            echo "ready check HTTP ${code}"
+            if [ "${code}" = "200" ]; then
+              echo "Staging is ready on ${{ steps.tag.outputs.value }}"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Staging did not become ready within 10 minutes — investigate Dokploy + Flyway job logs, then roll back to the previous SHA tag."
+          exit 1

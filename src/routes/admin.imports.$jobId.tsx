@@ -1,8 +1,11 @@
-import { createFileRoute, getRouteApi, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, Link, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 
-import { adminImportJobDetailFn, adminSurfaceFn } from "@/modules/food-discovery/admin.functions";
+import { ImportStatusBadge } from "@/components/admin/ui";
+import { adminImportJobDetailFn } from "@/modules/food-discovery/admin.functions";
+import { importJobStatusSchema } from "@/modules/food-discovery/admin.schema";
+import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
 import { formatAdminDateTime } from "@/shared/format";
 import { messagesFor } from "@/shared/i18n";
@@ -24,7 +27,9 @@ export const Route = createFileRoute("/admin/imports/$jobId")({
       });
     }
 
-    const { allowed } = await adminSurfaceFn();
+    const { allowed } = await authorizeFn({
+      data: { checks: [{ resource: "food", actions: ["import"] }] },
+    });
 
     if (!allowed) {
       throw redirect({ to: "/", search: { lang: search.lang } });
@@ -34,6 +39,7 @@ export const Route = createFileRoute("/admin/imports/$jobId")({
   },
   loader: async ({ params }) =>
     adminImportJobDetailFn({ data: { jobId: params.jobId, recordLimit: RECORD_LIMIT } }),
+  errorComponent: AdminImportDetailError,
   component: AdminImportDetail,
 });
 
@@ -50,12 +56,7 @@ const importJobSchema = z.object({
   source_name: z.string(),
   source_url: z.string().nullable(),
   source_version: z.string().nullable(),
-  status: z.union([
-    z.literal("applied"),
-    z.literal("failed"),
-    z.literal("staged"),
-    z.literal("validated"),
-  ]),
+  status: importJobStatusSchema,
   total_records: z.number(),
   valid_records: z.number(),
 });
@@ -216,29 +217,119 @@ const payloadSummary = (payloadText: string): string => {
 const countByStatus = (records: ReadonlyArray<JobRecord>, status: JobRecord["status"]): number =>
   records.filter((record) => record.status === status).length;
 
+const recordStatusClass = (status: JobRecord["status"]): string => {
+  if (status === "applied") {
+    return "border-green-200 bg-green-50 text-green-800";
+  }
+
+  if (status === "invalid") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  if (status === "valid") {
+    return "border-brand-blue/20 bg-brand-blue/10 text-brand-blue";
+  }
+
+  if (status === "skipped_duplicate") {
+    return "border-border-soft bg-cream text-muted";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-800";
+};
+
+function AdminImportDetailError({ reset }: { readonly reset: () => void }) {
+  const { lang } = rootRoute.useSearch();
+  const copy = messagesFor(lang);
+  const router = useRouter();
+
+  const retry = (): void => {
+    reset();
+    void router.invalidate();
+  };
+
+  return (
+    // The admin shell provides the page container; this view owns content only.
+    <div>
+      <p className="mb-4">
+        <Link
+          to="/admin/imports"
+          search={{ lang }}
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
+        >
+          {copy.adminImportBackToImports}
+        </Link>
+      </p>
+      <p
+        role="alert"
+        className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
+      >
+        {copy.adminLoadFailed}
+      </p>
+      <p className="mt-4">
+        <button
+          type="button"
+          onClick={retry}
+          className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-brand-blue px-5 text-sm font-bold text-white transition hover:bg-brand-blue-hover motion-safe:transition-colors"
+        >
+          {copy.commonRetry}
+        </button>
+      </p>
+    </div>
+  );
+}
+
 function AdminImportDetail() {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
+  const router = useRouter();
   const { jobId } = Route.useParams();
   const loaded: unknown = Route.useLoaderData();
-  const initial = jobDetailSchema.parse(loaded);
-  const [detail, setDetail] = useState<JobDetail>(initial);
+  const parsed = jobDetailSchema.safeParse(loaded);
+  const [detail, setDetail] = useState<JobDetail | null>(parsed.success ? parsed.data : null);
   const [page, setPage] = useState(0);
-  const terminal = detail.job.status === "applied" || detail.job.status === "failed";
+  const [refreshFailed, setRefreshFailed] = useState(false);
+
+  const terminal =
+    detail === null || detail.job.status === "applied" || detail.job.status === "failed";
+
+  const refreshNow = (): void => {
+    adminImportJobDetailFn({ data: { jobId, recordLimit: RECORD_LIMIT } })
+      .then((fresh) => {
+        const raw: unknown = fresh;
+        const next = jobDetailSchema.safeParse(raw);
+
+        if (next.success) {
+          setDetail(next.data);
+          setRefreshFailed(false);
+        } else {
+          setRefreshFailed(true);
+        }
+      })
+      .catch(() => {
+        setRefreshFailed(true);
+      });
+  };
 
   useEffect(() => {
     if (terminal) {
       return undefined;
     }
 
+    // Malformed poll payloads are ignored so a live "applying" job never
+    // crashes the page; only network failures stop the timer.
     const timer = window.setInterval(() => {
       adminImportJobDetailFn({ data: { jobId, recordLimit: RECORD_LIMIT } })
         .then((fresh) => {
           const raw: unknown = fresh;
+          const next = jobDetailSchema.safeParse(raw);
 
-          setDetail(jobDetailSchema.parse(raw));
+          if (next.success) {
+            setDetail(next.data);
+            setRefreshFailed(false);
+          }
         })
         .catch(() => {
+          setRefreshFailed(true);
           window.clearInterval(timer);
         });
     }, POLL_INTERVAL_MS);
@@ -247,6 +338,39 @@ function AdminImportDetail() {
       window.clearInterval(timer);
     };
   }, [jobId, terminal]);
+
+  if (detail === null) {
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8">
+        <p className="mb-4">
+          <Link
+            to="/admin/imports"
+            search={{ lang }}
+            className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
+          >
+            {copy.adminImportBackToImports}
+          </Link>
+        </p>
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
+        >
+          {copy.adminLoadFailed}
+        </p>
+        <p className="mt-4">
+          <button
+            type="button"
+            onClick={() => {
+              void router.invalidate();
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-brand-blue px-5 text-sm font-bold text-white transition hover:bg-brand-blue-hover motion-safe:transition-colors"
+          >
+            {copy.commonRetry}
+          </button>
+        </p>
+      </div>
+    );
+  }
 
   const applied = countByStatus(detail.records, "applied");
   const skipped = countByStatus(detail.records, "skipped_duplicate");
@@ -273,85 +397,143 @@ function AdminImportDetail() {
     setPage(safePage + 1);
   };
 
+  const applying = detail.job.status === "applying";
+
   return (
-    <div className="bg-cream min-h-screen text-ink">
-      <p>
-        <Link to="/admin/imports" search={{ lang }}>
+    // The admin shell provides the page container; this view owns content only.
+    <div>
+      <p className="mb-4">
+        <Link
+          to="/admin/imports"
+          search={{ lang }}
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
+        >
           {copy.adminImportBackToImports}
         </Link>
       </p>
 
-      <h1 className="font-display text-4xl tracking-wide">
-        {copy.adminImportsJob} {detail.job.id}
-      </h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="font-display text-4xl tracking-wide">
+          {copy.adminImportsJob} {detail.job.id}
+        </h1>
+        <ImportStatusBadge status={detail.job.status} />
+      </div>
 
-      <section aria-label={copy.adminImportJobDetails}>
+      {applying ? (
+        <section
+          aria-live="polite"
+          aria-label={copy.adminImportApplying}
+          className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm"
+        >
+          <p className="text-sm font-semibold text-amber-800">{copy.adminImportApplying}</p>
+          <button
+            type="button"
+            onClick={refreshNow}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-amber-200 bg-white px-4 text-sm font-semibold text-amber-800 hover:bg-amber-100 motion-safe:transition-colors"
+          >
+            {copy.adminImportRefreshStatus}
+          </button>
+        </section>
+      ) : null}
+
+      <section
+        aria-label={copy.adminImportJobDetails}
+        className="mt-6 rounded-lg border border-border-soft bg-white p-4 shadow-sm sm:p-6"
+      >
         <h2 className="font-display text-2xl tracking-wide">{copy.adminImportJobDetails}</h2>
 
-        <dl>
+        <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
           <div>
-            <dt>{copy.adminSource}</dt>
-            <dd>{detail.job.source_name}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminSource}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{detail.job.source_name}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportsFormat}</dt>
-            <dd>{detail.job.format}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportsFormat}
+            </dt>
+            <dd className="mt-1 text-sm">{detail.job.format}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminStatus}</dt>
-            <dd>{detail.job.status}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminStatus}
+            </dt>
+            <dd className="mt-1 text-sm">
+              <ImportStatusBadge status={detail.job.status} />
+            </dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportTotalRecords}</dt>
-            <dd>{detail.job.total_records}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportTotalRecords}
+            </dt>
+            <dd className="mt-1 text-sm tabular-nums">{detail.job.total_records}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportValidCount}</dt>
-            <dd>{detail.job.valid_records}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportValidCount}
+            </dt>
+            <dd className="mt-1 text-sm tabular-nums">{detail.job.valid_records}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportInvalidCount}</dt>
-            <dd>{detail.job.invalid_records}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportInvalidCount}
+            </dt>
+            <dd className="mt-1 text-sm tabular-nums">{detail.job.invalid_records}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportSourceUrl}</dt>
-            <dd>{cellText(detail.job.source_url)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportSourceUrl}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{cellText(detail.job.source_url)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportSourceVersion}</dt>
-            <dd>{cellText(detail.job.source_version)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportSourceVersion}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{cellText(detail.job.source_version)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminLicense}</dt>
-            <dd>{cellText(detail.job.license)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminLicense}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{cellText(detail.job.license)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportAttribution}</dt>
-            <dd>{cellText(detail.job.attribution)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportAttribution}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{cellText(detail.job.attribution)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminImportEditorialNotes}</dt>
-            <dd>{cellText(detail.job.editorial_notes)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminImportEditorialNotes}
+            </dt>
+            <dd className="mt-1 text-sm break-words">{cellText(detail.job.editorial_notes)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminCreated}</dt>
-            <dd>{formatAdminDateTime(detail.job.created_at, lang)}</dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminCreated}
+            </dt>
+            <dd className="mt-1 text-sm">{formatAdminDateTime(detail.job.created_at, lang)}</dd>
           </div>
 
           <div>
-            <dt>{copy.adminCompleted}</dt>
-            <dd>
+            <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
+              {copy.adminCompleted}
+            </dt>
+            <dd className="mt-1 text-sm">
               {detail.job.completed_at === null
                 ? cellText(detail.job.completed_at)
                 : formatAdminDateTime(detail.job.completed_at, lang)}
@@ -360,25 +542,45 @@ function AdminImportDetail() {
         </dl>
       </section>
 
-      <section aria-label={copy.adminImportProgress} aria-live="polite">
+      <section
+        aria-label={copy.adminImportProgress}
+        aria-live="polite"
+        className="mt-6 rounded-lg border border-border-soft bg-white p-4 shadow-sm sm:p-6"
+      >
         <h2 className="font-display text-2xl tracking-wide">{copy.adminImportProgress}</h2>
 
-        <p>
+        <p className="mt-2 text-sm">
           {processed} of {total} records processed ({applied} applied, {skipped} skipped duplicates,{" "}
           {failed} failed).
         </p>
 
-        {!terminal ? <p>{copy.adminImportRefreshing}</p> : null}
+        {!terminal ? <p className="mt-2 text-sm text-muted">{copy.adminImportRefreshing}</p> : null}
+
+        {refreshFailed ? (
+          <p className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">
+            <span role="alert">{copy.adminLoadFailed}</span>
+            <button
+              type="button"
+              onClick={refreshNow}
+              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-red-200 bg-white px-4 text-sm font-semibold hover:bg-red-100 motion-safe:transition-colors"
+            >
+              {copy.commonRetry}
+            </button>
+          </p>
+        ) : null}
       </section>
 
-      <section aria-label={copy.adminImportRecordsTitle}>
+      <section
+        aria-label={copy.adminImportRecordsTitle}
+        className="mt-6 rounded-lg border border-border-soft bg-white p-4 shadow-sm sm:p-6"
+      >
         <h2 className="font-display text-2xl tracking-wide">{copy.adminImportRecordsTitle}</h2>
 
         {failureCount > 0 ? (
-          <p>
+          <p className="mt-3">
             <button
               type="button"
-              className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white"
+              className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-brand-blue px-5 text-sm font-bold text-white transition hover:bg-brand-blue-hover motion-safe:transition-colors"
               onClick={downloadFailures}
             >
               {copy.adminImportDownloadFailures}
@@ -386,56 +588,107 @@ function AdminImportDetail() {
           </p>
         ) : null}
 
-        <div className="overflow-x-auto">
-          <table>
-            <caption>
-              Page {safePage + 1} of {totalPages} ({total} records)
-            </caption>
+        {total === 0 ? (
+          <p className="mt-3 text-sm text-muted">{copy.adminNoResults}</p>
+        ) : (
+          <>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-border-soft">
+              <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
+                <caption className="px-4 py-3 text-left text-xs font-medium text-muted">
+                  Page {safePage + 1} of {totalPages} ({total} records)
+                </caption>
 
-            <thead>
-              <tr>
-                <th scope="col">{copy.adminImportExternalRef}</th>
-                <th scope="col">{copy.adminStatus}</th>
-                <th scope="col">{copy.adminImportErrorsCol}</th>
-                <th scope="col">{copy.adminImportDishCol}</th>
-                <th scope="col">{copy.adminImportPreviewCol}</th>
-              </tr>
-            </thead>
+                <thead>
+                  <tr className="border-y border-border-soft bg-cream/60">
+                    <th scope="col" className="w-40 px-4 py-3 font-semibold">
+                      {copy.adminImportExternalRef}
+                    </th>
+                    <th scope="col" className="w-40 px-4 py-3 font-semibold">
+                      {copy.adminStatus}
+                    </th>
+                    <th scope="col" className="w-72 px-4 py-3 font-semibold">
+                      {copy.adminImportErrorsCol}
+                    </th>
+                    <th scope="col" className="w-32 px-4 py-3 font-semibold">
+                      {copy.adminImportDishCol}
+                    </th>
+                    <th scope="col" className="min-w-64 px-4 py-3 font-semibold">
+                      {copy.adminImportPreviewCol}
+                    </th>
+                  </tr>
+                </thead>
 
-            <tbody>
-              {visible.map((record) => (
-                <tr key={record.id}>
-                  <td>{record.external_ref}</td>
-                  <td>{record.status}</td>
-                  <td>{parseErrors(record.errors).join(" | ") || "—"}</td>
-                  <td>{cellText(record.dish_id)}</td>
-                  <td>{payloadSummary(record.payload)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                <tbody>
+                  {visible.map((record) => {
+                    const failures = parseErrors(record.errors);
 
-        {totalPages > 1 ? (
-          <p>
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center rounded-full px-5 font-bold"
-              disabled={safePage === 0}
-              onClick={showPrevious}
-            >
-              {copy.adminImportPrevious}
-            </button>{" "}
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center rounded-full px-5 font-bold"
-              disabled={safePage >= totalPages - 1}
-              onClick={showNext}
-            >
-              {copy.adminImportNext}
-            </button>
-          </p>
-        ) : null}
+                    return (
+                      <tr
+                        key={record.id}
+                        className="border-b border-border-soft align-top last:border-0"
+                      >
+                        <td className="px-4 py-3 font-medium break-words">{record.external_ref}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${recordStatusClass(record.status)}`}
+                          >
+                            {record.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {failures.length > 0 ? (
+                            <ul className="list-disc space-y-1 pl-5 text-red-800">
+                              {failures.map((failure) => (
+                                <li key={failure} className="break-words">
+                                  {failure}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 break-words">{cellText(record.dish_id)}</td>
+                        <td className="px-4 py-3">
+                          <p className="break-words">{payloadSummary(record.payload)}</p>
+                          <details className="mt-2 rounded-md border border-border-soft bg-cream/60 px-3 py-2">
+                            <summary className="inline-flex min-h-11 cursor-pointer items-center text-xs font-semibold">
+                              Raw payload
+                            </summary>
+                            <pre className="mt-2 max-h-64 overflow-auto text-xs break-words whitespace-pre-wrap">
+                              {record.payload}
+                            </pre>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 ? (
+              <p className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-5 text-sm font-bold hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
+                  disabled={safePage === 0}
+                  onClick={showPrevious}
+                >
+                  {copy.adminImportPrevious}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-5 text-sm font-bold hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
+                  disabled={safePage >= totalPages - 1}
+                  onClick={showNext}
+                >
+                  {copy.adminImportNext}
+                </button>
+              </p>
+            ) : null}
+          </>
+        )}
       </section>
     </div>
   );

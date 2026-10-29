@@ -45,6 +45,20 @@ export const dishSearchQuerySchema = z.object({
 
 export type DishSearchQuery = z.infer<typeof dishSearchQuerySchema>;
 
+export const carouselQuerySchema = z.object({
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
+    .optional(),
+  worldwide: z.boolean().optional(),
+  locale: localeSchema,
+  limit: z.coerce.number().int().min(1).max(20).default(5),
+});
+
+export type CarouselQuery = z.infer<typeof carouselQuerySchema>;
+
 export const dishDetailParamsSchema = z.object({
   id: z.string().min(1).max(120),
   locale: localeSchema,

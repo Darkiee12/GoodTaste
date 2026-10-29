@@ -15,6 +15,7 @@ import {
   localeNameFor,
   markLocaleExplicit,
   messagesFor,
+  writeLocaleCookie,
 } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -37,7 +38,12 @@ export function LanguageMenu() {
             className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-muted-on-dark hover:border-white/25 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
           >
             <GlobeIcon aria-hidden="true" className="size-4" />
-            <span>{localeNameFor(lang)}</span>
+            {/* Fixed width so switching between "English" and wider names
+            like "Tiếng Việt" never changes the button width; truncate is
+            a backstop for fonts that render wider than the box. */}
+            <span className="inline-block min-w-[5.75rem] max-w-[5.75rem] truncate text-left">
+              {localeNameFor(lang)}
+            </span>
             <ChevronDownIcon aria-hidden="true" className="size-4" />
           </button>
         </DropdownMenuTrigger>
@@ -60,6 +66,7 @@ export function LanguageMenu() {
                     className={cn(isCurrent && "font-semibold")}
                     onClick={() => {
                       markLocaleExplicit();
+                      writeLocaleCookie(locale);
                     }}
                   >
                     <span>{localeNameFor(locale)}</span>

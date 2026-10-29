@@ -1,0 +1,73 @@
+# Production runtime image for FeastJourney. READ-ONLY reference: local dev
+# uses infra/Dockerfile.dev; never adapt this file for local development.
+#
+# Build strategy (deliberate, fail-closed):
+# - CI builds and verifies the TanStack Start artifact on the runner FIRST,
+#   against a disposable migrated PostgreSQL (see .github/workflows/release.yml
+#   and the quality flow): migrate -> validate -> check-types -> tests -> build.
+#   The builder never connects to the production database.
+# - This Dockerfile then packages ONLY that verified artifact plus
+#   production-only dependencies. It never runs `bun install` at container
+#   start, never mounts source, and never contains .env files, git history,
+#   fixtures, or vendored reference repos.
+# - The application listens on 0.0.0.0:3000 inside the container (Dokploy maps
+#   the service port; the host firewall / NSG must NOT expose 3000 publicly —
+#   traffic arrives via Cloudflare Tunnel -> Traefik).
+#
+# Build context: repository root AFTER `bun run build` has produced `.output/`.
+# `.dockerignore` re-includes `.output/` for exactly this Dockerfile; the dev
+# image never uses the build output. Verify with:
+#   docker build -f infra/Dockerfile.prod -t feastjourney-prod:verify .
+#   docker run -d --name fj-prod-verify -p 127.0.0.1:3100:3000 \
+#     -e DATABASE_URL=... -e BETTER_AUTH_URL=... ... feastjourney-prod:verify
+#   (full required env list: infra/.env.production.example)
+
+# ---------------------------------------------------------------------------
+# Stage 1: production-only dependencies (no devDependencies, no source).
+# ---------------------------------------------------------------------------
+FROM oven/bun:1.4.4 AS deps
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+# ---------------------------------------------------------------------------
+# Stage 2: minimal runtime. Verified .output + prod node_modules only.
+# ---------------------------------------------------------------------------
+FROM oven/bun:1.4.4 AS runner
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000
+
+WORKDIR /app
+
+# Create the unprivileged runtime user explicitly (oven/bun defaults to root).
+RUN useradd --create-home --shell /usr/sbin/nologin appuser
+
+COPY package.json bun.lock ./
+COPY --from=deps /app/node_modules ./node_modules
+# TanStack Start (Nitro `bun` preset) server entry + prerendered assets.
+# `.dockerignore` keeps everything else (source, tests, db/, .env, .git,
+# fixtures, repos/) out of this image.
+COPY .output ./.output
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 3000
+
+# No curl in this image by design (smaller surface, no extra package). Probe
+# with the Bun runtime itself against the public liveness endpoint, which is
+# deliberately DB-free (see src/modules/food-discovery/server/api-adapter.ts:
+# handleHealthLive never touches the pool). Readiness (/health/ready) is for
+# orchestrators/humans, not for the restart loop: a wedged database must not
+# flap the container while the migration-gate investigation runs.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["bun", "-e", "const r = await fetch('http://127.0.0.1:3000/health/live'); if (!r.ok) process.exit(1)"]
+
+# Exec form: PID 1 receives SIGTERM directly so `docker stop` / Dokploy
+# graceful shutdown reaches the Nitro server without a signal proxy. No
+# process manager (tini/s6/supervisord) is needed or wanted for one process.
+CMD ["bun", ".output/server/index.mjs"]

@@ -1,10 +1,19 @@
-import { useMutation } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { Settings2 } from "lucide-react";
+import { useId, useRef, useState } from "react";
 
+import {
+  MemberDrawer,
+  MemberTable,
+  failureKindOf,
+  selectMember,
+  type FailureKind,
+} from "@/components/admin/members";
 import {
   adminAssignRoleFn,
   adminBanUserFn,
+  adminFindUserByEmailFn,
   adminListRolesFn,
   adminListUsersFn,
   adminRemoveRoleFn,
@@ -12,9 +21,11 @@ import {
   authorizeFn,
 } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { messagesFor } from "@/shared/i18n";
+import { messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
+
+const PAGE_SIZE = 20;
 
 export const Route = createFileRoute("/admin/users")({
   beforeLoad: async ({ search }) => {
@@ -25,7 +36,12 @@ export const Route = createFileRoute("/admin/users")({
     }
 
     const { allowed } = await authorizeFn({
-      data: { checks: [{ resource: "admin", actions: ["access"] }] },
+      data: {
+        checks: [
+          { resource: "user", actions: ["list"] },
+          { resource: "admin", actions: ["access"] },
+        ],
+      },
     });
 
     if (!allowed) {
@@ -35,83 +51,252 @@ export const Route = createFileRoute("/admin/users")({
     return {};
   },
   loader: async () => {
-    const [users, roleCatalog] = await Promise.all([
-      adminListUsersFn({ data: { limit: 50, offset: 0 } }),
+    const [users, roles, session] = await Promise.all([
+      adminListUsersFn({ data: { limit: PAGE_SIZE, offset: 0 } }),
       adminListRolesFn(),
+      getSessionFn(),
     ]);
 
-    return { users, roles: roleCatalog.roles };
+    return { users, roles: roles.roles, currentUserId: session.user?.id ?? null };
   },
   component: AdminUsers,
 });
+
+interface MemberNotice {
+  readonly message: string;
+  readonly userId: string;
+}
+
+const describeFailure = (kind: FailureKind, lang: Locale, copy: Messages): string => {
+  switch (kind) {
+    case "last-owner":
+      return lang === "vi"
+        ? "Đây là chủ sở hữu đang hoạt động cuối cùng. Hãy chỉ định một chủ sở hữu khác trước khi gỡ hoặc tạm khóa."
+        : "This is the last active owner. Assign another owner before removing or suspending them.";
+    case "protected":
+      return lang === "vi"
+        ? "Thay đổi này liên quan đến vai trò được bảo vệ và cần quyền cao hơn. Yêu cầu đã bị từ chối ở máy chủ."
+        : "That change involves a protected role and needs elevated rights. The server denied the request.";
+    case "recent-auth":
+      return lang === "vi"
+        ? "Thao tác nhạy cảm cần một phiên đăng nhập mới. Hãy đăng xuất rồi đăng nhập lại, sau đó thử lại."
+        : "Sensitive actions need a fresh sign-in. Sign out and back in, then try again.";
+    case "permissions":
+      return copy.authDenied;
+    case "generic":
+      return copy.adminActionFailed;
+    default:
+      return copy.adminActionFailed;
+  }
+};
 
 function AdminUsers() {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
   const initial = Route.useLoaderData();
+  const queryClient = useQueryClient();
   const pageId = useId();
   const errorId = `${pageId}-error`;
-  const [users, setUsers] = useState(initial.users);
-  const [assignTarget, setAssignTarget] = useState<ReadonlyMap<string, string>>(new Map());
-  const [banTarget, setBanTarget] = useState<string | null>(null);
 
-  const refreshUsers = useMutation({
-    mutationFn: () => adminListUsersFn({ data: { limit: 50, offset: 0 } }),
-    onSuccess: (rows) => {
-      setUsers(rows);
-    },
+  const [page, setPage] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchedEmail, setSearchedEmail] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [rolesError, setRolesError] = useState<MemberNotice | null>(null);
+  const [accountError, setAccountError] = useState<MemberNotice | null>(null);
+  const [announcement, setAnnouncement] = useState<MemberNotice | null>(null);
+  const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const usersQuery = useQuery({
+    queryKey: ["admin", "users", page],
+    queryFn: () => adminListUsersFn({ data: { limit: PAGE_SIZE, offset: page * PAGE_SIZE } }),
+    initialData: page === 0 ? initial.users : undefined,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    retry: 1,
   });
 
+  const rolesQuery = useQuery({
+    queryKey: ["admin", "roles"],
+    queryFn: () => adminListRolesFn().then((result) => result.roles),
+    initialData: initial.roles,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const searchQuery = useQuery({
+    queryKey: ["admin", "user-search", searchedEmail],
+    queryFn: () => adminFindUserByEmailFn({ data: { email: searchedEmail } }),
+    enabled: searchedEmail !== "",
+    staleTime: 30_000,
+    retry: 1,
+  });
+
+  const manageProtectedQuery = useQuery({
+    queryKey: ["admin", "capabilities", "manage-protected"],
+    queryFn: () =>
+      authorizeFn({
+        data: { checks: [{ resource: "role", actions: ["manage-protected"] }] },
+      }).then((result) => result.allowed),
+    initialData: false,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const users = usersQuery.data ?? [];
+  const roles = rolesQuery.data;
+  const foundUser = searchedEmail === "" ? null : (searchQuery.data ?? null);
+  const canManageProtected = manageProtectedQuery.data;
+
+  const roleNameOf = (roleId: string): string =>
+    roles.find((role) => role.id === roleId)?.name ?? roleId;
+
+  const selectedMember = selectMember(users, foundUser, selectedMemberId);
+
+  const refreshMemberCaches = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+
+    if (searchedEmail !== "") {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "user-search", searchedEmail] });
+    }
+  };
+
   const assignRole = useMutation({
-    mutationFn: (input: { userId: string; roleId: string }) =>
-      adminAssignRoleFn({ data: { user_id: input.userId, role_id: input.roleId } }),
-    onSuccess: (_data, input) => {
-      setAssignTarget((prev) => {
-        const next = new Map(prev);
-
-        next.delete(input.userId);
-
-        return next;
+    mutationFn: (input: {
+      readonly email: string;
+      readonly roleId: string;
+      readonly userId: string;
+    }) =>
+      adminAssignRoleFn({ data: { user_id: input.userId, role_id: input.roleId } }).then(
+        () => input,
+      ),
+    onSuccess: (input) => {
+      setRolesError(null);
+      setAnnouncement({
+        userId: input.userId,
+        message:
+          lang === "vi"
+            ? `Đã gán ${roleNameOf(input.roleId)} cho ${input.email}.`
+            : `Assigned ${roleNameOf(input.roleId)} to ${input.email}.`,
       });
-      refreshUsers.mutate();
+      refreshMemberCaches();
+    },
+    onError: (error, input) => {
+      setRolesError({
+        userId: input.userId,
+        message: describeFailure(failureKindOf(error), lang, copy),
+      });
     },
   });
 
   const removeRole = useMutation({
-    mutationFn: (input: { userId: string; roleId: string }) =>
-      adminRemoveRoleFn({ data: { user_id: input.userId, role_id: input.roleId } }),
-    onSuccess: () => {
-      refreshUsers.mutate();
+    mutationFn: (input: {
+      readonly email: string;
+      readonly roleId: string;
+      readonly userId: string;
+    }) =>
+      adminRemoveRoleFn({ data: { user_id: input.userId, role_id: input.roleId } }).then(
+        () => input,
+      ),
+    onSuccess: (input) => {
+      setRolesError(null);
+      setAnnouncement({
+        userId: input.userId,
+        message:
+          lang === "vi"
+            ? `Đã gỡ ${roleNameOf(input.roleId)} khỏi ${input.email}.`
+            : `Removed ${roleNameOf(input.roleId)} from ${input.email}.`,
+      });
+      refreshMemberCaches();
+    },
+    onError: (error, input) => {
+      setRolesError({
+        userId: input.userId,
+        message: describeFailure(failureKindOf(error), lang, copy),
+      });
     },
   });
 
   const banUser = useMutation({
-    mutationFn: (userId: string) => adminBanUserFn({ data: { user_id: userId, reason: "" } }),
-    onSuccess: () => {
-      setBanTarget(null);
-      refreshUsers.mutate();
+    mutationFn: (input: {
+      readonly email: string;
+      readonly reason: string;
+      readonly userId: string;
+    }) =>
+      adminBanUserFn({ data: { user_id: input.userId, reason: input.reason } }).then(() => input),
+    onSuccess: (input) => {
+      setAccountError(null);
+      setAnnouncement({
+        userId: input.userId,
+        message: lang === "vi" ? `Đã tạm khóa ${input.email}.` : `Suspended ${input.email}.`,
+      });
+      refreshMemberCaches();
+    },
+    onError: (error, input) => {
+      setAccountError({
+        userId: input.userId,
+        message: describeFailure(failureKindOf(error), lang, copy),
+      });
     },
   });
 
   const unbanUser = useMutation({
-    mutationFn: (userId: string) => adminUnbanUserFn({ data: { user_id: userId } }),
-    onSuccess: () => {
-      refreshUsers.mutate();
+    mutationFn: (input: { readonly email: string; readonly userId: string }) =>
+      adminUnbanUserFn({ data: { user_id: input.userId } }).then(() => input),
+    onSuccess: (input) => {
+      setAccountError(null);
+      setAnnouncement({
+        userId: input.userId,
+        message: lang === "vi" ? `Đã mở khóa ${input.email}.` : `Restored ${input.email}.`,
+      });
+      refreshMemberCaches();
+    },
+    onError: (error, input) => {
+      setAccountError({
+        userId: input.userId,
+        message: describeFailure(failureKindOf(error), lang, copy),
+      });
     },
   });
 
-  const failed =
-    assignRole.isError ||
-    removeRole.isError ||
-    banUser.isError ||
-    unbanUser.isError ||
-    refreshUsers.isError;
+  const openManage = (memberId: string, trigger: HTMLButtonElement): void => {
+    lastTriggerRef.current = trigger;
+    setRolesError(null);
+    setAccountError(null);
+    setAnnouncement(null);
+    setSelectedMemberId(memberId);
+  };
 
-  const banEntry = users.find((entry) => entry.id === banTarget) ?? null;
+  const closeDrawer = (): void => {
+    const trigger = lastTriggerRef.current;
+
+    setSelectedMemberId(null);
+
+    // Restore after the drawer unmounts: focusing synchronously here runs
+    // while Radix's focus scope is still mounted, so the scope reclaims it
+    // and focus is lost to the body. The deferred restore wins because it
+    // runs after the unmount commit (and Radix's own cleanup).
+    if (trigger !== null) {
+      window.requestAnimationFrame(() => {
+        trigger.focus();
+      });
+    }
+  };
+
+  const failed = usersQuery.isError || (searchedEmail !== "" && searchQuery.isError);
+  const hasNextPage = users.length >= PAGE_SIZE;
+
+  const drawerPending =
+    selectedMemberId !== null &&
+    ((assignRole.isPending && assignRole.variables.userId === selectedMemberId) ||
+      (removeRole.isPending && removeRole.variables.userId === selectedMemberId) ||
+      (banUser.isPending && banUser.variables.userId === selectedMemberId) ||
+      (unbanUser.isPending && unbanUser.variables.userId === selectedMemberId));
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-10">
-      <h1 className="font-display text-4xl tracking-wide">{copy.authAdminUsers}</h1>
+    <div className="mx-auto w-full max-w-6xl bg-cream px-4 py-10 sm:px-8">
+      <h1 className="font-display text-4xl tracking-wide text-ink">{copy.adminMembers}</h1>
+
       {failed ? (
         <div
           role="alert"
@@ -123,165 +308,184 @@ function AdminUsers() {
             type="button"
             className="mt-2 font-medium underline hover:no-underline"
             onClick={() => {
-              assignRole.reset();
-              removeRole.reset();
-              banUser.reset();
-              unbanUser.reset();
-              refreshUsers.reset();
-              refreshUsers.mutate();
+              void queryClient.invalidateQueries({ queryKey: ["admin"] });
             }}
           >
             {copy.adminRefresh}
           </button>
         </div>
       ) : null}
-      {users.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-border-soft bg-white p-6 text-sm text-muted shadow-sm">
-          {copy.adminNoResults}
-        </p>
-      ) : (
-        <ul className="mt-4 grid gap-4">
-          {users.map((entry) => {
-            const selectId = `${pageId}-assign-${entry.id}`;
-            const selectedRole = assignTarget.get(entry.id) ?? "";
 
-            return (
-              <li
-                key={entry.id}
-                className="min-w-0 rounded-lg border border-border-soft bg-white p-4 shadow-sm"
-              >
-                <p className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="min-w-0 break-words text-sm font-semibold">{entry.email}</span>
-                  {entry.banned ? (
-                    <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-800">
-                      {copy.authSuspended}
-                    </span>
-                  ) : null}
-                </p>
-                {entry.roles.length > 0 ? (
-                  <ul className="mt-3 grid gap-1.5">
-                    {entry.roles.map((roleId) => (
-                      <li
-                        key={roleId}
-                        className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border-soft px-3 py-1.5"
-                      >
-                        <span className="min-w-0 break-words text-sm">{roleId}</span>
-                        <button
-                          type="button"
-                          disabled={removeRole.isPending}
-                          aria-busy={removeRole.isPending}
-                          onClick={() => {
-                            removeRole.mutate({ userId: entry.id, roleId });
-                          }}
-                          className="inline-flex items-center justify-center rounded-md border border-border-soft bg-white px-3 py-1 text-xs font-medium hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                        >
-                          {copy.authRoleRemove}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="mt-3">
-                  <label htmlFor={selectId} className="block text-sm font-medium">
-                    {copy.authAssignRole}
-                  </label>
-                  <div className="mt-1 flex min-w-0 flex-wrap gap-2">
-                    <select
-                      id={selectId}
-                      aria-label={`${copy.authAssignRole} ${entry.email}`}
-                      value={selectedRole}
-                      onChange={(event) => {
-                        const next = event.target.value;
-
-                        setAssignTarget((prev) => new Map(prev).set(entry.id, next));
-                      }}
-                      className="min-w-0 flex-1 rounded-md border border-border-soft bg-white px-3 py-2 text-sm text-ink motion-safe:transition-colors focus:border-brand-blue"
-                    >
-                      <option value="">{copy.authAssignRole}</option>
-                      {initial.roles.map((role) => (
-                        <option key={role.id} value={role.id}>
-                          {role.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={assignRole.isPending || selectedRole === ""}
-                      aria-busy={assignRole.isPending}
-                      onClick={() => {
-                        if (selectedRole !== "") {
-                          assignRole.mutate({ userId: entry.id, roleId: selectedRole });
-                        }
-                      }}
-                      className="inline-flex items-center justify-center rounded-md bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                    >
-                      {copy.authAssign}
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-3">
-                  {entry.banned ? (
-                    <button
-                      type="button"
-                      disabled={unbanUser.isPending}
-                      aria-busy={unbanUser.isPending}
-                      onClick={() => {
-                        unbanUser.mutate(entry.id);
-                      }}
-                      className="inline-flex items-center justify-center rounded-md border border-border-soft bg-white px-4 py-2 text-sm font-medium hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                    >
-                      {copy.authUnban}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={banUser.isPending}
-                      aria-busy={banUser.isPending}
-                      onClick={() => {
-                        setBanTarget(entry.id);
-                      }}
-                      className="inline-flex items-center justify-center rounded-md border border-red-700 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                    >
-                      {copy.authBan}
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {banEntry !== null ? (
-        <div
-          role="alert"
-          className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+      <section
+        aria-labelledby={`${pageId}-search-heading`}
+        className="mt-4 rounded-lg border border-border-soft bg-white p-4 shadow-sm"
+      >
+        <h2
+          id={`${pageId}-search-heading`}
+          className="font-display text-2xl tracking-wide text-ink"
         >
-          <p>
-            {copy.adminBanConfirm} <span className="break-words font-medium">{banEntry.email}</span>
+          {copy.adminUserSearchLabel}
+        </h2>
+        <form
+          className="mt-3 flex flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSearchedEmail(searchInput.trim());
+          }}
+        >
+          <label htmlFor={`${pageId}-search-email`} className="sr-only">
+            {copy.adminUserSearchLabel}
+          </label>
+          <input
+            id={`${pageId}-search-email`}
+            name="memberEmail"
+            type="email"
+            autoComplete="off"
+            spellCheck={false}
+            value={searchInput}
+            placeholder={copy.adminUserSearchPlaceholder}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+            }}
+            className="min-h-11 min-w-0 flex-1 rounded-md border border-border-soft bg-white px-3 py-2 text-sm text-ink motion-safe:transition-colors focus:border-brand-blue"
+          />
+          <button
+            type="submit"
+            disabled={searchQuery.isFetching || searchInput.trim() === ""}
+            aria-busy={searchQuery.isFetching}
+            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {copy.adminUserSearchButton}
+          </button>
+        </form>
+        {searchQuery.isSuccess && searchedEmail !== "" && foundUser === null ? (
+          <p className="mt-3 rounded-md border border-border-soft bg-cream px-3 py-2 text-sm text-muted">
+            {copy.adminUserNotFound}
           </p>
-          <p className="mt-2 flex flex-wrap gap-2">
+        ) : null}
+        {searchQuery.isSuccess && foundUser !== null ? (
+          <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border-soft px-3 py-2">
+            <span className="min-w-0 break-words text-sm font-semibold text-ink">
+              {foundUser.email}
+            </span>
             <button
               type="button"
-              disabled={banUser.isPending}
-              onClick={() => {
-                banUser.mutate(banEntry.id);
+              aria-label={`Manage roles and account for ${foundUser.email}`}
+              title={`Manage roles and account for ${foundUser.email}`}
+              onClick={(event) => {
+                openManage(foundUser.id, event.currentTarget);
               }}
-              className="inline-flex items-center justify-center rounded-md bg-brand-blue px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
+              className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-white px-3 text-sm font-medium text-ink hover:bg-cream focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:outline-none"
             >
-              {copy.commonConfirm}
+              <Settings2 aria-hidden="true" className="size-4" />
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setBanTarget(null);
-              }}
-              className="inline-flex items-center justify-center rounded-md border border-border-soft bg-white px-3 py-1.5 text-sm font-medium hover:bg-cream motion-safe:transition-colors"
-            >
-              {copy.commonCancel}
-            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section aria-labelledby={`${pageId}-browse-heading`} className="mt-6">
+        <h2
+          id={`${pageId}-browse-heading`}
+          className="font-display text-2xl tracking-wide text-ink"
+        >
+          {copy.adminMembers}
+        </h2>
+        {usersQuery.isPending && users.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-border-soft bg-white p-6 text-sm text-muted shadow-sm">
+            {lang === "vi" ? "Đang tải…" : "Loading…"}
           </p>
+        ) : (
+          <MemberTable lang={lang} members={users} onManage={openManage} roleNameOf={roleNameOf} />
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={page === 0 || usersQuery.isFetching}
+            onClick={() => {
+              setPage(page - 1);
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-md border border-border-soft bg-white px-4 text-sm font-medium text-ink hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {copy.adminUserPrevious}
+          </button>
+          <button
+            type="button"
+            disabled={!hasNextPage || usersQuery.isFetching}
+            onClick={() => {
+              setPage(page + 1);
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-md border border-border-soft bg-white px-4 text-sm font-medium text-ink hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {copy.adminUserNext}
+          </button>
         </div>
-      ) : null}
+      </section>
+
+      <MemberDrawer
+        accountError={
+          selectedMember !== null &&
+          accountError !== null &&
+          accountError.userId === selectedMember.id
+            ? accountError.message
+            : null
+        }
+        announcement={
+          selectedMember !== null &&
+          announcement !== null &&
+          announcement.userId === selectedMember.id
+            ? announcement.message
+            : null
+        }
+        assignPending={assignRole.isPending}
+        banPending={banUser.isPending}
+        canManageProtected={canManageProtected}
+        copy={copy}
+        currentUserId={initial.currentUserId}
+        lang={lang}
+        member={selectedMember}
+        modalPending={drawerPending}
+        onAssign={(input) => {
+          if (selectedMember !== null && input.userId === selectedMember.id) {
+            assignRole.mutate({
+              email: selectedMember.email,
+              roleId: input.roleId,
+              userId: selectedMember.id,
+            });
+          }
+        }}
+        onClose={closeDrawer}
+        onRemove={(input) => {
+          if (selectedMember !== null && input.userId === selectedMember.id) {
+            removeRole.mutate({
+              email: selectedMember.email,
+              roleId: input.roleId,
+              userId: selectedMember.id,
+            });
+          }
+        }}
+        onRestore={(userId) => {
+          if (selectedMember !== null && userId === selectedMember.id) {
+            unbanUser.mutate({ email: selectedMember.email, userId: selectedMember.id });
+          }
+        }}
+        onSuspend={(input) => {
+          if (selectedMember !== null && input.userId === selectedMember.id) {
+            banUser.mutate({
+              email: selectedMember.email,
+              reason: input.reason,
+              userId: selectedMember.id,
+            });
+          }
+        }}
+        removePendingRoleId={removeRole.isPending ? removeRole.variables.roleId : null}
+        roles={roles}
+        rolesError={
+          selectedMember !== null && rolesError !== null && rolesError.userId === selectedMember.id
+            ? rolesError.message
+            : null
+        }
+        unbanPending={unbanUser.isPending}
+      />
     </div>
   );
 }

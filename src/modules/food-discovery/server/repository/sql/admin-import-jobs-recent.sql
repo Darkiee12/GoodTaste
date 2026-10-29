@@ -4,3 +4,4 @@ SELECT id::text AS id, source_name, format, status,
 FROM feastjourney.catalog_import_jobs
 ORDER BY created_at DESC, id DESC
 LIMIT :limit::int
+OFFSET :offset::int

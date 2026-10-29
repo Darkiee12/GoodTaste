@@ -19,6 +19,10 @@ import {
   CurationService,
   type CurationServiceError,
   type PublicationCheck,
+  type ResolvedNote,
+  type ResolvedRevision,
+  type RevisionHistoryInput,
+  type RevisionHistoryPage,
 } from "@/modules/food-discovery/server/operations/curation-service";
 import {
   DishService,
@@ -84,34 +88,38 @@ export class AdminDashboardService extends Context.Service<
     ) => Effect.Effect<
       {
         readonly dish: DishProfile;
-        readonly notes: ReadonlyArray<{
-          readonly id: string;
-          readonly author: string;
-          readonly noteKind: string;
-          readonly note: string;
-          readonly createdAt: string;
-        }>;
-        readonly revisions: ReadonlyArray<{
-          readonly id: string;
-          readonly actor: string;
-          readonly operation: string;
-          readonly summary: string;
-          readonly createdAt: string;
-        }>;
+        readonly notes: ReadonlyArray<ResolvedNote>;
       },
       AdminDashboardError,
       Database | DishService | CurationService
+    >;
+    readonly dishRevisionHistory: (
+      dishId: string,
+      input: RevisionHistoryInput,
+    ) => Effect.Effect<
+      {
+        readonly revisions: ReadonlyArray<ResolvedRevision>;
+        readonly nextCursor: string | null;
+      },
+      AdminDashboardError,
+      Database | CurationService
     >;
     readonly reviewQueue: (
       limit: number,
       cursor: bigint,
     ) => Effect.Effect<
-      ReadonlyArray<{ readonly id: string; readonly slug: string; readonly status: string }>,
+      ReadonlyArray<{
+        readonly id: string;
+        readonly slug: string;
+        readonly status: string;
+        readonly displayName: string | null;
+      }>,
       CurationServiceError,
       Database | CurationService
     >;
     readonly importJobs: (
       limit: number,
+      offset?: number,
     ) => Effect.Effect<
       ReadonlyArray<AdminImportJobRecentRow>,
       DatabaseError,
@@ -189,16 +197,18 @@ export const AdminDashboardServiceLive = Layer.effect(
       dishDetail: (dishId, locale) =>
         Effect.gen(function* () {
           const dish = yield* dishService.getDishForCuration(dishId, locale);
+          const notes = yield* curationService.listNotes(dish.id, 50);
 
-          const [notes, revisions] = yield* Effect.all(
-            [curationService.listNotes(dish.id, 50), curationService.listRevisions(dish.id, 50)],
-            { concurrency: 2 },
-          );
+          return { dish, notes };
+        }),
+      dishRevisionHistory: (dishId, input) =>
+        Effect.gen(function* () {
+          const page: RevisionHistoryPage = yield* curationService.revisionHistory(dishId, input);
 
-          return { dish, notes, revisions };
+          return { revisions: page.items, nextCursor: page.nextCursor };
         }),
       reviewQueue: (limit, cursor) => curationService.reviewQueue(limit, cursor),
-      importJobs: (limit) => curation.recentImportJobs(limit),
+      importJobs: (limit, offset = 0) => curation.recentImportJobs(limit, offset),
       importJobDetail: (jobId, recordLimit) =>
         Effect.gen(function* () {
           if (!isDbIdString(jobId)) {

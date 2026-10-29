@@ -2,10 +2,17 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
+import { PersonalNav } from "@/components/personal-nav";
 import { signOutFn } from "@/modules/user/auth.functions";
 import { getProfileFn, updateProfileFn } from "@/modules/user/profile.functions";
 import { listAccountsFn, unlinkAccountFn } from "@/modules/user/session.functions";
-import { messagesFor, displayLocales, locales } from "@/shared/i18n";
+import {
+  messagesFor,
+  displayLocales,
+  locales,
+  markLocaleExplicit,
+  writeLocaleCookie,
+} from "@/shared/i18n";
 import type { Locale } from "@/shared/i18n";
 
 const isLocale = (value: string): value is Locale =>
@@ -105,6 +112,13 @@ function AccountSettings() {
       updateProfileFn({
         data: { display_name: input.displayName, locale: input.locale },
       }),
+    onSuccess: (_data, input) => {
+      // The saved account language is an explicit preference: persist it
+      // where both the server (cookie) and the client (explicit flag) honor
+      // it, so auto-detect never overrides it on the next visit.
+      markLocaleExplicit();
+      writeLocaleCookie(input.locale);
+    },
   });
 
   const unlink = useMutation({
@@ -126,6 +140,9 @@ function AccountSettings() {
     return (
       <div className="mx-auto w-full max-w-2xl px-4 py-10">
         <h1 className="font-display text-4xl tracking-wide">{copy.authAccount}</h1>
+        <div className="mt-4">
+          <PersonalNav />
+        </div>
 
         <p
           role="note"
@@ -147,6 +164,9 @@ function AccountSettings() {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10">
       <h1 className="font-display text-4xl tracking-wide">{copy.authAccount}</h1>
+      <div className="mt-4">
+        <PersonalNav />
+      </div>
       <section
         aria-labelledby={`${formId}-profile-heading`}
         className="mt-6 rounded-lg border border-border-soft bg-white p-6 shadow-sm"
