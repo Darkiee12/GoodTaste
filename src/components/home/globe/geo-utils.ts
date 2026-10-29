@@ -150,6 +150,13 @@ export function facingCosine(
   return (normalX * viewX + normalY * viewY + normalZ * viewZ) / (normalLength * viewLength);
 }
 
+/**
+ * Fraction of the globe's vertical diameter visible inside the hero. The
+ * remaining slice extends below the hero's lower edge, so the planet reads
+ * as a large background body rather than a fully contained ball.
+ */
+export const VISIBLE_VERTICAL_FRACTION = 0.8;
+
 /** True when a globe surface point faces the camera instead of hiding behind the planet. */
 export function isFacingCamera(
   surfacePoint: THREE.Vector3,
@@ -161,30 +168,43 @@ export function isFacingCamera(
 }
 
 /**
- * Place a large planet filling the background: full-bleed on narrow screens,
- * and on desktop a 130%-of-width globe (bounded by twice the hero height)
- * pushed right of center so the left stays open universe behind the hero
- * copy. Vertically 80% of the diameter shows above the hero's lower edge,
- * clamped to the hero height on short screens.
+ * Place a large planet against the hero: the full horizontal circle fits
+ * inside the viewport with a responsive side margin, and 80% of the vertical
+ * diameter shows above the hero's lower edge. On desktop the globe anchors
+ * right so the left stays open universe behind the hero copy; on narrow
+ * screens the width bound pulls the center back to the middle and the globe
+ * sits lower in the hero under the headline and CTAs.
+ *
+ * The canvas fills the hero, so these viewport pixels are hero pixels.
+ * A degenerate zero-size hero yields a 1px globe instead of NaN geometry.
  */
 export function computeGlobeLayout(viewport: ViewportSize): GlobeLayout {
   const narrow = viewport.width < 768;
 
-  const diameterPx = narrow
-    ? Math.min(viewport.width * 1.04, viewport.height * 1.25)
-    : Math.min(viewport.width * 1.3, viewport.height * 2);
+  const marginPx = narrow ? 16 : 48;
 
-  const capPx = Math.min(diameterPx * 0.8, viewport.height);
+  const diameterPx = Math.max(
+    1,
+    Math.min(viewport.height / VISIBLE_VERTICAL_FRACTION, viewport.width - marginPx * 2),
+  );
+
+  const capPx = diameterPx * VISIBLE_VERTICAL_FRACTION;
 
   const pixelsPerUnit = diameterPx / (GLOBE_RADIUS * 2);
 
   const frustumHalfHeight = viewport.height / pixelsPerUnit / 2;
 
-  // Wide screens push the globe right so the left reads as open universe:
-  // screen-x 0.76 lands the limb ~20% in from the left edge.
-  const centerX = narrow ? 0 : ((0.76 - 0.5) * viewport.width) / pixelsPerUnit;
+  // Right-anchored: the whole circle stays in frame with a deliberate
+  // margin, leaving open universe on the left behind the hero copy.
+  const centerXPx = viewport.width - marginPx - diameterPx / 2;
 
-  const centerY = -frustumHalfHeight + capPx / pixelsPerUnit - GLOBE_RADIUS;
+  const centerX = (centerXPx - viewport.width / 2) / pixelsPerUnit;
+
+  // Bottom-clipped: the top edge sits one visible cap above the hero's
+  // lower edge, so ~80% of the diameter is visible vertically.
+  const centerYPx = viewport.height - capPx + diameterPx / 2;
+
+  const centerY = (viewport.height / 2 - centerYPx) / pixelsPerUnit;
 
   return { diameterPx, capPx, pixelsPerUnit, frustumHalfHeight, centerX, centerY };
 }

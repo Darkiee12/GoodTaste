@@ -99,6 +99,17 @@ export class RoleService extends Context.Service<
       InsufficientPermissions | DatabaseError,
       Database | RoleRepository | Authorization
     >;
+    /**
+     * Bounded per-role member counts from a single GROUP BY query. Never
+     * loads the member list; total membership can exceed any page size.
+     */
+    readonly memberCounts: (
+      actor: Actor,
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly roleId: string; readonly memberCount: number }>,
+      InsufficientPermissions | DatabaseError,
+      Database | RoleRepository | Authorization
+    >;
     readonly createRole: (
       actor: Actor,
       input: RoleInput,
@@ -210,6 +221,18 @@ export const RoleServiceLive = Layer.succeed(RoleService, {
         ),
         vocabulary: PERMISSION_KEYS,
       };
+    }),
+
+  memberCounts: (actor) =>
+    Effect.gen(function* () {
+      const authorization = yield* Authorization;
+      const repository = yield* RoleRepository;
+
+      yield* authorization.require(actor, { resource: "role", actions: ["read"] });
+
+      const rows = yield* repository.memberCounts();
+
+      return rows.map((row) => ({ roleId: row.role_id, memberCount: Number(row.member_count) }));
     }),
 
   createRole: (actor, input, audit) =>

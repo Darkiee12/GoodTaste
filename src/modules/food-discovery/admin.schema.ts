@@ -10,6 +10,23 @@ export const MAX_IMPORT_FILE_BYTES = 2_000_000;
 
 export const MAX_IMPORT_RECORDS = 100;
 
+/**
+ * Single source of truth for import-job lifecycle states, mirroring the
+ * database CHECK constraint (see V20261028_013). Route-level copies
+ * previously omitted "applying" (jobs claimed for crash-safe resume) and
+ * crashed on honest server data — always import this instead of
+ * redeclaring the union.
+ */
+export const importJobStatusSchema = z.enum([
+  "staged",
+  "validated",
+  "applying",
+  "applied",
+  "failed",
+]);
+
+export type ImportJobStatus = z.infer<typeof importJobStatusSchema>;
+
 const sourceIdSchema = z.enum(["manual", "partner", "community", "other"]);
 
 export type ImportSourceId = z.infer<typeof sourceIdSchema>;

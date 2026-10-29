@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 import { createEarthTexture } from "@/components/home/globe/earth-texture";
-import { FOOD_LOCATIONS } from "@/components/home/globe/food-locations";
+import type { FoodLocation } from "@/components/home/globe/food-locations";
 import {
   GLOBE_RADIUS,
   Longitude,
@@ -12,6 +12,7 @@ import {
   spinForLongitude,
   type GlobeLayout,
 } from "@/components/home/globe/geo-utils";
+import { createPinTexture } from "@/components/home/globe/pin-sprite";
 
 const OPENING_LONGITUDE = Longitude(105.8542);
 
@@ -62,15 +63,17 @@ export type GlobeAssets = {
   texture: THREE.CanvasTexture;
   atmosphere: THREE.ShaderMaterial;
   atmosphereGlow: THREE.ShaderMaterial;
+  pinTexture: THREE.CanvasTexture;
   dotPositions: Float32Array;
 };
 
 /**
  * Globe scene assets and their lifecycles: viewport layout, earth texture,
- * atmosphere material, and dish-dot positions. Must run inside the Canvas;
- * the scene component only places what this returns.
+ * atmosphere material, the pin sprite, and dish-pin positions for the
+ * currently visible dish subset. Must run inside the Canvas; the scene
+ * component only places what this returns.
  */
-export function useGlobeAssets(): GlobeAssets {
+export function useGlobeAssets(visibleDishes: Array<FoodLocation>): GlobeAssets {
   const size = useThree((state) => state.size);
   const layout = useMemo(() => computeGlobeLayout(size), [size]);
   const halfWidth = layout.frustumHalfHeight * (size.width / size.height);
@@ -133,10 +136,10 @@ export function useGlobeAssets(): GlobeAssets {
   );
 
   const dotPositions = useMemo(() => {
-    const positions = new Float32Array(FOOD_LOCATIONS.length * 3);
+    const positions = new Float32Array(visibleDishes.length * 3);
     const point = new THREE.Vector3();
 
-    for (const [index, dish] of FOOD_LOCATIONS.entries()) {
+    for (const [index, dish] of visibleDishes.entries()) {
       latLonToVec3(dish.latitude, dish.longitude, GLOBE_RADIUS * 1.006, point);
       positions[index * 3] = point.x;
       positions[index * 3 + 1] = point.y;
@@ -144,7 +147,25 @@ export function useGlobeAssets(): GlobeAssets {
     }
 
     return positions;
-  }, []);
+  }, [visibleDishes]);
 
-  return { layout, halfWidth, initialSpin, texture, atmosphere, atmosphereGlow, dotPositions };
+  const pinTexture = useMemo(() => createPinTexture(), []);
+
+  useEffect(
+    () => () => {
+      pinTexture.dispose();
+    },
+    [pinTexture],
+  );
+
+  return {
+    layout,
+    halfWidth,
+    initialSpin,
+    texture,
+    atmosphere,
+    atmosphereGlow,
+    pinTexture,
+    dotPositions,
+  };
 }

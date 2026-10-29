@@ -1,7 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { CircleUserRound, ChevronDownIcon } from "lucide-react";
-import { useState } from "react";
+import {
+  BookmarkIcon,
+  ChevronDownIcon,
+  CircleUserRound,
+  LogOutIcon,
+  ShieldCheckIcon,
+  UserRoundIcon,
+} from "lucide-react";
 
 import {
   DropdownMenu,
@@ -20,146 +26,121 @@ const rootRoute = getRouteApi("__root__");
 
 /**
  * Single account entry point in the site header. Guests find sign-in and
- * account creation here; members see their name plus saved dishes, settings,
- * admin access (when server-verified), and sign-out. Language lives in the
- * standalone globe menu beside this button.
+ * account creation here. Members get a small menu with exactly three tabs —
+ * saved dishes, account, security — and nothing else: no personal details,
+ * no admin links (Feast Lab lives in the navbar for those who hold it), no
+ * sign-out (it lives on the account page next to the danger it guards).
+ * Language lives in the standalone globe menu beside this button.
  */
 export function AccountMenu() {
   const { lang } = rootRoute.useSearch();
-  const { session, isAdmin } = rootRoute.useRouteContext();
+  const { session } = rootRoute.useRouteContext();
   const copy = messagesFor(lang);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutFailed, setSignOutFailed] = useState(false);
 
   const signedIn = session.status === "signed-in";
 
   const signOut = (): void => {
-    if (signingOut) {
-      return;
-    }
-
-    setSigningOut(true);
-    setSignOutFailed(false);
-
     void signOutFn().then(
       () => {
         clearFavoriteCaches(queryClient);
         void navigate({ to: "/", search: { lang } });
       },
       () => {
-        setSigningOut(false);
-        setSignOutFailed(true);
+        void navigate({ to: "/", search: { lang } });
       },
     );
   };
 
-  return (
-    <DropdownMenu
-      modal={false}
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
+  if (signedIn) {
+    return (
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={copy.authAccount}
+            title={copy.authAccount}
+            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-muted-on-dark hover:border-white/25 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
+          >
+            <CircleUserRound aria-hidden="true" className="size-5" />
+            <span className="max-w-28 truncate">{session.user.name}</span>
+            <ChevronDownIcon aria-hidden="true" className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuItem asChild>
+              <Link to="/saved" search={{ lang }}>
+                <BookmarkIcon aria-hidden="true" className="size-4" />
+                {copy.savedTitle}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings/account" search={{ lang }}>
+                <UserRoundIcon aria-hidden="true" className="size-4" />
+                {copy.authAccount}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings/security" search={{ lang }}>
+                <ShieldCheckIcon aria-hidden="true" className="size-4" />
+                {copy.authSecurity}
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                signOut();
+              }}
+            >
+              <LogOutIcon aria-hidden="true" className="size-4" />
+              {copy.authSignOut}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
-        if (!next) {
-          setSignOutFailed(false);
-        }
-      }}
-    >
+  return (
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={signedIn ? undefined : copy.accountMenu}
-          title={signedIn ? undefined : copy.accountMenu}
+          aria-label={copy.accountMenu}
+          title={copy.accountMenu}
           className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-muted-on-dark hover:border-white/25 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
         >
           <CircleUserRound aria-hidden="true" className="size-5" />
-          {signedIn ? <span className="max-w-28 truncate">{session.user.name}</span> : null}
-          <ChevronDownIcon aria-hidden="true" className="size-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {signedIn ? (
+        {session.status === "unavailable" ? (
           <>
             <DropdownMenuLabel>
-              <span className="block max-w-56 truncate font-bold">{session.user.name}</span>
-              <span className="block max-w-56 truncate text-xs font-normal text-muted-foreground">
-                {session.user.email}
+              <span role="note" className="text-xs font-semibold">
+                {copy.saveDishPaused}
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <Link to="/saved" search={{ lang }}>
-                  {copy.savedTitle}
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/settings/account" search={{ lang }}>
-                  {copy.authAccount}
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/settings/security" search={{ lang }}>
-                  {copy.authSecurity}
-                </Link>
-              </DropdownMenuItem>
-              {isAdmin ? (
-                <DropdownMenuItem asChild>
-                  <Link to="/admin" search={{ lang }} className="text-mango">
-                    {copy.adminWorkspace}
-                  </Link>
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  event.preventDefault();
-                  signOut();
-                }}
-                disabled={signingOut}
-              >
-                {signingOut ? copy.settingsSigningOut : copy.authSignOut}
-              </DropdownMenuItem>
-              {signOutFailed && !signingOut ? (
-                <DropdownMenuItem disabled>
-                  <span role="alert" className="text-xs font-semibold text-danger">
-                    {copy.settingsSignOutFailed} {copy.commonRetry}
-                  </span>
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuGroup>
           </>
-        ) : (
-          <>
-            {session.status === "unavailable" ? (
-              <>
-                <DropdownMenuLabel>
-                  <span role="note" className="text-xs font-semibold">
-                    {copy.saveDishPaused}
-                  </span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <Link to="/sign-in" search={{ lang, returnTo: "/" }}>
-                  {copy.authSignIn}
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/sign-up" search={{ lang, returnTo: "/" }}>
-                  {copy.authSignUp}
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </>
-        )}
+        ) : null}
+        <DropdownMenuGroup>
+          <DropdownMenuItem asChild>
+            <Link to="/sign-in" search={{ lang, returnTo: "/" }}>
+              {copy.authSignIn}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to="/sign-up" search={{ lang, returnTo: "/" }}>
+              {copy.authSignUp}
+            </Link>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

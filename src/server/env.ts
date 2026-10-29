@@ -22,6 +22,11 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1, "SMTP_PASSWORD is required"),
   EMAIL_FROM: z.string().min(1, "EMAIL_FROM is required"),
   TRUSTED_PROXIES: z.string().default(""),
+  // Optional owner bootstrap: when set, the account holding this address
+  // receives the owner role right after signup (all creation paths). Leave
+  // unset and the first signup stays a plain member; ownership is then
+  // granted out of band with SQL.
+  OWNER_EMAIL: z.string().email("OWNER_EMAIL must be a valid email address").optional(),
   // Optional Muse ranking integration. Every MODEL_* field stays optional
   // in both input and output so startup never depends on AI configuration
   // and existing ServerEnv literals keep compiling; resolveRankingConfig()

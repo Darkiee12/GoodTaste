@@ -1,13 +1,15 @@
 import { OrthographicCamera } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 
 import { FOOD_LOCATIONS, type FoodLocation } from "@/components/home/globe/food-locations";
 import {
   AXIAL_TILT_RADIANS,
+  FACING_COSINE_THRESHOLD,
   GLOBE_RADIUS,
   SPIN_ROLL_RADIANS,
+  facingCosine,
   latLonToVec3,
   type GlobeOverlayBridge,
 } from "@/components/home/globe/geo-utils";
@@ -15,13 +17,34 @@ import { GlobeAnimator } from "@/components/home/globe/globe-animator";
 import { GlobeFallback } from "@/components/home/globe/globe-fallback";
 import { GlobeFoodOverlay } from "@/components/home/globe/globe-food-overlay";
 import { useGlobeAssets } from "@/components/home/globe/use-globe-assets";
-import { useGlobeDishes } from "@/components/home/globe/use-globe-dishes";
+import {
+  useGlobeDishes,
+  type GlobeHoverState,
+  type GlobePopupNodes,
+} from "@/components/home/globe/use-globe-dishes";
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { Locale, Messages } from "@/shared/i18n";
 
-const DOT_SIZE_PX = 9;
+const PIN_SIZE_PX = 14;
 const RING_SCALE = 1.002;
 const GLOW_SCALE = 1.16;
+
+/**
+ * Raycast hit radius around each pin in world units. The globe radius is 1,
+ * so this is a generous hover target without covering neighboring cities.
+ */
+const PIN_HOVER_THRESHOLD = 0.045;
+
+/**
+ * Module-level raycaster write: the threshold lives outside React state, so
+ * this helper keeps the hook-arg mutation out of the component body.
+ */
+function applyPointsThreshold(raycaster: THREE.Raycaster, value: number): number {
+  const previous = raycaster.params.Points.threshold;
+  raycaster.params.Points.threshold = value;
+
+  return previous;
+}
 
 function DishAnchor({
   dish,
@@ -47,6 +70,21 @@ function DishAnchor({
       }}
     />
   );
+}
+
+/** Generous pin hover targets: the default Points threshold covers too much. */
+function PinRaycastThreshold() {
+  const raycaster = useThree((state) => state.raycaster);
+
+  useEffect(() => {
+    const previous = applyPointsThreshold(raycaster, PIN_HOVER_THRESHOLD);
+
+    return () => {
+      applyPointsThreshold(raycaster, previous);
+    };
+  }, [raycaster]);
+
+  return null;
 }
 
 function FrameloopGate() {
@@ -106,18 +144,117 @@ function FirstFrameReady({ onReady }: { onReady: () => void }) {
 
 function GlobeWorld({
   bridgeRef,
-  onActiveDish,
+  popupsRef,
+  hoverRef,
+  onActiveDishes,
+  onHoverDish,
+  onOpenPreview,
   onReady,
 }: {
   bridgeRef: RefObject<GlobeOverlayBridge>;
-  onActiveDish: (id: string | null) => void;
+  popupsRef: RefObject<GlobePopupNodes>;
+  hoverRef: RefObject<GlobeHoverState>;
+  onActiveDishes: (ids: Array<string>) => void;
+  onHoverDish: (id: string | null) => void;
+  onOpenPreview: (dish: FoodLocation) => void;
   onReady: () => void;
 }) {
-  const { layout, halfWidth, initialSpin, texture, atmosphere, atmosphereGlow, dotPositions } =
-    useGlobeAssets();
+  // Every catalog anchor renders a pin: no sampling cap. The pin layer
+  // and the popup scheduler share the full set; all anchors stay mounted
+  // so an open popup never loses its anchor.
+  const visibleDishes: Array<FoodLocation> = FOOD_LOCATIONS;
+
+  const {
+    layout,
+    halfWidth,
+    initialSpin,
+    texture,
+    atmosphere,
+    atmosphereGlow,
+    pinTexture,
+    dotPositions,
+  } = useGlobeAssets(visibleDishes);
 
   const spinRef = useRef<THREE.Group | null>(null);
   const anchorsRef = useRef<Map<string, THREE.Object3D | null>>(new Map());
+  const camera = useThree((state) => state.camera);
+
+  const facingTemps = useMemo(
+    () => ({ world: new THREE.Vector3(), center: new THREE.Vector3() }),
+    [],
+  );
+
+  // Raycast hits ignore globe occlusion, so only front-facing pins answer
+  // hover and tap. Backside hits clear the hover instead of pinning a popup
+  // the animator would immediately hide.
+  const dishFacesCamera = useCallback(
+    (id: string): boolean => {
+      const anchor = anchorsRef.current.get(id);
+
+      if (!anchor) {
+        return false;
+      }
+
+      anchor.getWorldPosition(facingTemps.world);
+      facingTemps.center.set(layout.centerX, layout.centerY, 0);
+
+      return (
+        facingCosine(facingTemps.world, facingTemps.center, camera.position) >
+        FACING_COSINE_THRESHOLD
+      );
+    },
+    [camera, facingTemps, layout],
+  );
+
+  const handlePointsMove = useCallback(
+    (event: ThreeEvent<PointerEvent>) => {
+      if (event.nativeEvent.pointerType === "touch") {
+        return;
+      }
+
+      const index = event.index;
+
+      if (index === undefined) {
+        onHoverDish(null);
+
+        return;
+      }
+
+      const dish = FOOD_LOCATIONS[index];
+
+      if (!dish || !dishFacesCamera(dish.id)) {
+        onHoverDish(null);
+
+        return;
+      }
+
+      onHoverDish(dish.id);
+    },
+    [dishFacesCamera, onHoverDish],
+  );
+
+  const handlePointsOut = useCallback(() => {
+    onHoverDish(null);
+  }, [onHoverDish]);
+
+  const handlePointsClick = useCallback(
+    (event: ThreeEvent<PointerEvent>) => {
+      const index = event.index;
+
+      if (index === undefined) {
+        return;
+      }
+
+      const dish = FOOD_LOCATIONS[index];
+
+      if (!dish || !dishFacesCamera(dish.id)) {
+        return;
+      }
+
+      onOpenPreview(dish);
+    },
+    [dishFacesCamera, onOpenPreview],
+  );
 
   return (
     <>
@@ -144,16 +281,21 @@ function GlobeWorld({
                 <meshStandardMaterial map={texture} roughness={1} metalness={0} />
               </mesh>
 
-              <points frustumCulled={false}>
+              <points
+                frustumCulled={false}
+                onPointerMove={handlePointsMove}
+                onPointerOut={handlePointsOut}
+                onClick={handlePointsClick}
+              >
                 <bufferGeometry>
                   <bufferAttribute attach="attributes-position" args={[dotPositions, 3]} />
                 </bufferGeometry>
                 <pointsMaterial
-                  size={DOT_SIZE_PX}
+                  size={PIN_SIZE_PX}
                   sizeAttenuation={false}
-                  color="#ffd97a"
+                  map={pinTexture}
                   transparent
-                  opacity={0.95}
+                  alphaTest={0.4}
                   depthWrite={false}
                 />
               </points>
@@ -178,9 +320,13 @@ function GlobeWorld({
         spinRef={spinRef}
         anchorsRef={anchorsRef}
         bridgeRef={bridgeRef}
-        onActiveDish={onActiveDish}
+        popupsRef={popupsRef}
+        hoverRef={hoverRef}
+        visibleDishes={visibleDishes}
+        onActiveDishes={onActiveDishes}
         layout={layout}
       />
+      <PinRaycastThreshold />
       <FirstFrameReady onReady={onReady} />
       <FrameloopGate />
     </>
@@ -200,15 +346,18 @@ export function GlobeScene({
   const reducedMotion = usePrefersReducedMotion();
 
   const {
-    active,
+    actives,
     preview,
     announcement,
-    handleActiveDish,
+    hoverRef,
+    handleActiveDishes,
+    handleHoverDish,
     handleOpenPreview,
     handleClosePreview,
     handleShowAnother,
   } = useGlobeDishes(bridgeRef, copy);
 
+  const popupsRef = useRef<GlobePopupNodes>(new Map());
   const [ready, setReady] = useState(false);
   const [showStatic, setShowStatic] = useState(true);
 
@@ -257,7 +406,15 @@ export function GlobeScene({
           gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
           camera={{ position: [0, 0, 10], near: 0.1, far: 60 }}
         >
-          <GlobeWorld bridgeRef={bridgeRef} onActiveDish={handleActiveDish} onReady={handleReady} />
+          <GlobeWorld
+            bridgeRef={bridgeRef}
+            popupsRef={popupsRef}
+            hoverRef={hoverRef}
+            onActiveDishes={handleActiveDishes}
+            onHoverDish={handleHoverDish}
+            onOpenPreview={handleOpenPreview}
+            onReady={handleReady}
+          />
         </Canvas>
       </div>
 
@@ -270,12 +427,14 @@ export function GlobeScene({
         copy={copy}
         lang={lang}
         bridgeRef={bridgeRef}
-        active={active}
+        popupsRef={popupsRef}
+        actives={actives}
         preview={preview}
         announcement={announcement}
         onOpenPreview={handleOpenPreview}
         onClosePreview={handleClosePreview}
         onShowAnother={handleShowAnother}
+        onHoverDish={handleHoverDish}
       />
     </>
   );

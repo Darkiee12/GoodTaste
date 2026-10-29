@@ -8,6 +8,7 @@ import {
   dishSearchQuerySchema,
   localeSchema,
   nameSearchQuerySchema,
+  carouselQuerySchema,
   placeQuerySchema,
   recommendationQuerySchema,
   relatedQuerySchema,
@@ -217,6 +218,50 @@ export const listCountriesFn = createServerFn({ method: "GET" })
       "server-fn",
     );
   });
+
+/**
+ * Single-round-trip local carousel projection: resolves dishes by visitor
+ * coordinate (nearest associated places first) or by country filter, then
+ * returns full cards with names, descriptions, ingredients, regions, and
+ * image references. No per-card fetch.
+ */
+export const getLocalCarouselFn = createServerFn({ method: "GET" })
+  .validator(carouselQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, { DishService }, _catalog, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(DishService, (service) =>
+          service.getLocalCarousel({
+            country: data.country,
+            latitude: data.latitude,
+            limit: data.limit,
+            locale: data.locale,
+            longitude: data.longitude,
+            worldwide: data.worldwide,
+          }),
+        ),
+      ),
+      "fn/dishes/local-carousel",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
+ * Coarse visitor region for the local-discovery carousel: Cloudflare
+ * `cf-*` headers when deployed behind the CDN, nulls locally. The country
+ * code filters the public catalog; nothing here identifies a person.
+ */
+export const getVisitorRegionFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { getVisitorRegionFromHeaders } = await import("@/server/geo/visitor-region");
+  const server = await import("@tanstack/react-start/server");
+
+  return getVisitorRegionFromHeaders(server.getRequestHeaders());
+});
 
 export const listCuisinesFn = createServerFn({ method: "GET" })
   .validator(z.object({ locale: localeSchema.optional() }))
