@@ -1,0 +1,39 @@
+# LOCAL DEVELOPMENT ONLY. Never deploy this file as production.
+# Full-stack dev loop: Vite dev server in a container, hot-reloading from a
+# bind mount, against the Compose PostgreSQL + one-shot Flyway migrator.
+#
+# Usage (repository root):
+#   bun run dev:docker
+#
+# Only the application port is published, bound to loopback. PostgreSQL,
+# Garage, and the migrator stay on the internal Compose network.
+# The database URL is rewritten to the internal `postgres:5432` address;
+# every other variable comes from the repository-root `.env` unchanged.
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.dev
+    image: feastjourney-app:dev
+    env_file:
+      - path: ../.env
+        required: true
+    environment:
+      # Inside the Compose network the database is `postgres:5432`, not the
+      # host-tooling loopback address from `.env`. Keep passwords free of
+      # URL-special characters (`@`, `:`, `/`) or percent-encode them here.
+      DATABASE_URL: postgres://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${APP_DEV_PORT:-3000}:3000"
+    volumes:
+      - ..:/app
+      - app_node_modules:/app/node_modules
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  app_node_modules:

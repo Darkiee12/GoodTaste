@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
+import { getRouteApi, Link } from "@tanstack/react-router";
 import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
@@ -20,15 +20,9 @@ import {
   statusForDish,
   useFavoriteStatus,
 } from "@/modules/user/components/save-dish-button";
-import { localeSearchSchema, messagesFor, type Messages } from "@/shared/i18n";
+import { messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
-
-export const Route = createFileRoute("/recommend")({
-  validateSearch: localeSearchSchema,
-  ssr: false,
-  component: Recommend,
-});
 
 /** UI mirror of the shared meal vocabulary; undefined is never a meal. */
 export const mealSchema = z.enum(MEAL_OCCASIONS);
@@ -308,9 +302,9 @@ const journeySnapshotSchema = z.object({
 type JourneySnapshot = z.infer<typeof journeySnapshotSchema>;
 
 // Module-scoped, client-only: the SPA keeps this module alive across
-// client-side navigation, so dish detail visits remounting this route restore
-// from here. Server rendering never touches it (window guard), so concurrent
-// requests cannot share state.
+// client-side navigation, so dish detail visits unmounting this section
+// restore from here on back-navigation. Server rendering never touches it
+// (window guard), so concurrent requests cannot share state.
 let journeyCache: JourneySnapshot | null = null;
 
 const readJourneySnapshot = (): JourneySnapshot | null => {
@@ -451,7 +445,14 @@ const QUIZ_STEPS = 5;
 
 type RecommendResult = Awaited<ReturnType<typeof recommendDishesFn>>;
 
-function Recommend() {
+/**
+ * Homepage recommendation section. Previously the standalone `/recommend`
+ * route; now embedded so guests reach a valid recommendation in one scroll.
+ * Reads locale and session from the root route, so it mounts anywhere under
+ * the root layout. Wrapped in `ClientOnly` by callers: quiz state
+ * initializes from tab storage, which must never run during SSR.
+ */
+export function RecommendSection() {
   const { lang } = rootRoute.useSearch();
   const { session } = rootRoute.useRouteContext();
   const copy = messagesFor(lang);
@@ -619,6 +620,37 @@ function Recommend() {
     setStepIndex(stepIndex - 1);
   };
 
+  /**
+   * Auto-advance after an explicit answer. Radio activation runs onClick
+   * (pointer clicks plus keyboard Space/Enter) rather than onChange so
+   * arrow-key exploration never yanks keyboard users to the next step;
+   * the Continue button remains as an explicit path either way.
+   */
+  const advanceStep = (): void => {
+    setStepError(null);
+    setStepIndex(stepIndex + 1);
+  };
+
+  const advanceRegion = (next: QuizDraft): void => {
+    const regionError = validateRegion(
+      next.regionMode,
+      next.cuisine,
+      next.country,
+      copy,
+      catalogSlugs,
+    );
+
+    if (regionError !== null) {
+      setDraft(next);
+      setStepError(regionError);
+
+      return;
+    }
+
+    setDraft(next);
+    advanceStep();
+  };
+
   const findDishes = (): void => {
     const lengthError = termLengthError(draft.avoidRaw, draft.allergiesRaw, copy);
 
@@ -731,494 +763,518 @@ function Recommend() {
   const resultFavorites = useFavoriteStatus(resultIds, resultUserId);
 
   return (
-    <div
-      className="mx-auto w-full max-w-2xl px-5 pt-10"
+    <section
+      id="recommend"
+      aria-labelledby="recommend-heading"
+      className="mx-auto w-full max-w-6xl scroll-mt-20 px-5 pt-10"
       style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
     >
-      <p className="mb-4 text-sm font-semibold">
-        <Link
-          to="/"
-          search={{ lang }}
-          className="text-brand-blue-hover underline underline-offset-4"
-        >
-          FeastJourney
-        </Link>
-      </p>
+      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div className="lg:sticky lg:top-24">
+          <h1
+            id="recommend-heading"
+            className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance"
+          >
+            {copy.recTitle}
+          </h1>
+          <p className="mt-3 max-w-[60ch] text-lg text-muted">{copy.recIntro}</p>
 
-      <h1 className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance">
-        {copy.recTitle}
-      </h1>
-      <p className="mt-3 max-w-[60ch] text-lg text-muted">{copy.recIntro}</p>
-
-      <div className="mt-6 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={surprise}
-          disabled={recommend.isPending}
-          className="inline-flex min-h-12 cursor-pointer items-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:-translate-y-px hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-        >
-          <SparklesIcon aria-hidden="true" className="size-5" /> {copy.recSurprise}
-        </button>
-        <button
-          type="button"
-          onClick={findDishes}
-          disabled={recommend.isPending}
-          className="inline-flex min-h-12 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-6 text-base font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70"
-        >
-          {copy.recQuick}
-        </button>
-      </div>
-      <p className="mt-2 max-w-[60ch] text-sm text-muted">{copy.recSurpriseNote}</p>
-      <p className="mt-1 max-w-[60ch] text-sm text-muted">{copy.recQuickNote}</p>
-
-      <p
-        aria-live="polite"
-        className={
-          showResults ? "sr-only" : "mt-8 text-sm font-bold tracking-wide text-muted uppercase"
-        }
-      >
-        {showResults ? copy.recResultsHeading : stepLabel}
-      </p>
-
-      {showResults ? (
-        <section aria-labelledby="rec-results-heading" className="mt-3">
-          <h2 id="rec-results-heading" className="font-display text-3xl tracking-wide">
-            {copy.recResultsHeading}
-          </h2>
-          <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4">
-            {renderOutcome(copy)}
-          </div>
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={backToQuiz}
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+              onClick={surprise}
+              disabled={recommend.isPending}
+              className="inline-flex min-h-12 cursor-pointer items-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:-translate-y-px hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
-              {copy.recAdjust}
+              <SparklesIcon aria-hidden="true" className="size-5" /> {copy.recSurprise}
             </button>
             <button
               type="button"
-              onClick={startOver}
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+              onClick={findDishes}
+              disabled={recommend.isPending}
+              className="inline-flex min-h-12 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-6 text-base font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70"
             >
-              {copy.recStartOver}
+              {copy.recQuick}
             </button>
           </div>
-        </section>
-      ) : (
-        <section aria-labelledby="rec-step-heading" className="mt-3">
-          <h2 id="rec-step-heading" className="sr-only">
-            {stepLabel}
-          </h2>
+        </div>
+        <div>
+          <p
+            aria-live="polite"
+            className={
+              showResults ? "sr-only" : "text-sm font-bold tracking-wide text-muted uppercase"
+            }
+          >
+            {showResults ? copy.recResultsHeading : stepLabel}
+          </p>
 
-          {stepIndex === 0 ? (
-            <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
-              <legend className="font-display px-2 text-2xl tracking-wide">
-                {copy.recMealLegend}
-              </legend>
-              <p className="mb-4 text-sm text-muted">{copy.recMealHint}</p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {mealOptions(copy).map((option) => (
-                  <label
-                    key={option.value}
-                    className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition ${
-                      meal === option.value
-                        ? "border-ink bg-ink text-white"
-                        : "border-border-soft bg-white text-ink hover:border-food-orange"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="rec-meal"
-                      value={option.value}
-                      checked={meal === option.value}
-                      onChange={() => {
-                        setMeal(option.value);
-                      }}
-                      className="size-5 flex-none accent-food-orange-strong"
-                    />
-                    {option.label}
-                  </label>
-                ))}
+          {showResults ? (
+            <section aria-labelledby="rec-results-heading" className="mt-3">
+              <h2 id="rec-results-heading" className="font-display text-3xl tracking-wide">
+                {copy.recResultsHeading}
+              </h2>
+              <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4">
+                {renderOutcome(copy)}
               </div>
-            </fieldset>
-          ) : null}
-
-          {stepIndex === 1 ? (
-            <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
-              <legend className="font-display px-2 text-2xl tracking-wide">
-                {copy.recAvoidLegend}
-              </legend>
-              <p className="mb-4 text-sm text-muted">{copy.recAvoidHint}</p>
-              <div className="flex flex-col gap-5">
-                <div>
-                  <label htmlFor="rec-avoid" className="mb-2 block text-sm font-bold text-ink">
-                    {copy.recAvoidLabel}
-                  </label>
-                  <input
-                    id="rec-avoid"
-                    type="text"
-                    autoComplete="off"
-                    value={draft.avoidRaw}
-                    placeholder={copy.recAvoidPlaceholder}
-                    onChange={(event) => {
-                      setDraft({ ...draft, avoidRaw: event.target.value });
-                    }}
-                    className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="rec-allergies" className="mb-2 block text-sm font-bold text-ink">
-                    {copy.recAllergiesLabel}
-                  </label>
-                  <input
-                    id="rec-allergies"
-                    type="text"
-                    autoComplete="off"
-                    value={draft.allergiesRaw}
-                    placeholder={copy.recAllergiesPlaceholder}
-                    aria-describedby="rec-allergies-hint"
-                    onChange={(event) => {
-                      setDraft({ ...draft, allergiesRaw: event.target.value });
-                    }}
-                    className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
-                  />
-                  <p id="rec-allergies-hint" className="mt-2 text-sm text-muted">
-                    {copy.recAllergiesHint}
-                  </p>
-                </div>
-                <p className="rounded-xl border-2 border-mango bg-cream px-4 py-3 text-sm font-semibold text-ink">
-                  {copy.recStrictNote}
-                </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={backToQuiz}
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+                >
+                  {copy.recAdjust}
+                </button>
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                >
+                  {copy.recStartOver}
+                </button>
               </div>
-            </fieldset>
-          ) : null}
+            </section>
+          ) : (
+            <section aria-labelledby="rec-step-heading" className="mt-3">
+              <h2 id="rec-step-heading" className="sr-only">
+                {stepLabel}
+              </h2>
 
-          {stepIndex === 2 ? (
-            <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
-              <legend className="font-display px-2 text-2xl tracking-wide">
-                {copy.recRegionLegend}
-              </legend>
-              <p className="mb-4 text-sm text-muted">{copy.recRegionHint}</p>
-              <p className="mb-4 text-sm font-semibold text-ink">{copy.recRegionAssocNote}</p>
-              <div className="flex flex-col gap-3">
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                  <input
-                    type="radio"
-                    name="rec-region"
-                    value="anywhere"
-                    checked={draft.regionMode === "anywhere"}
-                    onChange={() => {
-                      setDraft({ ...draft, regionMode: "anywhere" });
-                    }}
-                    className="size-5 flex-none accent-food-orange-strong"
-                  />
-                  {copy.recRegionAnywhere}
-                </label>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                  <input
-                    type="radio"
-                    name="rec-region"
-                    value="cuisine"
-                    checked={draft.regionMode === "cuisine"}
-                    onChange={() => {
-                      setDraft({ ...draft, regionMode: "cuisine" });
-                    }}
-                    className="size-5 flex-none accent-food-orange-strong"
-                  />
-                  {copy.recRegionCuisine}
-                </label>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                  <input
-                    type="radio"
-                    name="rec-region"
-                    value="country"
-                    checked={draft.regionMode === "country"}
-                    onChange={() => {
-                      setDraft({ ...draft, regionMode: "country" });
-                    }}
-                    className="size-5 flex-none accent-food-orange-strong"
-                  />
-                  {copy.recRegionCountry}
-                </label>
-              </div>
-
-              {draft.regionMode === "cuisine" ? (
-                <div className="mt-5">
-                  <label htmlFor="rec-cuisine" className="mb-2 block text-sm font-bold text-ink">
-                    {copy.recCuisineLabel}
-                  </label>
-                  {cuisines.isPending ? (
-                    <output className="block text-sm text-muted">{copy.recCuisineLoading}</output>
-                  ) : null}
-                  {cuisines.isError ? (
-                    <div>
-                      <p
-                        role="alert"
-                        className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+              {stepIndex === 0 ? (
+                <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
+                  <legend className="font-display px-2 text-2xl tracking-wide">
+                    {copy.recMealLegend}
+                  </legend>
+                  <p className="mb-4 text-sm text-muted">{copy.recMealHint}</p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {mealOptions(copy).map((option) => (
+                      <label
+                        key={option.value}
+                        className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition ${
+                          meal === option.value
+                            ? "border-ink bg-ink text-white"
+                            : "border-border-soft bg-white text-ink hover:border-food-orange"
+                        }`}
                       >
-                        {copy.recCuisineLoadError}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void cuisines.refetch();
-                        }}
-                        className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
-                      >
-                        {copy.recRetry}
-                      </button>
-                    </div>
-                  ) : null}
-                  {cuisines.data !== undefined && cuisines.data.length === 0 ? (
-                    <output className="block text-sm text-muted">{copy.recCuisineEmpty}</output>
-                  ) : null}
-                  {cuisines.data !== undefined && cuisines.data.length > 0 ? (
-                    <select
-                      id="rec-cuisine"
-                      value={draft.cuisine}
-                      onChange={(event) => {
-                        setDraft({ ...draft, cuisine: event.target.value });
-                      }}
-                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
-                    >
-                      <option value="">{copy.recCuisineLabel}…</option>
-                      {cuisines.data.map((entry) => (
-                        <option key={entry.slug} value={entry.slug}>
-                          {entry.displayName ?? entry.slug}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
-                </div>
+                        <input
+                          type="radio"
+                          name="rec-meal"
+                          value={option.value}
+                          checked={meal === option.value}
+                          onChange={() => {
+                            setMeal(option.value);
+                          }}
+                          onClick={() => {
+                            setMeal(option.value);
+                            advanceStep();
+                          }}
+                          className="size-5 flex-none accent-food-orange-strong"
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
               ) : null}
 
-              {draft.regionMode === "country" ? (
-                <div className="mt-5">
-                  <label htmlFor="rec-country" className="mb-2 block text-sm font-bold text-ink">
-                    {copy.recCountryLabel}
-                  </label>
-                  {countries.isPending ? (
-                    <output className="block text-sm text-muted">{copy.recCuisineLoading}</output>
-                  ) : null}
-                  {countries.isError ? (
+              {stepIndex === 1 ? (
+                <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
+                  <legend className="font-display px-2 text-2xl tracking-wide">
+                    {copy.recAvoidLegend}
+                  </legend>
+                  <p className="mb-4 text-sm text-muted">{copy.recAvoidHint}</p>
+                  <div className="flex flex-col gap-5">
                     <div>
-                      <p
-                        role="alert"
-                        className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
-                      >
-                        {copy.recCuisineLoadError}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void countries.refetch();
+                      <label htmlFor="rec-avoid" className="mb-2 block text-sm font-bold text-ink">
+                        {copy.recAvoidLabel}
+                      </label>
+                      <input
+                        id="rec-avoid"
+                        type="text"
+                        autoComplete="off"
+                        value={draft.avoidRaw}
+                        placeholder={copy.recAvoidPlaceholder}
+                        onChange={(event) => {
+                          setDraft({ ...draft, avoidRaw: event.target.value });
                         }}
-                        className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
-                      >
-                        {copy.recRetry}
-                      </button>
+                        className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
+                      />
                     </div>
-                  ) : null}
-                  {countries.data !== undefined ? (
-                    <select
-                      id="rec-country"
-                      value={draft.country}
-                      onChange={(event) => {
-                        setDraft({ ...draft, country: event.target.value });
-                      }}
-                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
-                    >
-                      <option value="">{copy.recCountryPlaceholder}</option>
-                      {countryOptions.map((entry) => (
-                        <option key={entry.code} value={entry.code}>
-                          {entry.label} · {entry.code}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
-                </div>
-              ) : null}
-            </fieldset>
-          ) : null}
-
-          {stepIndex === 3 ? (
-            <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
-              <legend className="font-display px-2 text-2xl tracking-wide">
-                {copy.recMoodLegend}
-              </legend>
-              <p className="mb-4 text-sm text-muted">{copy.recMoodHint}</p>
-              <div className="grid grid-cols-2 gap-3">
-                {moodOptions(copy).map((option) => (
-                  <label
-                    key={option.value}
-                    className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition ${
-                      mood === option.value
-                        ? "border-ink bg-ink text-white"
-                        : "border-border-soft bg-white text-ink hover:border-food-orange"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="rec-mood"
-                      value={option.value}
-                      checked={mood === option.value}
-                      onChange={() => {
-                        setMood(option.value);
-                      }}
-                      className="size-5 flex-none accent-food-orange-strong"
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          ) : null}
-
-          {stepIndex === 4 ? (
-            <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
-              <legend className="font-display px-2 text-2xl tracking-wide">
-                {copy.recReviewLegend}
-              </legend>
-              <p className="mb-4 text-sm text-muted">{copy.recReviewHint}</p>
-              <dl className="flex flex-col gap-3 text-sm">
-                <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewMeal}</dt>
-                  <dd className="text-muted">{mealLabel(meal, copy)}</dd>
-                </div>
-                <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewAvoid}</dt>
-                  <dd className="text-muted">{orAny(draft.avoidRaw, copy)}</dd>
-                </div>
-                <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewAllergies}</dt>
-                  <dd className="text-muted">{orAny(draft.allergiesRaw, copy)}</dd>
-                </div>
-                <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewRegionAssoc}</dt>
-                  <dd className="text-muted">{regionLabel(draft, copy)}</dd>
-                </div>
-                <div className="flex gap-3">
-                  <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewMood}</dt>
-                  <dd className="text-muted">{moodLabel(mood, copy)}</dd>
-                </div>
-              </dl>
-              <label className="mt-5 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-food-orange-strong">
-                <input
-                  type="checkbox"
-                  checked={draft.remember}
-                  onChange={(event) => {
-                    setDraft({ ...draft, remember: event.target.checked });
-                  }}
-                  className="mt-0.5 size-5 flex-none accent-food-orange-strong"
-                />
-                <span>
-                  {copy.recRemember}
-                  <span className="mt-1 block text-xs font-normal text-muted">
-                    {copy.recRememberHint}
-                  </span>
-                </span>
-              </label>
-              {hasSaved ? (
-                <div className="mt-4 rounded-2xl border-2 border-border-soft px-4 py-3">
-                  {confirmClear ? (
                     <div>
-                      <p className="text-sm font-bold text-ink">{copy.recClearPrefsConfirm}</p>
-                      <div className="mt-3 flex flex-wrap gap-3">
-                        <button
-                          type="button"
-                          onClick={clearSaved}
-                          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-danger bg-white px-5 text-sm font-bold text-danger transition hover:bg-danger hover:text-white"
+                      <label
+                        htmlFor="rec-allergies"
+                        className="mb-2 block text-sm font-bold text-ink"
+                      >
+                        {copy.recAllergiesLabel}
+                      </label>
+                      <input
+                        id="rec-allergies"
+                        type="text"
+                        autoComplete="off"
+                        value={draft.allergiesRaw}
+                        placeholder={copy.recAllergiesPlaceholder}
+                        aria-describedby="rec-allergies-hint"
+                        onChange={(event) => {
+                          setDraft({ ...draft, allergiesRaw: event.target.value });
+                        }}
+                        className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
+                      />
+                      <p id="rec-allergies-hint" className="mt-2 text-sm text-muted">
+                        {copy.recAllergiesHint}
+                      </p>
+                    </div>
+                    <p className="rounded-xl border-2 border-mango bg-cream px-4 py-3 text-sm font-semibold text-ink">
+                      {copy.recStrictNote}
+                    </p>
+                  </div>
+                </fieldset>
+              ) : null}
+
+              {stepIndex === 2 ? (
+                <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
+                  <legend className="font-display px-2 text-2xl tracking-wide">
+                    {copy.recRegionLegend}
+                  </legend>
+                  <p className="mb-4 text-sm text-muted">{copy.recRegionHint}</p>
+                  <p className="mb-4 text-sm font-semibold text-ink">{copy.recRegionAssocNote}</p>
+                  <div className="flex flex-col gap-3">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                      <input
+                        type="radio"
+                        name="rec-region"
+                        value="anywhere"
+                        checked={draft.regionMode === "anywhere"}
+                        onChange={() => {
+                          setDraft({ ...draft, regionMode: "anywhere" });
+                        }}
+                        onClick={() => {
+                          advanceRegion({ ...draft, regionMode: "anywhere" });
+                        }}
+                        className="size-5 flex-none accent-food-orange-strong"
+                      />
+                      {copy.recRegionAnywhere}
+                    </label>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                      <input
+                        type="radio"
+                        name="rec-region"
+                        value="cuisine"
+                        checked={draft.regionMode === "cuisine"}
+                        onChange={() => {
+                          setDraft({ ...draft, regionMode: "cuisine" });
+                        }}
+                        className="size-5 flex-none accent-food-orange-strong"
+                      />
+                      {copy.recRegionCuisine}
+                    </label>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                      <input
+                        type="radio"
+                        name="rec-region"
+                        value="country"
+                        checked={draft.regionMode === "country"}
+                        onChange={() => {
+                          setDraft({ ...draft, regionMode: "country" });
+                        }}
+                        className="size-5 flex-none accent-food-orange-strong"
+                      />
+                      {copy.recRegionCountry}
+                    </label>
+                  </div>
+
+                  {draft.regionMode === "cuisine" ? (
+                    <div className="mt-5">
+                      <label
+                        htmlFor="rec-cuisine"
+                        className="mb-2 block text-sm font-bold text-ink"
+                      >
+                        {copy.recCuisineLabel}
+                      </label>
+                      {cuisines.isPending ? (
+                        <output className="block text-sm text-muted">
+                          {copy.recCuisineLoading}
+                        </output>
+                      ) : null}
+                      {cuisines.isError ? (
+                        <div>
+                          <p
+                            role="alert"
+                            className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                          >
+                            {copy.recCuisineLoadError}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void cuisines.refetch();
+                            }}
+                            className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+                          >
+                            {copy.recRetry}
+                          </button>
+                        </div>
+                      ) : null}
+                      {cuisines.data !== undefined && cuisines.data.length === 0 ? (
+                        <output className="block text-sm text-muted">{copy.recCuisineEmpty}</output>
+                      ) : null}
+                      {cuisines.data !== undefined && cuisines.data.length > 0 ? (
+                        <select
+                          id="rec-cuisine"
+                          value={draft.cuisine}
+                          onChange={(event) => {
+                            const next = event.target.value;
+
+                            if (next === "") {
+                              setDraft({ ...draft, cuisine: next });
+
+                              return;
+                            }
+
+                            advanceRegion({ ...draft, cuisine: next });
+                          }}
+                          className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
                         >
-                          {copy.recClearPrefsYes}
-                        </button>
+                          <option value="">{copy.recCuisineLabel}…</option>
+                          {cuisines.data.map((entry) => (
+                            <option key={entry.slug} value={entry.slug}>
+                              {entry.displayName ?? entry.slug}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {draft.regionMode === "country" ? (
+                    <div className="mt-5">
+                      <label
+                        htmlFor="rec-country"
+                        className="mb-2 block text-sm font-bold text-ink"
+                      >
+                        {copy.recCountryLabel}
+                      </label>
+                      {countries.isPending ? (
+                        <output className="block text-sm text-muted">
+                          {copy.recCuisineLoading}
+                        </output>
+                      ) : null}
+                      {countries.isError ? (
+                        <div>
+                          <p
+                            role="alert"
+                            className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                          >
+                            {copy.recCuisineLoadError}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void countries.refetch();
+                            }}
+                            className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+                          >
+                            {copy.recRetry}
+                          </button>
+                        </div>
+                      ) : null}
+                      {countries.data !== undefined ? (
+                        <select
+                          id="rec-country"
+                          value={draft.country}
+                          onChange={(event) => {
+                            const next = event.target.value;
+
+                            if (next === "") {
+                              setDraft({ ...draft, country: next });
+
+                              return;
+                            }
+
+                            advanceRegion({ ...draft, country: next });
+                          }}
+                          className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
+                        >
+                          <option value="">{copy.recCountryPlaceholder}</option>
+                          {countryOptions.map((entry) => (
+                            <option key={entry.code} value={entry.code}>
+                              {entry.label} · {entry.code}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </fieldset>
+              ) : null}
+
+              {stepIndex === 3 ? (
+                <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
+                  <legend className="font-display px-2 text-2xl tracking-wide">
+                    {copy.recMoodLegend}
+                  </legend>
+                  <p className="mb-4 text-sm text-muted">{copy.recMoodHint}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {moodOptions(copy).map((option) => (
+                      <label
+                        key={option.value}
+                        className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition ${
+                          mood === option.value
+                            ? "border-ink bg-ink text-white"
+                            : "border-border-soft bg-white text-ink hover:border-food-orange"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="rec-mood"
+                          value={option.value}
+                          checked={mood === option.value}
+                          onChange={() => {
+                            setMood(option.value);
+                          }}
+                          onClick={() => {
+                            setMood(option.value);
+                            advanceStep();
+                          }}
+                          className="size-5 flex-none accent-food-orange-strong"
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : null}
+
+              {stepIndex === 4 ? (
+                <fieldset className="rounded-3xl border-2 border-border-soft bg-white p-6 shadow-[0_12px_28px_rgba(194,65,12,0.08)]">
+                  <legend className="font-display px-2 text-2xl tracking-wide">
+                    {copy.recReviewLegend}
+                  </legend>
+                  <p className="mb-4 text-sm text-muted">{copy.recReviewHint}</p>
+                  <dl className="flex flex-col gap-3 text-sm">
+                    <div className="flex gap-3">
+                      <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewMeal}</dt>
+                      <dd className="text-muted">{mealLabel(meal, copy)}</dd>
+                    </div>
+                    <div className="flex gap-3">
+                      <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewAvoid}</dt>
+                      <dd className="text-muted">{orAny(draft.avoidRaw, copy)}</dd>
+                    </div>
+                    <div className="flex gap-3">
+                      <dt className="w-24 flex-none font-bold text-ink">
+                        {copy.recReviewAllergies}
+                      </dt>
+                      <dd className="text-muted">{orAny(draft.allergiesRaw, copy)}</dd>
+                    </div>
+                    <div className="flex gap-3">
+                      <dt className="w-24 flex-none font-bold text-ink">
+                        {copy.recReviewRegionAssoc}
+                      </dt>
+                      <dd className="text-muted">{regionLabel(draft, copy)}</dd>
+                    </div>
+                    <div className="flex gap-3">
+                      <dt className="w-24 flex-none font-bold text-ink">{copy.recReviewMood}</dt>
+                      <dd className="text-muted">{moodLabel(mood, copy)}</dd>
+                    </div>
+                  </dl>
+                  <label className="mt-5 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl border-2 border-border-soft px-4 py-3 text-sm font-bold has-checked:border-food-orange-strong">
+                    <input
+                      type="checkbox"
+                      checked={draft.remember}
+                      onChange={(event) => {
+                        setDraft({ ...draft, remember: event.target.checked });
+                      }}
+                      className="mt-0.5 size-5 flex-none accent-food-orange-strong"
+                    />
+                    <span>
+                      {copy.recRemember}
+                      <span className="mt-1 block text-xs font-normal text-muted">
+                        {copy.recRememberHint}
+                      </span>
+                    </span>
+                  </label>
+                  {hasSaved ? (
+                    <div className="mt-4 rounded-2xl border-2 border-border-soft px-4 py-3">
+                      {confirmClear ? (
+                        <div>
+                          <p className="text-sm font-bold text-ink">{copy.recClearPrefsConfirm}</p>
+                          <div className="mt-3 flex flex-wrap gap-3">
+                            <button
+                              type="button"
+                              onClick={clearSaved}
+                              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-danger bg-white px-5 text-sm font-bold text-danger transition hover:bg-danger hover:text-white"
+                            >
+                              {copy.recClearPrefsYes}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmClear(false);
+                              }}
+                              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                            >
+                              {copy.recClearPrefsNo}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => {
-                            setConfirmClear(false);
+                            setConfirmClear(true);
                           }}
+                          aria-expanded="false"
                           className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
                         >
-                          {copy.recClearPrefsNo}
+                          {copy.recClearPrefs}
                         </button>
-                      </div>
+                      )}
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmClear(true);
-                      }}
-                      aria-expanded="false"
-                      className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-                    >
-                      {copy.recClearPrefs}
-                    </button>
-                  )}
-                </div>
+                  ) : null}
+                </fieldset>
               ) : null}
-            </fieldset>
-          ) : null}
 
-          {stepError !== null ? (
-            <p
-              role="alert"
-              className="mt-4 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
-            >
-              {stepError}
-            </p>
-          ) : null}
+              {stepError !== null ? (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                >
+                  {stepError}
+                </p>
+              ) : null}
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            {stepIndex > 0 ? (
-              <button
-                type="button"
-                onClick={goBack}
-                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-              >
-                {copy.recBack}
-              </button>
-            ) : null}
-            {stepIndex === 2 || stepIndex === 3 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (stepIndex === 2) {
-                    setDraft({ ...draft, regionMode: "anywhere", cuisine: "", country: "" });
-                  } else {
-                    setMood("any");
-                  }
-
-                  setStepError(null);
-                  setStepIndex(stepIndex + 1);
-                }}
-                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-muted transition hover:border-ink hover:text-ink"
-              >
-                {copy.recSkip}
-              </button>
-            ) : null}
-            {stepIndex < QUIZ_STEPS - 1 ? (
-              <button
-                type="button"
-                onClick={goNext}
-                className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
-              >
-                {copy.recContinue}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={findDishes}
-                disabled={recommend.isPending}
-                className="inline-flex min-h-12 cursor-pointer items-center rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:-translate-y-px hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-              >
-                {copy.recFind}
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-    </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                {stepIndex > 0 ? (
+                  <button
+                    type="button"
+                    onClick={goBack}
+                    className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                  >
+                    {copy.recBack}
+                  </button>
+                ) : null}
+                {stepIndex < QUIZ_STEPS - 1 ? (
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+                  >
+                    {copy.recContinue}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={findDishes}
+                    disabled={recommend.isPending}
+                    className="inline-flex min-h-12 cursor-pointer items-center rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:-translate-y-px hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+                  >
+                    {copy.recFind}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
+    </section>
   );
 
   function renderOutcome(copyMessages: Messages) {
@@ -1348,7 +1404,7 @@ function Recommend() {
                   <SaveDishButton
                     dishId={dish.id}
                     lang={lang}
-                    returnTo="/recommend"
+                    returnTo="/"
                     session={session}
                     status={statusForDish(resultFavorites, dish.id)}
                   />

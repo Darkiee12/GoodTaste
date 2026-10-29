@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as RecommendRouteImport } from './routes/recommend'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as SignInRouteImport } from './routes/sign-in'
@@ -72,11 +71,6 @@ const AdminRoute = AdminRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RecommendRoute = RecommendRouteImport.update({
-  id: '/recommend',
-  path: '/recommend',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -317,7 +311,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
-  '/recommend': typeof RecommendRoute
   '/reset-password': typeof ResetPasswordRoute
   '/saved': typeof SavedRoute
   '/sign-in': typeof SignInRoute
@@ -367,7 +360,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/recommend': typeof RecommendRoute
   '/reset-password': typeof ResetPasswordRoute
   '/saved': typeof SavedRoute
   '/sign-in': typeof SignInRoute
@@ -419,7 +411,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
-  '/recommend': typeof RecommendRoute
   '/reset-password': typeof ResetPasswordRoute
   '/saved': typeof SavedRoute
   '/sign-in': typeof SignInRoute
@@ -472,7 +463,6 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/forgot-password'
-    | '/recommend'
     | '/reset-password'
     | '/saved'
     | '/sign-in'
@@ -522,7 +512,6 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/forgot-password'
-    | '/recommend'
     | '/reset-password'
     | '/saved'
     | '/sign-in'
@@ -573,7 +562,6 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/forgot-password'
-    | '/recommend'
     | '/reset-password'
     | '/saved'
     | '/sign-in'
@@ -625,7 +613,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
-  RecommendRoute: typeof RecommendRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SavedRoute: typeof SavedRoute
   SignInRoute: typeof SignInRoute
@@ -670,13 +657,6 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/recommend': {
-      id: '/recommend'
-      path: '/recommend'
-      fullPath: '/recommend'
-      preLoaderRoute: typeof RecommendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -1144,7 +1124,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
-  RecommendRoute: RecommendRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SavedRoute: SavedRoute,
   SignInRoute: SignInRoute,
