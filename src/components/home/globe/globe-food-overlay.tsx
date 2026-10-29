@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from "react";
 
 import { localizedDishText, type FoodLocation } from "@/components/home/globe/food-locations";
 import type { GlobeOverlayBridge } from "@/components/home/globe/geo-utils";
+import type { GlobePopupNodes } from "@/components/home/globe/use-globe-dishes";
 import { usePreviewDialog } from "@/components/home/globe/use-preview-dialog";
 import type { Locale, Messages } from "@/shared/i18n";
 
@@ -19,27 +20,41 @@ function PopupStem() {
   );
 }
 
+function sameDishName(dish: { readonly name: string; readonly englishName: string }): boolean {
+  return dish.englishName.trim().toLowerCase() === dish.name.trim().toLowerCase();
+}
+
+function dishLabel(dish: FoodLocation, lang: Locale, popupHint: string): string {
+  const names = sameDishName(dish) ? dish.name : `${dish.name}, ${dish.englishName}`;
+
+  return `${names}, ${localizedDishText(dish.country, lang)}. ${popupHint}`;
+}
+
 /** DOM popup and preview cards positioned each frame from real 3D anchors. */
 export function GlobeFoodOverlay({
   copy,
   lang,
   bridgeRef,
-  active,
+  popupsRef,
+  actives,
   preview,
   announcement,
   onOpenPreview,
   onClosePreview,
   onShowAnother,
+  onHoverDish,
 }: {
   copy: Messages;
   lang: Locale;
   bridgeRef: RefObject<GlobeOverlayBridge>;
-  active: ActiveDish | null;
+  popupsRef: RefObject<GlobePopupNodes>;
+  actives: Array<ActiveDish>;
   preview: FoodLocation | null;
   announcement: string;
   onOpenPreview: (dish: FoodLocation) => void;
   onClosePreview: () => void;
   onShowAnother: () => void;
+  onHoverDish: (id: string | null) => void;
 }) {
   const headingRef = usePreviewDialog(preview, onClosePreview);
 
@@ -50,41 +65,81 @@ export function GlobeFoodOverlay({
     [bridgeRef],
   );
 
+  const registerPopup = useCallback(
+    (id: string) => (node: HTMLDivElement | null) => {
+      if (node) {
+        popupsRef.current.set(id, node);
+      } else {
+        popupsRef.current.delete(id);
+      }
+    },
+    [popupsRef],
+  );
+
   return (
     <>
-      {active && !preview ? (
-        <div
-          ref={setNode}
-          className="pointer-events-none absolute top-0 left-0 flex -translate-x-1/2 -translate-y-full flex-col items-center"
-        >
-          <button
-            type="button"
-            onClick={() => {
-              onOpenPreview(active.dish);
-            }}
-            aria-label={`${active.dish.name}, ${localizedDishText(active.dish.country, lang)}. ${copy.popupHint}`}
-            className={`pointer-events-auto flex cursor-pointer items-center gap-3 rounded-2xl border border-border-soft bg-white py-2 pr-4 pl-2 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)] transition-colors hover:border-food-orange ${
-              active.exiting ? "motion-safe:animate-popup-exit" : "motion-safe:animate-popup-enter"
-            }`}
-          >
-            <span
-              aria-hidden="true"
-              className="grid h-11 w-11 flex-none place-items-center rounded-full bg-cream text-[1.6rem]"
+      {!preview
+        ? actives.map((active) => (
+            <div
+              key={active.dish.id}
+              ref={registerPopup(active.dish.id)}
+              style={{ visibility: "hidden" }}
+              className="pointer-events-none absolute top-0 left-0 flex -translate-x-1/2 -translate-y-full flex-col items-center"
             >
-              {active.dish.emoji}
-            </span>
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenPreview(active.dish);
+                }}
+                onFocus={() => {
+                  onHoverDish(active.dish.id);
+                }}
+                onBlur={() => {
+                  onHoverDish(null);
+                }}
+                onPointerEnter={(event) => {
+                  if (event.pointerType !== "touch") {
+                    onHoverDish(active.dish.id);
+                  }
+                }}
+                onPointerLeave={(event) => {
+                  if (event.pointerType !== "touch") {
+                    onHoverDish(null);
+                  }
+                }}
+                aria-label={dishLabel(active.dish, lang, copy.popupHint)}
+                className={`pointer-events-auto flex cursor-pointer items-center gap-3 rounded-2xl border border-border-soft bg-white py-2 pr-4 pl-2 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)] transition-colors hover:border-food-orange ${
+                  active.exiting
+                    ? "motion-safe:animate-popup-exit"
+                    : "motion-safe:animate-popup-enter"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="grid h-11 w-11 flex-none place-items-center rounded-full bg-cream text-[1.6rem]"
+                >
+                  {active.dish.emoji}
+                </span>
 
-            <span className="flex flex-col py-0.5 pr-1 leading-tight">
-              <span className="text-base font-extrabold whitespace-nowrap">{active.dish.name}</span>
-              <span className="text-sm whitespace-nowrap text-muted">
-                {localizedDishText(active.dish.country, lang)}
-              </span>
-            </span>
-          </button>
+                <span className="flex flex-col py-0.5 pr-1 leading-tight">
+                  <span className="text-base font-extrabold whitespace-nowrap">
+                    {active.dish.name}
+                  </span>
+                  {sameDishName(active.dish) ? null : (
+                    <span className="text-sm font-semibold whitespace-nowrap text-food-orange-strong">
+                      {active.dish.englishName}
+                    </span>
+                  )}
+                  <span className="text-sm whitespace-nowrap text-muted">
+                    {localizedDishText(active.dish.country, lang)}
+                  </span>
+                </span>
+              </button>
 
-          <PopupStem />
-        </div>
-      ) : null}
+              <PopupStem />
+            </div>
+          ))
+        : null}
 
       {preview ? (
         <div
@@ -111,6 +166,12 @@ export function GlobeFoodOverlay({
                   >
                     {preview.name}
                   </p>
+
+                  {sameDishName(preview) ? null : (
+                    <p className="text-sm font-semibold text-food-orange-strong">
+                      {preview.englishName}
+                    </p>
+                  )}
 
                   <p className="text-sm text-muted">
                     {localizedDishText(preview.country, lang)} ·{" "}

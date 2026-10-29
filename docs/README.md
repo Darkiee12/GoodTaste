@@ -27,6 +27,7 @@
 - [Object storage](infra/object-storage.md): images, S3 API, security, retention.
 - [Environment](infra/environment.md): configuration and secret handling.
 - [Operations](infra/operations.md): local runbook and smoke checks.
+- [Production deployment](infra/deployment-dokploy-azure.md): Azure VM + Dokploy + GHCR + Cloudflare Tunnel release contract (Proposed; Azure-side steps operator-verified).
 
 ## Agent coordination
 - [Workflow](agents/workflow.md): agent roles, worktree coordination, shared files.

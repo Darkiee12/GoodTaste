@@ -6,6 +6,7 @@ import ownerGuardLock from "@/modules/user/server/repository/sql/owner-guard-loc
 import roleById from "@/modules/user/server/repository/sql/role-by-id.sql";
 import roleDelete from "@/modules/user/server/repository/sql/role-delete.sql";
 import roleInsert from "@/modules/user/server/repository/sql/role-insert.sql";
+import roleMemberCounts from "@/modules/user/server/repository/sql/role-member-counts.sql";
 import rolePermissionGrant from "@/modules/user/server/repository/sql/role-permission-grant.sql";
 import rolePermissionRevoke from "@/modules/user/server/repository/sql/role-permission-revoke.sql";
 import rolePermissionsByRole from "@/modules/user/server/repository/sql/role-permissions-by-role.sql";
@@ -15,6 +16,7 @@ import rolesList from "@/modules/user/server/repository/sql/roles-list.sql";
 import sessionsDeleteByUser from "@/modules/user/server/repository/sql/sessions-delete-by-user.sql";
 import userBan from "@/modules/user/server/repository/sql/user-ban.sql";
 import userBannedById from "@/modules/user/server/repository/sql/user-banned-by-id.sql";
+import userFindByEmail from "@/modules/user/server/repository/sql/user-find-by-email.sql";
 import userRoleAssign from "@/modules/user/server/repository/sql/user-role-assign.sql";
 import userRoleRemove from "@/modules/user/server/repository/sql/user-role-remove.sql";
 import userRolesByUser from "@/modules/user/server/repository/sql/user-roles-by-user.sql";
@@ -26,11 +28,15 @@ import type { DatabaseError } from "@/server/database/query";
 
 export type RoleRow = (typeof roleById)["~reylo"]["element"];
 
+export type RoleMemberCountRow = (typeof roleMemberCounts)["~reylo"]["element"];
+
 export type RolePermissionRow = (typeof rolePermissionsByRole)["~reylo"]["element"];
 
 export type UserRoleRow = (typeof userRolesByUser)["~reylo"]["element"];
 
 export type MemberRow = (typeof usersList)["~reylo"]["element"];
+
+export type MemberLookupRow = (typeof userFindByEmail)["~reylo"]["element"];
 
 export class RoleRepository extends Context.Service<
   RoleRepository,
@@ -43,6 +49,11 @@ export class RoleRepository extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<UserRoleRow>, DatabaseError, Database>;
     readonly roleById: (roleId: string) => Effect.Effect<RoleRow | null, DatabaseError, Database>;
     readonly rolesList: () => Effect.Effect<ReadonlyArray<RoleRow>, DatabaseError, Database>;
+    readonly memberCounts: () => Effect.Effect<
+      ReadonlyArray<RoleMemberCountRow>,
+      DatabaseError,
+      Database
+    >;
     readonly insertRole: (input: {
       readonly id: string;
       readonly slug: string;
@@ -94,6 +105,9 @@ export class RoleRepository extends Context.Service<
       limit: number,
       offset: number,
     ) => Effect.Effect<ReadonlyArray<MemberRow>, DatabaseError, Database>;
+    readonly findUserByEmail: (
+      email: string,
+    ) => Effect.Effect<MemberLookupRow | null, DatabaseError, Database>;
     readonly banUser: (
       userId: string,
       reason: string | null,
@@ -112,6 +126,7 @@ export const RoleRepositoryLive = Layer.succeed(RoleRepository, {
     runQuery("user/user-roles-by-user", (sql) => userRolesByUser.run(sql, { user_id: userId })),
   roleById: (roleId) => runQuery("user/role-by-id", (sql) => roleById.run(sql, { id: roleId })),
   rolesList: () => runQuery("user/roles-list", (sql) => rolesList.run(sql)),
+  memberCounts: () => runQuery("user/role-member-counts", (sql) => roleMemberCounts.run(sql)),
   insertRole: (input) =>
     runQuery("user/role-insert", (sql) =>
       roleInsert.run(sql, {
@@ -178,6 +193,10 @@ export const RoleRepositoryLive = Layer.succeed(RoleRepository, {
     }),
   usersList: (limit, offset) =>
     runQuery("user/users-list", (sql) => usersList.run(sql, { limit, offset })),
+  findUserByEmail: (email) =>
+    Effect.gen(function* () {
+      return yield* runQuery("user/find-by-email", (sql) => userFindByEmail.run(sql, { email }));
+    }),
   banUser: (userId, reason) =>
     runQuery("user/user-ban", (sql) => userBan.run(sql, { user_id: userId, reason })),
   unbanUser: (userId) =>

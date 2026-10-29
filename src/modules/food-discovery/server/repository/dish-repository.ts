@@ -28,6 +28,8 @@ import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type DishRecord = (typeof dishFindById)["~reylo"]["element"];
 
+export type DishListRow = (typeof dishListByStatus)["~reylo"]["element"];
+
 export type AdminDishRow = (typeof adminDishesByStatus)["~reylo"]["element"];
 
 export type AdminDishRecentRow = (typeof adminDishesRecent)["~reylo"]["element"];
@@ -49,7 +51,7 @@ export class DishRepository extends Context.Service<
       status: DishStatus,
       cursor: bigint,
       limit: number,
-    ) => Effect.Effect<ReadonlyArray<DishRecord>, DatabaseError, Database>;
+    ) => Effect.Effect<ReadonlyArray<DishListRow>, DatabaseError, Database>;
     readonly countByStatus: (status: DishStatus) => Effect.Effect<number, DatabaseError, Database>;
     readonly missingIngredientsCount: () => Effect.Effect<number, DatabaseError, Database>;
     readonly recentAdminDishes: (

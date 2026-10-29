@@ -284,7 +284,12 @@ export const adminReviewQueueFn = createServerFn({ method: "GET" })
   });
 
 export const adminImportJobsFn = createServerFn({ method: "GET" })
-  .validator(z.object({ limit: z.coerce.number().int().min(1).max(50).default(20) }))
+  .validator(
+    z.object({
+      limit: z.coerce.number().int().min(1).max(50).default(20),
+      offset: z.coerce.number().int().min(0).default(0),
+    }),
+  )
   .handler(async ({ data }) => {
     const loaded = await loadServer();
 
@@ -313,7 +318,9 @@ export const adminImportJobsFn = createServerFn({ method: "GET" })
     return runtime.runApp(
       currentActor.withActor(
         actor.Actor.Member({ userId: trusted.userId }),
-        effects.Effect.flatMap(AdminDashboardService, (service) => service.importJobs(data.limit)),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.importJobs(data.limit, data.offset),
+        ),
       ),
       "fn/admin/import-jobs",
       15000,

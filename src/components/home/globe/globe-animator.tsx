@@ -2,11 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 import * as THREE from "three";
 
-import {
-  FOOD_LOCATIONS,
-  SURPRISE_DISH_EVENT,
-  type FoodLocation,
-} from "@/components/home/globe/food-locations";
+import { SURPRISE_DISH_EVENT, type FoodLocation } from "@/components/home/globe/food-locations";
 import {
   FACING_COSINE_THRESHOLD,
   GLOBE_REVOLUTION_SECONDS,
@@ -16,12 +12,19 @@ import {
   type GlobeOverlayBridge,
   type ViewportSize,
 } from "@/components/home/globe/geo-utils";
+import {
+  MAX_CONCURRENT_POPUPS,
+  type GlobeHoverState,
+  type GlobePopupNodes,
+} from "@/components/home/globe/use-globe-dishes";
 
 /**
- * Dish rhythm: a new pick every 3.6s matches the 3.2s show + 0.38s exit for
- * near-seamless handoffs, and the 10s cooldown fits inside one window cycle
- * (3 dishes x 3.6s = 10.8s). Brief pauses still occur over ocean sectors
- * with no curated dishes in view (e.g. the Pacific transit).
+ * Dish rhythm: a new set every 3.6s matches the 3.2s show + 0.38s exit for
+ * near-seamless handoffs, and the 10s cooldown fits inside one window cycle.
+ * Brief pauses still occur over ocean sectors with no curated dishes in view
+ * (e.g. the Pacific transit). While a pin is hovered/focused the set freezes
+ * so the auto-cycle never fights the pinned popup; the rhythm resumes fresh
+ * once the pin clears.
  */
 const DISH_INTERVAL_SECONDS = 3.6;
 const DISH_COOLDOWN_SECONDS = 10;
@@ -39,6 +42,16 @@ type AnimatorTemps = {
   center: THREE.Vector3;
 };
 
+type ScoredDish = {
+  dish: FoodLocation;
+  cosine: number;
+  x: number;
+  y: number;
+};
+
+/** Minimum anchor separation between concurrent popups in CSS pixels. */
+const POPUP_MIN_SEPARATION_PX = 128;
+
 function readAnchor(
   anchor: THREE.Object3D,
   camera: THREE.Camera,
@@ -54,7 +67,11 @@ function readAnchor(
 
   const x = (temps.projected.x * 0.5 + 0.5) * size.width;
   const y = (-temps.projected.y * 0.5 + 0.5) * size.height;
-  const zoneTop = Math.max(size.height * 0.6, size.height - layout.capPx - 150);
+
+  // Eligible cards live on the visible globe below the hero copy: at least
+  // halfway down the hero, and inside the lower globe band with room for the
+  // card to fit without covering the headline or primary CTAs.
+  const zoneTop = Math.max(size.height * 0.5, size.height - layout.capPx + layout.diameterPx * 0.1);
 
   const inZone =
     x > size.width * 0.06 && x < size.width * 0.94 && y > zoneTop && y < size.height - 8;
@@ -62,21 +79,46 @@ function readAnchor(
   return { cosine, x, y, inZone };
 }
 
+function countryKey(dish: FoodLocation): string {
+  return dish.country.get("en") ?? dish.id;
+}
+
 /**
- * Spins the globe, schedules the visible dish, and positions the DOM overlay
- * node every frame. Runs inside the Canvas; pauses with frameloop="never".
+ * Imperative overlay write: the animator owns per-frame DOM positioning so
+ * React state never updates at 60fps. Transform/visibility only, so the
+ * hero layout never shifts.
+ */
+function writePopupPosition(node: HTMLElement, x: number, y: number, visible: boolean): void {
+  if (visible) {
+    node.style.visibility = "visible";
+    node.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+  } else {
+    node.style.visibility = "hidden";
+  }
+}
+
+/**
+ * Spins the globe, schedules the visible dish set, and positions the DOM
+ * overlay nodes every frame. Runs inside the Canvas; pauses with
+ * frameloop="never".
  */
 export function GlobeAnimator({
   spinRef,
   anchorsRef,
   bridgeRef,
-  onActiveDish,
+  popupsRef,
+  hoverRef,
+  visibleDishes,
+  onActiveDishes,
   layout,
 }: {
   spinRef: RefObject<THREE.Group | null>;
   anchorsRef: RefObject<Map<string, THREE.Object3D | null>>;
   bridgeRef: RefObject<GlobeOverlayBridge>;
-  onActiveDish: (id: string | null) => void;
+  popupsRef: RefObject<GlobePopupNodes>;
+  hoverRef: RefObject<GlobeHoverState>;
+  visibleDishes: Array<FoodLocation>;
+  onActiveDishes: (ids: Array<string>) => void;
   layout: GlobeLayout;
 }) {
   const temps = useMemo<AnimatorTemps>(
@@ -90,6 +132,9 @@ export function GlobeAnimator({
 
   const lastTick = useRef(DISH_INTERVAL_SECONDS * -1 + 1);
   const lastShown = useRef(new Map<string, number>());
+  const lastSent = useRef("");
+  const lastPositioned = useRef(new Map<string, { x: number; y: number; visible: boolean }>());
+  const wasHovered = useRef(false);
   const forceRandom = useRef(false);
 
   useEffect(() => {
@@ -105,10 +150,12 @@ export function GlobeAnimator({
     };
   }, []);
 
-  const pickDish = (camera: THREE.Camera, size: ViewportSize, now: number): FoodLocation | null => {
-    const eligible: Array<{ dish: FoodLocation; cosine: number }> = [];
+  const pickDishes = (camera: THREE.Camera, size: ViewportSize, now: number): Array<string> => {
+    const eligible: Array<ScoredDish> = [];
 
-    for (const dish of FOOD_LOCATIONS) {
+    // Only the currently visible pin subset is eligible: popups never pick
+    // a dish whose pin is not on the globe.
+    for (const dish of visibleDishes) {
       const anchor = anchorsRef.current.get(dish.id);
 
       if (!anchor) {
@@ -127,28 +174,88 @@ export function GlobeAnimator({
         continue;
       }
 
-      eligible.push({ dish, cosine: reading.cosine });
+      eligible.push({ dish, cosine: reading.cosine, x: reading.x, y: reading.y });
     }
 
     if (eligible.length === 0) {
-      return null;
+      return [];
     }
 
     if (forceRandom.current) {
-      const pick = eligible[Math.floor(Math.random() * eligible.length)];
+      for (let index = eligible.length - 1; index > 0; index -= 1) {
+        const other = Math.floor(Math.random() * (index + 1));
+        const current = eligible[index];
+        const candidate = eligible[other];
 
-      return pick === undefined ? null : pick.dish;
-    }
+        if (current === undefined || candidate === undefined) {
+          continue;
+        }
 
-    let best = eligible[0];
-
-    for (const candidate of eligible) {
-      if (best === undefined || candidate.cosine > best.cosine) {
-        best = candidate;
+        eligible[index] = candidate;
+        eligible[other] = current;
       }
+    } else {
+      eligible.sort((a, b) => b.cosine - a.cosine);
     }
 
-    return best === undefined ? null : best.dish;
+    // Spread the set across countries and the screen: the first pass takes
+    // at most one popup per country, the second allows a second dish per
+    // country for nearby-cuisine depth, and the last pass fills leftover
+    // slots only when fewer distinct countries are in view. Every pass but
+    // the last also enforces a minimum on-screen separation so concurrent
+    // cards never stack on top of each other.
+    const picked: Array<ScoredDish> = [];
+    const pickedIds = new Set<string>();
+    const perCountry = new Map<string, number>();
+
+    const clearOfPicked = (candidate: ScoredDish, minSeparation: number): boolean => {
+      if (minSeparation <= 0) {
+        return true;
+      }
+
+      for (const taken of picked) {
+        const dx = taken.x - candidate.x;
+        const dy = taken.y - candidate.y;
+
+        if (dx * dx + dy * dy < minSeparation * minSeparation) {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+    const take = (maxPerCountry: number, minSeparation: number) => {
+      for (const candidate of eligible) {
+        if (picked.length >= MAX_CONCURRENT_POPUPS) {
+          break;
+        }
+
+        if (pickedIds.has(candidate.dish.id)) {
+          continue;
+        }
+
+        const key = countryKey(candidate.dish);
+
+        if ((perCountry.get(key) ?? 0) >= maxPerCountry) {
+          continue;
+        }
+
+        if (!clearOfPicked(candidate, minSeparation)) {
+          continue;
+        }
+
+        perCountry.set(key, (perCountry.get(key) ?? 0) + 1);
+        pickedIds.add(candidate.dish.id);
+        picked.push(candidate);
+      }
+    };
+
+    take(1, POPUP_MIN_SEPARATION_PX);
+    take(2, POPUP_MIN_SEPARATION_PX);
+    take(2, 0);
+
+    return picked.map((item) => item.dish.id);
   };
 
   useFrame((state, delta) => {
@@ -163,23 +270,73 @@ export function GlobeAnimator({
 
     const bridge = bridgeRef.current;
     const now = state.clock.elapsedTime;
+    const hoveredId = hoverRef.current.hoveredId;
 
-    if (now - lastTick.current >= DISH_INTERVAL_SECONDS && !document.hidden && !bridge.paused) {
+    if (wasHovered.current && hoveredId === null) {
+      lastTick.current = now;
+    }
+
+    wasHovered.current = hoveredId !== null;
+
+    if (
+      hoveredId === null &&
+      now - lastTick.current >= DISH_INTERVAL_SECONDS &&
+      !document.hidden &&
+      !bridge.paused
+    ) {
       lastTick.current = now;
 
-      const next = pickDish(state.camera, state.size, now);
+      const next = pickDishes(state.camera, state.size, now);
       forceRandom.current = false;
 
-      if (next) {
-        lastShown.current.set(next.id, now);
+      for (const id of next) {
+        lastShown.current.set(id, now);
       }
 
-      const nextId = next ? next.id : null;
-
-      if (nextId !== bridge.activeId) {
-        bridge.activeId = nextId;
-        onActiveDish(nextId);
+      if (lastShown.current.size > visibleDishes.length + 64) {
+        for (const [id, at] of lastShown.current) {
+          if (now - at >= DISH_COOLDOWN_SECONDS) {
+            lastShown.current.delete(id);
+          }
+        }
       }
+
+      const key = next.join(",");
+
+      if (key !== lastSent.current) {
+        lastSent.current = key;
+        onActiveDishes(next);
+      }
+    }
+
+    const popups = popupsRef.current;
+
+    for (const [id, node] of popups) {
+      if (!node) {
+        continue;
+      }
+
+      const anchor = anchorsRef.current.get(id);
+
+      if (!anchor) {
+        continue;
+      }
+
+      const reading = readAnchor(anchor, state.camera, state.size, layout, temps);
+      const visible = reading.cosine > FACING_COSINE_THRESHOLD && reading.inZone;
+      const cache = lastPositioned.current.get(id);
+      const roundedX = Math.round(reading.x * 10) / 10;
+      const roundedY = Math.round((reading.y - 12) * 10) / 10;
+
+      if (cache && cache.visible === visible && cache.x === roundedX && cache.y === roundedY) {
+        continue;
+      }
+
+      lastPositioned.current.set(id, { x: roundedX, y: roundedY, visible });
+
+      // Never show backside or out-of-zone popups: hide in place with
+      // visibility so hero content never shifts.
+      writePopupPosition(node, roundedX, roundedY, visible);
     }
 
     const node = bridge.node;
@@ -201,7 +358,7 @@ export function GlobeAnimator({
 
       if (!bridge.paused && bridge.activeId) {
         bridge.activeId = null;
-        onActiveDish(null);
+        onActiveDishes([]);
       }
     }
   });

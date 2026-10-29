@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
+import { PersonalNav } from "@/components/personal-nav";
 import { changePasswordFn } from "@/modules/user/auth.functions";
 import {
   listSessionsFn,
@@ -127,6 +128,9 @@ function SecuritySettings() {
     return (
       <div className="mx-auto w-full max-w-2xl px-4 py-10">
         <h1 className="font-display text-4xl tracking-wide">{copy.authSecurity}</h1>
+        <div className="mt-4">
+          <PersonalNav />
+        </div>
 
         <p
           role="note"
@@ -141,6 +145,9 @@ function SecuritySettings() {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10">
       <h1 className="font-display text-4xl tracking-wide">{copy.authSecurity}</h1>
+      <div className="mt-4">
+        <PersonalNav />
+      </div>
       <section
         aria-labelledby={`${formId}-password-heading`}
         className="mt-6 rounded-lg border border-border-soft bg-white p-6 shadow-sm"
