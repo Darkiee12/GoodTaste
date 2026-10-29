@@ -4,6 +4,12 @@ import { SQL } from "bun";
 import { Effect } from "effect";
 import { z } from "zod";
 
+import {
+  buildSurprisePayload,
+  draftFromSavedPrefs,
+  EMPTY_DRAFT,
+  readSavedPrefs,
+} from "@/components/home/recommend-section";
 import { CatalogService } from "@/modules/food-discovery/server/operations/catalog-service";
 import { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import { addFavoriteFn, listFavoritesFn, removeFavoriteFn } from "@/modules/user/profile.functions";
@@ -11,12 +17,6 @@ import { FavoritesService } from "@/modules/user/server/operations/user-services
 import type { FavoriteRow } from "@/modules/user/server/repository/user-repository";
 import { classifySessionFailure, sessionFailureSchema } from "@/modules/user/session.functions";
 import type { SessionState } from "@/modules/user/session.functions";
-import {
-  buildSurprisePayload,
-  draftFromSavedPrefs,
-  EMPTY_DRAFT,
-  readSavedPrefs,
-} from "@/routes/recommend";
 import { SignInRequired, UserSuspended } from "@/server/auth/errors";
 import { resolveSession, requirePermission } from "@/server/auth/session";
 import { DatabaseUnavailable } from "@/server/database/errors";

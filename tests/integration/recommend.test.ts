@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  MEAL_OCCASIONS,
-  RECOMMENDATION_MOODS,
-} from "@/modules/food-discovery/recommendation.constants";
-import {
   buildRecommendPayload,
   buildSurprisePayload,
   draftFromSavedPrefs,
@@ -19,7 +15,11 @@ import {
   termLengthError,
   tooLongTerms,
   validateRegion,
-} from "@/routes/recommend";
+} from "@/components/home/recommend-section";
+import {
+  MEAL_OCCASIONS,
+  RECOMMENDATION_MOODS,
+} from "@/modules/food-discovery/recommendation.constants";
 import { messagesFor } from "@/shared/i18n";
 
 const copy = messagesFor("en");

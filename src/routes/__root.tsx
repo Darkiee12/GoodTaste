@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
@@ -8,30 +8,20 @@ import {
   stripSearchParams,
   useNavigate,
 } from "@tanstack/react-router";
-import { cn } from "cn";
-import { CheckIcon, ChevronDownIcon, GlobeIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { AccountMenu } from "@/components/account-menu";
+import { LanguageMenu } from "@/components/language-menu";
 import { authorizeFn } from "@/modules/user/admin.functions";
-import { signOutFn } from "@/modules/user/auth.functions";
-import { clearFavoriteCaches } from "@/modules/user/components/save-dish-button";
 import { getSessionStateFn } from "@/modules/user/session.functions";
 import {
   bcp47TagFor,
-  displayLocales,
-  localeNameFor,
+  detectBrowserLocale,
+  hasExplicitLocaleChoice,
   localeSearchSchema,
   messagesFor,
 } from "@/shared/i18n";
-import type { Locale } from "@/shared/i18n";
 
 import stylesheet from "@/styles.css?url";
 
@@ -92,119 +82,41 @@ function Document({ children }: { children: ReactNode }) {
   );
 }
 
-function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
+function AppLayout() {
+  const { lang } = Route.useSearch();
+  const { session } = Route.useRouteContext();
   const copy = messagesFor(lang);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [signOutFailed, setSignOutFailed] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
+  const [queryClient] = useState(() => new QueryClient());
 
-  const signOut = (): void => {
-    if (signingOut) {
+  // First visit only: default to the browser's language when it is a fully
+  // translated UI locale. Manual picks are remembered and never overridden;
+  // an explicit ?lang= URL wins over detection.
+  useEffect(() => {
+    if (typeof window === "undefined") {
       return;
     }
 
-    setSigningOut(true);
-    setSignOutFailed(false);
+    if (hasExplicitLocaleChoice()) {
+      return;
+    }
 
-    void signOutFn().then(
-      () => {
-        clearFavoriteCaches(queryClient);
-        void navigate({ to: "/", search: { lang } });
-      },
-      () => {
-        setSigningOut(false);
-        setSignOutFailed(true);
-      },
-    );
-  };
+    if (new URLSearchParams(window.location.search).has("lang")) {
+      return;
+    }
 
-  return (
-    <>
-      <Link
-        to="/saved"
-        search={{ lang }}
-        activeOptions={{ exact: true }}
-        activeProps={{ "aria-current": "page" }}
-        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
-      >
-        Saved
-      </Link>
-      <Link
-        to="/settings/account"
-        search={{ lang }}
-        activeProps={{ "aria-current": "page" }}
-        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
-      >
-        {copy.authAccount}
-      </Link>
-      {isAdmin ? (
-        <Link
-          to="/admin"
-          search={{ lang }}
-          className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-mango no-underline hover:bg-white/10 hover:text-white"
-        >
-          {copy.adminWorkspace}
-        </Link>
-      ) : null}
-      <button
-        type="button"
-        onClick={signOut}
-        disabled={signingOut}
-        aria-busy={signingOut}
-        className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-70"
-      >
-        {signingOut ? copy.settingsSigningOut : copy.authSignOut}
-      </button>
-      {signOutFailed && !signingOut ? (
-        <span
-          role="alert"
-          className="inline-flex items-center gap-2 text-xs font-semibold text-mango"
-        >
-          {copy.settingsSignOutFailed}
-          <button
-            type="button"
-            onClick={signOut}
-            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-mango/60 px-3 text-xs font-bold text-mango hover:bg-white/10"
-          >
-            {copy.commonRetry}
-          </button>
-        </span>
-      ) : null}
-    </>
-  );
-}
+    const detected = detectBrowserLocale();
 
-function GuestNav({ lang }: { lang: Locale }) {
-  const copy = messagesFor(lang);
-
-  return (
-    <>
-      <Link
-        to="/sign-in"
-        search={{ lang, returnTo: "/" }}
-        activeProps={{ "aria-current": "page" }}
-        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
-      >
-        {copy.authSignIn}
-      </Link>
-      <Link
-        to="/sign-up"
-        search={{ lang, returnTo: "/" }}
-        activeProps={{ "aria-current": "page" }}
-        className="inline-flex min-h-11 items-center rounded-full border border-white/25 px-4 text-sm font-bold text-white no-underline hover:border-white/50 hover:bg-white/10 aria-current:bg-white/15"
-      >
-        {copy.authSignUp}
-      </Link>
-    </>
-  );
-}
-
-function AppLayout() {
-  const { lang } = Route.useSearch();
-  const { session, isAdmin } = Route.useRouteContext();
-  const copy = messagesFor(lang);
-  const [queryClient] = useState(() => new QueryClient());
+    if (detected !== null && detected !== lang) {
+      void navigate({
+        to: ".",
+        search: (previous) => ({ ...previous, lang: detected }),
+        replace: true,
+      });
+    }
+    // Mount-only default: reacting to later changes would fight the menu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -242,64 +154,23 @@ function AppLayout() {
               resetScroll={false}
               className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
             >
-              Discover
+              {copy.navDiscover}
             </Link>
             <Link
-              to="/recommend"
+              to="/"
               search={{ lang }}
-              activeProps={{ "aria-current": "page" }}
-              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
+              hash="recommend"
+              resetScroll={false}
+              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
             >
               {copy.ctaRecommend}
             </Link>
-            {session.status === "signed-in" ? (
-              <MemberNav lang={lang} isAdmin={isAdmin} />
-            ) : (
-              <GuestNav lang={lang} />
-            )}
           </nav>
 
-          <nav aria-label={copy.languageLabel}>
-            {/* Non-modal: opening the menu must not lock scroll or shift the page. */}
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-muted-on-dark hover:border-white/25 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
-                >
-                  <GlobeIcon aria-hidden="true" className="size-4" />
-                  <span>{localeNameFor(lang)}</span>
-                  <ChevronDownIcon aria-hidden="true" className="size-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuGroup>
-                  {displayLocales.map((locale) => {
-                    const isCurrent = locale === lang;
-
-                    return (
-                      <DropdownMenuItem key={locale} asChild>
-                        <Link
-                          to="."
-                          search={(previous) => ({ ...previous, lang: locale })}
-                          hash={true}
-                          resetScroll={false}
-                          lang={bcp47TagFor(locale)}
-                          hrefLang={bcp47TagFor(locale)}
-                          activeOptions={{ exact: true }}
-                          aria-current={isCurrent ? "true" : undefined}
-                          className={cn(isCurrent && "font-semibold")}
-                        >
-                          <span>{localeNameFor(locale)}</span>
-                          {isCurrent ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
-                        </Link>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </nav>
+          <div className="flex items-center gap-1">
+            <AccountMenu />
+            <LanguageMenu />
+          </div>
         </div>
       </header>
 
@@ -308,7 +179,7 @@ function AppLayout() {
           role="note"
           className="border-b border-mango/40 bg-cream px-4 py-2 text-center text-sm font-semibold text-ink"
         >
-          Sign-in status is unavailable — discovery still works, saving is paused.
+          {copy.saveDishPaused}
         </p>
       ) : null}
 

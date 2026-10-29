@@ -64,7 +64,7 @@ function DishShell({ children }: { readonly children: React.ReactNode }) {
 }
 
 /** Back prefers router history (dish cards, recommendations, saved rows all
- *  land here); only a direct load falls back to /recommend. */
+ *  land here); only a direct load falls back to the homepage quiz section. */
 function BackLink() {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
@@ -78,7 +78,7 @@ function BackLink() {
       return;
     }
 
-    void navigate({ to: "/recommend", search: { lang } });
+    void navigate({ to: "/", search: { lang }, hash: "recommend" });
   };
 
   return (

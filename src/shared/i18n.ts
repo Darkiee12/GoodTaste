@@ -80,6 +80,7 @@ const english = {
   authPassword: "Password",
   authName: "Display name",
   authContinueGoogle: "Continue with Google",
+  authOrDivider: "or",
   authContinueFacebook: "Continue with Facebook",
   authNoAccount: "New here? Create an account.",
   authHaveAccount: "Have an account? Sign in.",
@@ -389,12 +390,12 @@ const english = {
   recCuisineLoading: "Loading cuisines…",
   recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
   recCuisineLoadError: "Could not load cuisines from the catalog.",
-  recSurpriseNote:
-    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
   recClearPrefs: "Clear saved preferences",
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  navDiscover: "Discover",
+  accountMenu: "Account",
   saveDishSave: "Save dish",
   saveDishSaved: "Saved",
   saveDishLoading: "Loading…",
@@ -417,9 +418,6 @@ const english = {
   savedUnavailableNote:
     "Sign-in status is unavailable — saving is paused, discovery still works. Try again shortly; we did not sign you out.",
   recQuick: "Find dishes now",
-  recQuickNote:
-    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
-  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -515,6 +513,7 @@ const vietnamese: Messages = {
   authPassword: "Mật khẩu",
   authName: "Tên hiển thị",
   authContinueGoogle: "Tiếp tục với Google",
+  authOrDivider: "hoặc",
   authContinueFacebook: "Tiếp tục với Facebook",
   authNoAccount: "Mới đến? Tạo tài khoản.",
   authHaveAccount: "Đã có tài khoản? Đăng nhập.",
@@ -825,11 +824,12 @@ const vietnamese: Messages = {
   recCuisineLoading: "Đang tải danh sách ẩm thực…",
   recCuisineEmpty: "Danh mục hiện chưa có ẩm thực nào — hãy chọn mọi nơi hoặc theo quốc gia.",
   recCuisineLoadError: "Không tải được danh sách ẩm thực từ danh mục.",
-  recSurpriseNote: "Chế độ bất ngờ giữ nguyên lựa chọn và dị ứng hiện tại — không xóa gì đã lưu.",
   recClearPrefs: "Xóa sở thích đã lưu",
   recClearPrefsConfirm: "Xóa sở thích đã lưu trên thiết bị này?",
   recClearPrefsYes: "Vâng, xóa",
   recClearPrefsNo: "Giữ lại",
+  navDiscover: "Khám phá",
+  accountMenu: "Tài khoản",
   saveDishSave: "Lưu món ăn",
   saveDishSaved: "Đã lưu",
   saveDishLoading: "Đang tải…",
@@ -852,9 +852,6 @@ const vietnamese: Messages = {
   savedUnavailableNote:
     "Không rõ trạng thái đăng nhập — tạm dừng lưu món, bạn vẫn khám phá bình thường. Thử lại sau; chúng tôi không đăng xuất bạn.",
   recQuick: "Tìm món ngay",
-  recQuickNote:
-    "Một chạm: tìm với lựa chọn hiện tại. Dùng các bước bên dưới để chỉnh bữa ăn, kiêng kỵ, vùng hoặc tâm trạng.",
-  recSkip: "Bỏ qua",
   recRegionAssocNote:
     "Chúng tôi gợi ý món liên quan đến ẩm thực hoặc vùng — không nhất thiết là nơi khai sinh món đó.",
   recReviewRegionAssoc: "Liên quan đến",
@@ -949,6 +946,7 @@ const hindi: Messages = {
   authPassword: "Password",
   authName: "Display name",
   authContinueGoogle: "Continue with Google",
+  authOrDivider: "or",
   authContinueFacebook: "Continue with Facebook",
   authNoAccount: "New here? Create an account.",
   authHaveAccount: "Have an account? Sign in.",
@@ -1263,12 +1261,12 @@ const hindi: Messages = {
   recCuisineLoading: "Loading cuisines…",
   recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
   recCuisineLoadError: "Could not load cuisines from the catalog.",
-  recSurpriseNote:
-    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
   recClearPrefs: "Clear saved preferences",
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  navDiscover: "Discover",
+  accountMenu: "Account",
   saveDishSave: "Save dish",
   saveDishSaved: "Saved",
   saveDishLoading: "Loading…",
@@ -1291,9 +1289,6 @@ const hindi: Messages = {
   savedUnavailableNote:
     "Sign-in status is unavailable — saving is paused, discovery still works. Try again shortly; we did not sign you out.",
   recQuick: "Find dishes now",
-  recQuickNote:
-    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
-  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -1389,6 +1384,7 @@ const spanish: Messages = {
   authPassword: "Password",
   authName: "Display name",
   authContinueGoogle: "Continue with Google",
+  authOrDivider: "or",
   authContinueFacebook: "Continue with Facebook",
   authNoAccount: "New here? Create an account.",
   authHaveAccount: "Have an account? Sign in.",
@@ -1703,12 +1699,12 @@ const spanish: Messages = {
   recCuisineLoading: "Loading cuisines…",
   recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
   recCuisineLoadError: "Could not load cuisines from the catalog.",
-  recSurpriseNote:
-    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
   recClearPrefs: "Clear saved preferences",
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  navDiscover: "Discover",
+  accountMenu: "Account",
   saveDishSave: "Save dish",
   saveDishSaved: "Saved",
   saveDishLoading: "Loading…",
@@ -1731,9 +1727,6 @@ const spanish: Messages = {
   savedUnavailableNote:
     "Sign-in status is unavailable — saving is paused, discovery still works. Try again shortly; we did not sign you out.",
   recQuick: "Find dishes now",
-  recQuickNote:
-    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
-  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -1828,6 +1821,7 @@ const chinese: Messages = {
   authPassword: "Password",
   authName: "Display name",
   authContinueGoogle: "Continue with Google",
+  authOrDivider: "or",
   authContinueFacebook: "Continue with Facebook",
   authNoAccount: "New here? Create an account.",
   authHaveAccount: "Have an account? Sign in.",
@@ -2142,12 +2136,12 @@ const chinese: Messages = {
   recCuisineLoading: "Loading cuisines…",
   recCuisineEmpty: "No cuisines in the catalog right now — try anywhere or by country.",
   recCuisineLoadError: "Could not load cuisines from the catalog.",
-  recSurpriseNote:
-    "Surprise me keeps your current answers and allergies — nothing saved is cleared.",
   recClearPrefs: "Clear saved preferences",
   recClearPrefsConfirm: "Clear the preferences saved on this device?",
   recClearPrefsYes: "Yes, clear them",
   recClearPrefsNo: "Keep them",
+  navDiscover: "Discover",
+  accountMenu: "Account",
   saveDishSave: "Save dish",
   saveDishSaved: "Saved",
   saveDishLoading: "Loading…",
@@ -2170,9 +2164,6 @@ const chinese: Messages = {
   savedUnavailableNote:
     "Sign-in status is unavailable — saving is paused, discovery still works. Try again shortly; we did not sign you out.",
   recQuick: "Find dishes now",
-  recQuickNote:
-    "One click: search with your current answers. Use the steps below to refine meal, restrictions, region, or mood.",
-  recSkip: "Skip for now",
   recRegionAssocNote:
     "We match dishes associated with a cuisine or region — not necessarily where they originated.",
   recReviewRegionAssoc: "Associated with",
@@ -2246,4 +2237,53 @@ export function localeNameFor(locale: Locale): string {
 
 export function bcp47TagFor(locale: Locale): string {
   return localeBcp47Tags.get(locale) ?? locale;
+}
+
+const LOCALE_EXPLICIT_KEY = "feastjourney.locale.explicit";
+
+/** Whether the visitor has ever picked a language by hand (persisted choice). */
+export function hasExplicitLocaleChoice(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(LOCALE_EXPLICIT_KEY) !== null;
+}
+
+/** Record a manual language choice so auto-detect never overrides it. */
+export function markLocaleExplicit(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(LOCALE_EXPLICIT_KEY, "1");
+}
+
+/**
+ * Best browser language limited to fully translated UI locales, so a
+ * first-time visitor lands in a language the whole page actually speaks.
+ * Returns null for English (the default — no navigation needed) and for
+ * unmatched languages. Takes an override list for tests; defaults to the
+ * browser's own preference order on the client.
+ */
+export function detectBrowserLocale(languages?: ReadonlyArray<string>): Locale | null {
+  // DOM lib types navigator.languages as always present, but non-browser
+  // runtimes leave it undefined; read it into an honest type first so the
+  // fallback below is genuine instead of a lint suppression.
+
+  const browserLanguages: ReadonlyArray<string> | undefined =
+    typeof navigator === "undefined" ? undefined : navigator.languages;
+
+  const tags: ReadonlyArray<string> = languages ?? browserLanguages ?? [];
+
+  for (const tag of tags) {
+    const primary = tag.split("-")[0]?.toLowerCase();
+    const match = displayLocales.find((locale) => locale === primary);
+
+    if (match !== undefined && match !== "en") {
+      return match;
+    }
+  }
+
+  return null;
 }
