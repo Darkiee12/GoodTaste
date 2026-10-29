@@ -54,7 +54,28 @@ export const resetServerEnvCache = (): void => {
   cached = undefined;
 };
 
-export const META_MODEL_ALLOWLIST = ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1"] as const;
+/**
+ * Accepted model identity shape: any Muse Spark `<major>.<minor>` release
+ * (Standard or Contributor tier) or any Muse Wonder `<major>.<minor>`
+ * release (Standard tier only — Contributor mode is not offered for Wonder).
+ * An exact-ID list would force a code change for every new release; the
+ * shape check keeps typo protection (`muse-sparc-…`, empty strings) while
+ * letting new releases through without a redeploy. Self-hosted
+ * (`muse-glimmer-*`) stays out: it is not served on this endpoint. Existence
+ * of a well-formed version is the provider's job to confirm (unknown
+ * versions fail loudly at request time, never silently).
+ *
+ * This is a misconfiguration guardrail, not an attacker boundary: the model
+ * ID comes only from operator-owned server configuration, never from user
+ * input — no client request can smuggle a model choice in. (A template type
+ * like `muse-${string}` could not enforce this on its own: environment
+ * values arrive as plain strings, so the runtime predicate below is the
+ * real mechanism.)
+ */
+const SUPPORTED_MODEL_PATTERN = /^muse-(?:spark-\d+\.\d+(?:-contributor)?|wonder-\d+\.\d+)$/;
+
+export const isSupportedModelId = (modelId: string): boolean =>
+  SUPPORTED_MODEL_PATTERN.test(modelId);
 
 /**
  * Explicitly discriminated ranking backend selection. Pure: takes the parsed
@@ -62,7 +83,7 @@ export const META_MODEL_ALLOWLIST = ["muse-spark-1.3", "muse-spark-1.2", "muse-s
  * process.env. Reads no network and performs no I/O.
  *
  * - Deterministic: local relevance order, no provider call.
- * - Muse: provider call with a validated key, allowlisted model, https base.
+ * - Muse: provider call with a validated key, supported model shape, https base.
  * - Misconfigured: muse was requested but key/model/baseUrl is unusable.
  *   Callers must fail loudly (HTTP 500), never silently degrade.
  */
@@ -152,8 +173,10 @@ export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
 
   const modelId = env.MODEL_MODEL_ID ?? DEFAULT_MODEL_ID;
 
-  if (!META_MODEL_ALLOWLIST.some((allowed) => allowed === modelId)) {
-    return RankingConfig.Misconfigured({ reason: `Unknown model "${modelId}"` });
+  if (!isSupportedModelId(modelId)) {
+    return RankingConfig.Misconfigured({
+      reason: `Unsupported model "${modelId}" (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>)`,
+    });
   }
 
   const baseUrl = env.MODEL_BASE_URL ?? DEFAULT_MODEL_BASE_URL;

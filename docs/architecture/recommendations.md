@@ -1,7 +1,8 @@
 # Recommendations (implemented)
 
 **Status: Implemented** on PR #3 (`feat/food-discovery`). Public,
-session-optional dish chooser (`/recommend`) plus a minimal public dish
+session-optional dish chooser embedded in the homepage (`/#recommend`)
+plus a minimal public dish
 page (`/dishes/$dishId`, slug or numeric id) linked from result cards.
 The database owns facts; Muse only orders already-eligible candidates.
 
@@ -12,10 +13,11 @@ The database owns facts; Muse only orders already-eligible candidates.
 request by `resolveRankingConfig` (env parsing itself is cached):
 
 - `deterministic` → deterministic ranking with an honest note. Always available, no credentials needed.
-- `muse` + valid key + allowlisted model (`muse-spark-1.3` family) +
-  https base URL → Muse ranking with deterministic fallback only for
-  transient/provider-output failures.
-- `muse` with a missing key, unknown model, or non-https endpoint →
+- `muse` + valid key + supported model shape (`muse-spark-<major>.<minor>`
+  releases, Standard or `-contributor` tier, plus `muse-wonder-<major>.<minor>`
+  releases) + https base URL → Muse ranking
+  with deterministic fallback only for transient/provider-output failures.
+- `muse` with a missing key, out-of-shape model, or non-https endpoint →
   `Misconfigured`: the request fails closed (HTTP 500, no silent
   deterministic mode, nothing logged but the failure class).
 
