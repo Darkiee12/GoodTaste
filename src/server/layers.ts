@@ -13,6 +13,10 @@ import type { CatalogService } from "@/modules/food-discovery/server/operations/
 import { CurationServiceLive } from "@/modules/food-discovery/server/operations/curation-service";
 import type { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
 import type { DishService } from "@/modules/food-discovery/server/operations/dish-service";
+import {
+  type RecommendationService,
+  RecommendationServiceLive,
+} from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { CurationRepository } from "@/modules/food-discovery/server/repository/curation-repository";
 import type { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import type { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
@@ -42,6 +46,8 @@ import { DatabaseLive } from "@/server/database/client";
 import type { Database } from "@/server/database/client";
 import { RateLimiterLive, RateLimitPolicyLive } from "@/server/http/rate-limit";
 import type { RateLimitPolicy } from "@/server/http/rate-limit";
+import { MetaClientLive } from "@/server/integrations/meta-client";
+import type { MetaClient } from "@/server/integrations/meta-client";
 
 const CurationLive = Layer.provide(CurationServiceLive, RepositoriesLive);
 const FxLive = Layer.provide(FxRatesLive, FxProviderLive);
@@ -58,6 +64,11 @@ const DashboardLive = Layer.provide(
   Layer.mergeAll(RepositoriesLive, CurationLive, DomainLive),
 );
 
+const RecommendationLive = Layer.provide(
+  RecommendationServiceLive,
+  Layer.mergeAll(RepositoriesLive, MetaClientLive, DatabaseLive),
+);
+
 export const AppLive = Layer.mergeAll(
   DatabaseLive,
   FxLive,
@@ -69,6 +80,8 @@ export const AppLive = Layer.mergeAll(
   DashboardLive,
   UserRepositoriesLive,
   UserLive,
+  MetaClientLive,
+  RecommendationLive,
 );
 
 export type AppServices =
@@ -88,6 +101,8 @@ export type AppServices =
   | CatalogImportService
   | AdminDashboardService
   | CurationService
+  | RecommendationService
+  | MetaClient
   | CurationRepository
   | UserRepository
   | RoleRepository

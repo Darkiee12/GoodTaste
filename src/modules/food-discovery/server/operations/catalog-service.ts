@@ -32,6 +32,7 @@ import type {
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const MAX_COUNTRY_LIMIT = 300;
 
 const clampLimit = (limit: number | undefined): number => {
   if (limit === undefined || Number.isNaN(limit)) {
@@ -39,6 +40,14 @@ const clampLimit = (limit: number | undefined): number => {
   }
 
   return Math.min(Math.max(Math.floor(limit), 1), MAX_LIMIT);
+};
+
+const clampCountryLimit = (limit: number | undefined): number => {
+  if (limit === undefined || Number.isNaN(limit)) {
+    return MAX_COUNTRY_LIMIT;
+  }
+
+  return Math.min(Math.max(Math.floor(limit), 1), MAX_COUNTRY_LIMIT);
 };
 
 const checkLocale = (locale: string): Effect.Effect<string, InvalidLocale> =>
@@ -122,6 +131,16 @@ export class CatalogService extends Context.Service<
       locale: string,
     ) => Effect.Effect<PlaceDetail, CatalogServiceError, Database>;
     readonly listPlaces: (
+      locale: string,
+      limit: number | undefined,
+    ) => Effect.Effect<ReadonlyArray<PlaceSummary>, CatalogServiceError, Database>;
+    /**
+     * Country chooser for the recommendation region step: kind-filtered at
+     * the database level with verified ISO identity, so no eligible country
+     * can hide behind a generic place-list limit. Deterministic id order;
+     * display sorting happens client-side on localized labels.
+     */
+    readonly listCountries: (
       locale: string,
       limit: number | undefined,
     ) => Effect.Effect<ReadonlyArray<PlaceSummary>, CatalogServiceError, Database>;
@@ -355,6 +374,72 @@ export const CatalogServiceLive = Layer.effect(
         };
       });
 
+    type PlaceNameLabel = {
+      readonly languageTag: string;
+      readonly name: string;
+      readonly isPreferred: boolean;
+    };
+
+    type GroupedPlace = {
+      readonly kind: string;
+      readonly iso3166: string | null;
+      readonly displayLatitude: number | null;
+      readonly displayLongitude: number | null;
+      readonly names: Array<PlaceNameLabel>;
+    };
+
+    const groupPlaceRows = (
+      rows: ReadonlyArray<{
+        readonly id: bigint;
+        readonly kind: string;
+        readonly iso3166: string | null;
+        readonly display_latitude: number | null;
+        readonly display_longitude: number | null;
+        readonly language_tag: string;
+        readonly name: string;
+        readonly is_preferred: boolean;
+      }>,
+    ): ReadonlyMap<string, GroupedPlace> => {
+      const byPlace = new Map<string, GroupedPlace>();
+
+      for (const row of rows) {
+        const key = row.id.toString();
+        const existing = byPlace.get(key);
+
+        const label: PlaceNameLabel = {
+          languageTag: row.language_tag,
+          name: row.name,
+          isPreferred: row.is_preferred,
+        };
+
+        const current = existing ?? {
+          kind: row.kind,
+          iso3166: row.iso3166,
+          displayLatitude: row.display_latitude,
+          displayLongitude: row.display_longitude,
+          names: [],
+        };
+
+        current.names.push(label);
+        byPlace.set(key, current);
+      }
+
+      return byPlace;
+    };
+
+    const toPlaceSummaries = (
+      grouped: ReadonlyMap<string, GroupedPlace>,
+      checkedLocale: string,
+    ): Array<PlaceSummary> =>
+      [...grouped].map(([id, entry]) => ({
+        id,
+        kind: entry.kind,
+        iso3166: entry.iso3166,
+        displayName: pickDisplayName(entry.names, checkedLocale)?.name,
+        displayLatitude: entry.displayLatitude,
+        displayLongitude: entry.displayLongitude,
+      }));
+
     const listPlaces = (
       locale: string,
       limit: number | undefined,
@@ -363,52 +448,18 @@ export const CatalogServiceLive = Layer.effect(
         const checkedLocale = yield* checkLocale(locale);
         const rows = yield* placeRepository.listWithNames(clampLimit(limit));
 
-        const byPlace = new Map<
-          string,
-          {
-            readonly kind: string;
-            readonly iso3166: string | null;
-            readonly displayLatitude: number | null;
-            readonly displayLongitude: number | null;
-            readonly names: Array<{
-              readonly languageTag: string;
-              readonly name: string;
-              readonly isPreferred: boolean;
-            }>;
-          }
-        >();
+        return toPlaceSummaries(groupPlaceRows(rows), checkedLocale);
+      });
 
-        for (const row of rows) {
-          const key = row.id.toString();
-          const existing = byPlace.get(key);
+    const listCountries = (
+      locale: string,
+      limit: number | undefined,
+    ): Effect.Effect<ReadonlyArray<PlaceSummary>, CatalogServiceError, Database> =>
+      Effect.gen(function* () {
+        const checkedLocale = yield* checkLocale(locale);
+        const rows = yield* placeRepository.countriesWithNames(clampCountryLimit(limit));
 
-          const label = {
-            languageTag: row.language_tag,
-            name: row.name,
-            isPreferred: row.is_preferred,
-          };
-
-          if (existing === undefined) {
-            byPlace.set(key, {
-              kind: row.kind,
-              iso3166: row.iso3166,
-              displayLatitude: row.display_latitude,
-              displayLongitude: row.display_longitude,
-              names: [label],
-            });
-          } else {
-            existing.names.push(label);
-          }
-        }
-
-        return [...byPlace].map(([id, entry]) => ({
-          id,
-          kind: entry.kind,
-          iso3166: entry.iso3166,
-          displayName: pickDisplayName(entry.names, checkedLocale)?.name,
-          displayLatitude: entry.displayLatitude,
-          displayLongitude: entry.displayLongitude,
-        }));
+        return toPlaceSummaries(groupPlaceRows(rows), checkedLocale);
       });
 
     const listCategories = (
@@ -522,6 +573,7 @@ export const CatalogServiceLive = Layer.effect(
       searchPlaces,
       getPlace,
       listPlaces,
+      listCountries,
       listCategories,
       listCuisines,
     });

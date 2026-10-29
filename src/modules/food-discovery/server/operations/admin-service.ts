@@ -10,6 +10,7 @@ import {
   InvalidSearchFilter,
 } from "@/modules/food-discovery/server/domain/errors";
 import {
+  type DishStatus,
   encodeDbId,
   isDbIdString,
   isLanguageTag,
@@ -74,14 +75,14 @@ export interface CreateDishNameInput {
 
 export interface CreateDishInput {
   readonly slug?: string | undefined;
-  readonly status?: string | undefined;
+  readonly status?: DishStatus | undefined;
   readonly parentSlug?: string | undefined;
   readonly names: ReadonlyArray<CreateDishNameInput>;
 }
 
 export interface UpdateDishInput {
   readonly slug?: string | undefined;
-  readonly status?: string | undefined;
+  readonly status?: DishStatus | undefined;
   readonly parentSlug?: string | undefined;
 }
 
@@ -100,9 +101,9 @@ export class AdminService extends Context.Service<
     readonly updateDishStatus: (
       actor: string,
       id: string,
-      status: string,
+      status: DishStatus,
     ) => Effect.Effect<
-      { readonly id: string; readonly status: string },
+      { readonly id: string; readonly status: DishStatus },
       AdminServiceError,
       Database
     >;
@@ -149,8 +150,10 @@ const checkDishId = (id: string): Effect.Effect<bigint, InvalidSearchFilter> =>
     ? Effect.succeed(BigInt(id))
     : Effect.fail(new InvalidSearchFilter({ reason: "dish id must be a decimal id string" }));
 
-const checkStatus = (status: string): Effect.Effect<string, InvalidSearchFilter> =>
-  STATUSES.has(status)
+const isDishStatus = (status: string): status is DishStatus => STATUSES.has(status);
+
+const checkStatus = (status: string): Effect.Effect<DishStatus, InvalidSearchFilter> =>
+  isDishStatus(status)
     ? Effect.succeed(status)
     : Effect.fail(new InvalidSearchFilter({ reason: "unknown dish status" }));
 
@@ -441,7 +444,7 @@ export const AdminServiceLive = Layer.effect(
         return { id: encodeDbId(updated.id), slug: updated.slug };
       });
 
-    const updateDishStatus = (actor: string, id: string, status: string) =>
+    const updateDishStatus = (actor: string, id: string, status: DishStatus) =>
       Effect.gen(function* () {
         const updated = yield* updateDish(actor, id, { status });
 

@@ -1,3 +1,4 @@
+import { Data } from "effect";
 import { z } from "zod";
 
 /**
@@ -21,6 +22,21 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1, "SMTP_PASSWORD is required"),
   EMAIL_FROM: z.string().min(1, "EMAIL_FROM is required"),
   TRUSTED_PROXIES: z.string().default(""),
+  // Optional Muse ranking integration. Every MODEL_* field stays optional
+  // in both input and output so startup never depends on AI configuration
+  // and existing ServerEnv literals keep compiling; resolveRankingConfig()
+  // below applies the documented defaults at the use site. Note
+  // RECOMMENDATION_PROVIDER is deliberately `.optional()` rather than
+  // `.default("deterministic")`: a Zod default would make the field required
+  // in the inferred ServerEnv output type and break existing literal
+  // constructions; undefined means deterministic at the use site.
+  RECOMMENDATION_PROVIDER: z.enum(["deterministic", "muse"]).optional(),
+  MODEL_API_KEY: z.string().optional(),
+  MODEL_MODEL_ID: z.string().optional(),
+  MODEL_BASE_URL: z.string().optional(),
+  MODEL_TIMEOUT_MS: z.coerce.number().int().optional(),
+  MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
+  MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
@@ -36,4 +52,122 @@ export const serverEnv = (): ServerEnv => {
 /** Test-only escape hatch: reset the cached parse between cases. */
 export const resetServerEnvCache = (): void => {
   cached = undefined;
+};
+
+export const META_MODEL_ALLOWLIST = ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1"] as const;
+
+/**
+ * Explicitly discriminated ranking backend selection. Pure: takes the parsed
+ * environment so unit tests can construct ServerEnv literals without touching
+ * process.env. Reads no network and performs no I/O.
+ *
+ * - Deterministic: local relevance order, no provider call.
+ * - Muse: provider call with a validated key, allowlisted model, https base.
+ * - Misconfigured: muse was requested but key/model/baseUrl is unusable.
+ *   Callers must fail loudly (HTTP 500), never silently degrade.
+ */
+export type RankingConfig = Data.TaggedEnum<{
+  Deterministic: {
+    readonly candidateLimit: number;
+    readonly outputLimit: number;
+  };
+  Muse: {
+    readonly apiKey: string;
+    readonly modelId: string;
+    readonly baseUrl: string;
+    readonly timeoutMs: number;
+    readonly candidateLimit: number;
+    readonly outputLimit: number;
+  };
+  Misconfigured: { readonly reason: string };
+}>;
+
+export const RankingConfig = Data.taggedEnum<RankingConfig>();
+
+export const DEFAULT_MODEL_ID = "muse-spark-1.3";
+
+export const DEFAULT_MODEL_BASE_URL = "https://api.meta.ai/v1";
+
+export const DEFAULT_MODEL_TIMEOUT_MS = 15000;
+
+const clampCandidateLimit = (value: number | undefined): number => {
+  if (value === undefined || Number.isNaN(value)) {
+    return 60;
+  }
+
+  return Math.min(Math.max(Math.floor(value), 1), 100);
+};
+
+const clampOutputLimit = (value: number | undefined): number => {
+  if (value === undefined || Number.isNaN(value)) {
+    return 10;
+  }
+
+  return Math.min(Math.max(Math.floor(value), 1), 10);
+};
+
+/**
+ * Bounded provider timeout: 1s floor avoids instant-abort loops, 60s
+ * ceiling avoids hung recommendation requests holding the 30s server-fn
+ * budget hostage. Out-of-range values clamp instead of failing startup
+ * (offline shape validation only; the provider is never contacted here).
+ */
+const clampTimeoutMs = (value: number | undefined): number => {
+  if (value === undefined || Number.isNaN(value)) {
+    return DEFAULT_MODEL_TIMEOUT_MS;
+  }
+
+  return Math.min(Math.max(Math.floor(value), 1000), 60000);
+};
+
+const isHttpsUrl = (value: string): boolean => {
+  // Operator-controlled endpoint: any https URL passes shape validation so
+  // self-hosted Meta-compatible gateways work; the API key is only ever sent
+  // to this operator-chosen host. There is no host allowlist by design —
+  // the trust boundary is the operator's own configuration, never client input.
+  let parsed: URL;
+
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+
+  return parsed.protocol === "https:";
+};
+
+export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
+  const candidateLimit = clampCandidateLimit(env.MODEL_CANDIDATE_LIMIT);
+  const outputLimit = clampOutputLimit(env.MODEL_OUTPUT_LIMIT);
+
+  if (env.RECOMMENDATION_PROVIDER !== "muse") {
+    return RankingConfig.Deterministic({ candidateLimit, outputLimit });
+  }
+
+  const apiKey = env.MODEL_API_KEY;
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    return RankingConfig.Misconfigured({ reason: "MODEL_API_KEY is not configured" });
+  }
+
+  const modelId = env.MODEL_MODEL_ID ?? DEFAULT_MODEL_ID;
+
+  if (!META_MODEL_ALLOWLIST.some((allowed) => allowed === modelId)) {
+    return RankingConfig.Misconfigured({ reason: `Unknown model "${modelId}"` });
+  }
+
+  const baseUrl = env.MODEL_BASE_URL ?? DEFAULT_MODEL_BASE_URL;
+
+  if (!isHttpsUrl(baseUrl)) {
+    return RankingConfig.Misconfigured({ reason: "MODEL_BASE_URL must be an https URL" });
+  }
+
+  return RankingConfig.Muse({
+    apiKey,
+    modelId,
+    baseUrl,
+    timeoutMs: clampTimeoutMs(env.MODEL_TIMEOUT_MS),
+    candidateLimit,
+    outputLimit,
+  });
 };

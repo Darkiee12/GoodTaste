@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { DishNotFound } from "@/modules/food-discovery/server/domain/errors";
-import { isDbIdString } from "@/modules/food-discovery/server/domain/ids";
+import { isDbIdString, type DishStatus } from "@/modules/food-discovery/server/domain/ids";
 import {
   type AdminServiceError,
   AdminService,
@@ -74,7 +74,7 @@ export class AdminDashboardService extends Context.Service<
       Database | DishRepository | CurationRepository
     >;
     readonly listDishes: (
-      status: string,
+      status: DishStatus,
       cursor: bigint,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<AdminDishRow>, DatabaseError, Database | DishRepository>;
@@ -134,9 +134,9 @@ export class AdminDashboardService extends Context.Service<
     readonly publishDish: (
       userId: string,
       dishId: string,
-      status: string,
+      status: DishStatus,
     ) => Effect.Effect<
-      { readonly id: string; readonly status: string },
+      { readonly id: string; readonly status: DishStatus },
       AdminServiceError,
       Database | AdminService
     >;

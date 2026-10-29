@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 
+import placeCountriesWithNames from "@/modules/food-discovery/server/repository/sql/place-countries-with-names.sql";
 import placeFindById from "@/modules/food-discovery/server/repository/sql/place-find-by-id.sql";
 import placeFindByIso from "@/modules/food-discovery/server/repository/sql/place-find-by-iso.sql";
 import placeFindDescendants from "@/modules/food-discovery/server/repository/sql/place-find-descendants.sql";
@@ -17,24 +18,6 @@ export type PlaceNameRow = (typeof placeNamesByPlaceIds)["~reylo"]["element"];
 
 export type PlaceListRow = (typeof placeListWithNames)["~reylo"]["element"];
 
-export interface PlaceRecord {
-  readonly id: bigint;
-  readonly kind: string;
-  readonly iso3166: string | null;
-  readonly displayLatitude: number | null;
-  readonly displayLongitude: number | null;
-  readonly displayNote: string | null;
-}
-
-const toRecord = (row: PlaceRow): PlaceRecord => ({
-  id: row.id,
-  kind: row.kind,
-  iso3166: row.iso3166,
-  displayLatitude: row.display_latitude,
-  displayLongitude: row.display_longitude,
-  displayNote: row.display_note,
-});
-
 export class PlaceRepository extends Context.Service<
   PlaceRepository,
   {
@@ -48,14 +31,14 @@ export class PlaceRepository extends Context.Service<
       DatabaseError,
       Database
     >;
-    readonly findById: (id: bigint) => Effect.Effect<PlaceRecord | null, DatabaseError, Database>;
-    readonly findByIso: (iso: string) => Effect.Effect<PlaceRecord | null, DatabaseError, Database>;
+    readonly findById: (id: bigint) => Effect.Effect<PlaceRow | null, DatabaseError, Database>;
+    readonly findByIso: (iso: string) => Effect.Effect<PlaceRow | null, DatabaseError, Database>;
     readonly namesByPlaceIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<PlaceNameRow>, DatabaseError, Database>;
     readonly descendants: (
       id: bigint,
-    ) => Effect.Effect<ReadonlyArray<PlaceRecord>, DatabaseError, Database>;
+    ) => Effect.Effect<ReadonlyArray<PlaceRow>, DatabaseError, Database>;
     readonly descendantIds: (
       id: bigint,
     ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
@@ -66,6 +49,9 @@ export class PlaceRepository extends Context.Service<
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
     readonly listWithNames: (
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<PlaceListRow>, DatabaseError, Database>;
+    readonly countriesWithNames: (
       limit: number,
     ) => Effect.Effect<ReadonlyArray<PlaceListRow>, DatabaseError, Database>;
     readonly parentEdges: () => Effect.Effect<
@@ -92,13 +78,13 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
     Effect.gen(function* () {
       const row = yield* runQuery("place/find-by-id", (sql) => placeFindById.run(sql, { id }));
 
-      return row === null ? null : toRecord(row);
+      return row;
     }),
   findByIso: (iso) =>
     Effect.gen(function* () {
       const row = yield* runQuery("place/find-by-iso", (sql) => placeFindByIso.run(sql, { iso }));
 
-      return row === null ? null : toRecord(row);
+      return row;
     }),
   namesByPlaceIds: (ids) =>
     Effect.gen(function* () {
@@ -112,14 +98,7 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
         placeFindDescendants.run(sql, { id }),
       );
 
-      return rows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        iso3166: row.iso3166,
-        displayLatitude: row.display_latitude,
-        displayLongitude: row.display_longitude,
-        displayNote: row.display_note,
-      }));
+      return rows;
     }),
   descendantIds: (id) =>
     Effect.gen(function* () {
@@ -145,6 +124,12 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
   listWithNames: (limit) =>
     Effect.gen(function* () {
       return yield* runQuery("place/list", (sql) => placeListWithNames.run(sql, { limit }));
+    }),
+  countriesWithNames: (limit) =>
+    Effect.gen(function* () {
+      return yield* runQuery("place/countries", (sql) =>
+        placeCountriesWithNames.run(sql, { limit }),
+      );
     }),
   parentEdges: () =>
     Effect.gen(function* () {

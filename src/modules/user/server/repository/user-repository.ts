@@ -5,6 +5,7 @@ import favoriteByUserDish from "@/modules/user/server/repository/sql/favorite-by
 import favoriteDelete from "@/modules/user/server/repository/sql/favorite-delete.sql";
 import favoriteInsert from "@/modules/user/server/repository/sql/favorite-insert.sql";
 import favoritesByUserId from "@/modules/user/server/repository/sql/favorites-by-user-id.sql";
+import favoritesStatusByDishIds from "@/modules/user/server/repository/sql/favorites-status-by-dish-ids.sql";
 import profileByUserId from "@/modules/user/server/repository/sql/profile-by-user-id.sql";
 import profileUpsert from "@/modules/user/server/repository/sql/profile-upsert.sql";
 import type { Database } from "@/server/database/client";
@@ -21,6 +22,8 @@ export type ProfileRow = (typeof profileByUserId)["~reylo"]["element"];
 export type FavoriteRow = (typeof favoritesByUserId)["~reylo"]["element"];
 
 export type FavoriteKeyRow = (typeof favoriteByUserDish)["~reylo"]["element"];
+
+export type FavoriteStatusRow = (typeof favoritesStatusByDishIds)["~reylo"]["element"];
 
 const insertConflict = (
   operation: string,
@@ -65,7 +68,12 @@ export class UserRepository extends Context.Service<
     readonly favoritesByUserId: (
       userId: string,
       limit: number,
+      offset: number,
     ) => Effect.Effect<ReadonlyArray<FavoriteRow>, DatabaseError, Database>;
+    readonly favoriteStatusByDishIds: (
+      userId: string,
+      ids: ReadonlyArray<bigint>,
+    ) => Effect.Effect<ReadonlyArray<FavoriteStatusRow>, DatabaseError, Database>;
     readonly insertFavorite: (
       userId: string,
       dishId: bigint,
@@ -102,9 +110,13 @@ export const UserRepositoryLive = Layer.succeed(UserRepository, {
     runQuery("user/favorite-by-user-dish", (sql) =>
       favoriteByUserDish.run(sql, { user_id: userId, dish_id: dishId }),
     ),
-  favoritesByUserId: (userId, limit) =>
+  favoritesByUserId: (userId, limit, offset) =>
     runQuery("user/favorites-by-user-id", (sql) =>
-      favoritesByUserId.run(sql, { user_id: userId, limit }),
+      favoritesByUserId.run(sql, { user_id: userId, limit, offset }),
+    ),
+  favoriteStatusByDishIds: (userId, ids) =>
+    runQuery("user/favorites-status-by-dish-ids", (sql) =>
+      favoritesStatusByDishIds.run(sql, { user_id: userId, ids: [...ids] }),
     ),
   insertFavorite: (userId, dishId) =>
     Effect.gen(function* () {

@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  MEAL_OCCASIONS,
+  RECOMMENDATION_MOODS,
+} from "@/modules/food-discovery/recommendation.constants";
+
 export const localeSchema = z
   .string()
   .regex(/^[a-z]{2,3}(-[A-Za-z]{2,8})?$/, "locale must be a BCP 47 tag")
@@ -45,6 +50,11 @@ export const dishDetailParamsSchema = z.object({
   locale: localeSchema,
 });
 
+export const dishBatchQuerySchema = z.object({
+  ids: z.array(dbIdSchema).min(1).max(50),
+  locale: localeSchema,
+});
+
 export const relatedQuerySchema = z.object({
   locale: localeSchema,
   limit: z.coerce.number().int().min(1).max(20).default(8),
@@ -61,11 +71,37 @@ export const placeQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+/** Country chooser bound: all ISO countries fit well under this cap. */
+export const countryQuerySchema = z.object({
+  locale: localeSchema,
+  limit: z.coerce.number().int().min(1).max(300).default(250),
+});
+
 export const placeDishesQuerySchema = z.object({
   locale: localeSchema,
   association: z.enum(["origin", "associated", "popular"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
+
+const mealSchema = z.enum(MEAL_OCCASIONS).default("anything");
+
+const recommendationMoodSchema = z.enum(RECOMMENDATION_MOODS).default("any");
+
+export const recommendationQuerySchema = z.object({
+  meal: mealSchema,
+  avoid: z.array(z.string().max(100)).max(20).default([]),
+  allergies: z.array(z.string().max(100)).max(20).default([]),
+  cuisine: z.string().max(80).optional(),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
+    .optional(),
+  mood: recommendationMoodSchema,
+  locale: localeSchema,
+  surpriseSeed: z.number().int().min(0).max(2147483647).default(0),
+});
+
+export type RecommendationQuery = z.infer<typeof recommendationQuerySchema>;
 
 const nameKindSchema = z.enum(["native", "localized", "alias", "transliteration"]);
 

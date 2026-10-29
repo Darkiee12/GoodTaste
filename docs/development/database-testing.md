@@ -36,7 +36,7 @@ fails closed without it.
 
 Keep database test fixtures synthetic and disposable; never use user photographs, real account tokens or production credentials. Use PostgreSQL for query tests rather than mocking SQL semantics.
 
-Integration tests refuse to run unless `DATABASE_URL` points at the disposable loopback `feastjourney` test database (`tests/integration/cleanup.ts` fails fast otherwise). Pointing tests at a production or shared database is not supported.
+Integration tests refuse to run unless `DATABASE_URL` points at the disposable loopback `feastjourney` test database. The guard lives in `tests/bootstrap.ts`, which Bun preloads before any test module evaluates (`bunfig.toml` `[test] preload`), so static application imports can never observe an unconfigured environment regardless of file order; `tests/integration/cleanup.ts` keeps per-suite fixture tracking plus the same guard as a fallback.
 
 ## Developer loop
 
