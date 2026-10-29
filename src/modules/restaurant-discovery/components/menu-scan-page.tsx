@@ -1,0 +1,606 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
+
+import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
+import { menuLanguageNames } from "@/modules/restaurant-discovery/components/menu-copy";
+import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
+import { presentScan } from "@/modules/restaurant-discovery/menu-presentation";
+import { menuScanClient, validateMenuFiles } from "@/modules/restaurant-discovery/menu-scan-client";
+import type { ScanView } from "@/modules/restaurant-discovery/menu-scan-client";
+import {
+  menuLanguages,
+  menuLanguageSchema,
+  menuScanDocumentSchema,
+} from "@/modules/restaurant-discovery/menu-scan.schema";
+import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
+
+const english = {
+  title: "Read the menu. Choose your meal.",
+  introduction:
+    "Photograph a menu, understand it in your language, then show your choices to the waiter. Guests are welcome.",
+  privacy:
+    "Personal scans stay private and expire after 24 hours on FeastJourney. Photos are sent to Meta for analysis in standard mode; Meta may retain them under its own terms. Contributing is optional and never publishes your photograph.",
+  camera: "Take a menu photograph",
+  gallery: "Choose menu photographs",
+  cameraHelp:
+    "If the camera is unavailable or permission is denied, choose images from your gallery. JPEG, PNG or WebP; up to 6 pages, 8 MiB each, 24 MiB together.",
+  language: "Translate into",
+  branch: "Restaurant branch ID (optional)",
+  branchHelp:
+    "Use an existing FeastJourney branch ID if known. Leave empty for an unknown restaurant.",
+  pages: "Menu pages",
+  earlier: "Move earlier",
+  later: "Move later",
+  removePhoto: "Remove photograph",
+  analyze: "Analyze menu",
+  retry: "Start a new analysis",
+  analyzing: "Reading and translating your menu…",
+  uploading: "Uploading menu photograph",
+  restoring: "Checking your private scan…",
+  loading: "Loading private scan…",
+  saving: "Saving a new revision…",
+  delete: "Delete private scan",
+  deleting: "Removing private access and scheduling photo deletion…",
+  deleted:
+    "Private access removed. Stored photos are deleted by retryable cleanup; this may take time.",
+  save: "Save corrections",
+  unsaved: "Your corrections are visible now. Save them before contributing.",
+  sourceLanguage: "Confirm the original menu language",
+  unknown: "Unknown",
+  empty: "Add at least one clear menu photograph to begin.",
+  uploadRetry:
+    "Retrying starts a fresh scan and removes the previous attempt from your private view.",
+  refresh: "Reload scan status",
+  processing: "This scan is being processed. Reload its status before starting another analysis.",
+  contributeTitle: "Help the next traveler",
+  contributeHelp:
+    "You can send this saved revision and its private photographs to FeastJourney curators. They may reuse approved menu facts for the selected branch. Evidence is kept for up to 30 days for review; approval does not publish your photograph. Personal use works without contributing.",
+  consent:
+    "I agree to submit this exact saved revision and private evidence for curator review under menu-facts-v1.",
+  contribute: "Contribute saved menu",
+  contributing: "Submitting your contribution for private review…",
+  contributed: "Contribution status",
+  revision: "Saved revision",
+  expired: "Private scan expires",
+  claim: "Keep my previous guest scan in this account",
+  claimHelp:
+    "A guest scan was created in this browser before sign-in. Choose whether to move it into this account.",
+  claiming: "Moving the guest scan into your account…",
+  failure: "This request could not be completed. Check your connection and retry.",
+};
+
+const vietnamese: typeof english = {
+  title: "Hiểu thực đơn. Chọn món ngon.",
+  introduction:
+    "Chụp thực đơn, đọc bằng ngôn ngữ của bạn, rồi đưa lựa chọn cho nhân viên xem. Không cần đăng ký.",
+  privacy:
+    "Bản quét cá nhân luôn riêng tư và hết hạn sau 24 giờ trên FeastJourney. Ảnh được gửi cho Meta để phân tích ở chế độ tiêu chuẩn; Meta có thể lưu ảnh theo điều khoản riêng. Đóng góp là tùy chọn và không công khai ảnh.",
+  camera: "Chụp ảnh thực đơn",
+  gallery: "Chọn ảnh thực đơn",
+  cameraHelp:
+    "Nếu không dùng được camera hoặc bị từ chối quyền, hãy chọn ảnh từ thư viện. JPEG, PNG hoặc WebP; tối đa 6 trang, mỗi ảnh 8 MiB, tổng 24 MiB.",
+  language: "Dịch sang",
+  branch: "Mã chi nhánh nhà hàng (không bắt buộc)",
+  branchHelp: "Dùng mã chi nhánh FeastJourney có sẵn nếu biết. Để trống nếu chưa rõ nhà hàng.",
+  pages: "Các trang thực đơn",
+  earlier: "Chuyển lên trước",
+  later: "Chuyển ra sau",
+  removePhoto: "Xóa ảnh đã chọn",
+  analyze: "Phân tích thực đơn",
+  retry: "Bắt đầu phân tích mới",
+  analyzing: "Đang đọc và dịch thực đơn…",
+  uploading: "Đang tải ảnh thực đơn",
+  restoring: "Đang kiểm tra bản quét riêng tư…",
+  loading: "Đang tải bản quét riêng tư…",
+  saving: "Đang lưu phiên bản mới…",
+  delete: "Xóa bản quét riêng tư",
+  deleting: "Đang thu hồi truy cập và lên lịch xóa ảnh…",
+  deleted:
+    "Đã thu hồi truy cập riêng tư. Ảnh sẽ được xóa qua tác vụ có thể thử lại; việc này có thể cần thời gian.",
+  save: "Lưu bản sửa",
+  unsaved: "Bản sửa hiển thị ngay. Hãy lưu trước khi đóng góp.",
+  sourceLanguage: "Xác nhận ngôn ngữ gốc của thực đơn",
+  unknown: "Chưa rõ",
+  empty: "Thêm ít nhất một ảnh thực đơn rõ nét để bắt đầu.",
+  uploadRetry: "Thử lại sẽ tạo bản quét mới và thu hồi truy cập riêng tư của lần trước.",
+  refresh: "Tải lại trạng thái",
+  processing: "Bản quét đang được xử lý. Tải lại trạng thái trước khi phân tích lần nữa.",
+  contributeTitle: "Giúp người du lịch tiếp theo",
+  contributeHelp:
+    "Bạn có thể gửi đúng phiên bản đã lưu và ảnh riêng tư cho người duyệt FeastJourney. Thông tin được duyệt có thể được dùng lại cho chi nhánh đã chọn. Bằng chứng được giữ tối đa 30 ngày để xem xét; duyệt không công khai ảnh. Không cần đóng góp để dùng cá nhân.",
+  consent:
+    "Tôi đồng ý gửi đúng phiên bản đã lưu và bằng chứng riêng tư này để xem xét theo menu-facts-v1.",
+  contribute: "Đóng góp thực đơn đã lưu",
+  contributing: "Đang gửi đóng góp riêng tư để xem xét…",
+  contributed: "Trạng thái đóng góp",
+  revision: "Phiên bản đã lưu",
+  expired: "Bản quét riêng tư hết hạn",
+  claim: "Lưu bản quét của khách trước đó vào tài khoản này",
+  claimHelp:
+    "Một bản quét khách đã được tạo trong trình duyệt này trước khi đăng nhập. Bạn có thể chuyển bản quét vào tài khoản này.",
+  claiming: "Đang chuyển bản quét vào tài khoản…",
+  failure: "Không thể hoàn thành yêu cầu. Kiểm tra kết nối và thử lại.",
+};
+
+type SelectedPhoto = { readonly id: string; readonly file: File; readonly previewUrl: string };
+
+const storageOwner = "feastjourney:menu-scan-owner:v1";
+const storageScan = "feastjourney:menu-scan:v1";
+
+export function MenuScanPage({
+  locale,
+  venueId,
+  userId,
+}: {
+  readonly locale: string;
+  readonly venueId?: string;
+  readonly userId?: string | null;
+}) {
+  const copy = locale === "vi" ? vietnamese : english;
+  const owner = userId ?? "guest";
+
+  const [targetLanguage, setTargetLanguage] = useState(() => {
+    const parsed = menuLanguageSchema.safeParse(locale);
+
+    return parsed.success ? parsed.data : "en";
+  });
+
+  const [branchId, setBranchId] = useState(venueId ?? "");
+  const [photos, setPhotos] = useState<ReadonlyArray<SelectedPhoto>>([]);
+  const [view, setView] = useState<ScanView | null>(null);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [document, setDocument] = useState<MenuScanDocument | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [claimCandidate, setClaimCandidate] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(copy.restoring);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const controller = useRef<AbortController | null>(null);
+  const previewUrls = useRef(new Set<string>());
+  const busy = status !== null;
+
+  const adoptView = useCallback((next: ScanView): void => {
+    setView(next);
+    setScanId(next.scan.id);
+    setDocument(next.document);
+    setDirty(false);
+    setConsent(false);
+  }, []);
+
+  const failureMessage = copy.failure;
+
+  useEffect(() => {
+    const abort = new AbortController();
+    controller.current = abort;
+    const urls = previewUrls.current;
+
+    const restore = async (): Promise<void> => {
+      try {
+        const previousOwner = sessionStorage.getItem(storageOwner);
+        const remembered = sessionStorage.getItem(storageScan);
+        sessionStorage.setItem(storageOwner, owner);
+
+        if (previousOwner !== owner) {
+          sessionStorage.removeItem(storageScan);
+
+          if (previousOwner === "guest" && owner !== "guest") setClaimCandidate(remembered);
+
+          return;
+        }
+
+        if (remembered === null) return;
+        const next = await menuScanClient.get(remembered, abort.signal);
+
+        if (abort.signal.aborted) return;
+        adoptView(next);
+      } catch {
+        if (!abort.signal.aborted) setError(failureMessage);
+      } finally {
+        if (!abort.signal.aborted) setStatus(null);
+      }
+    };
+
+    void restore();
+
+    return () => {
+      abort.abort();
+
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [owner, failureMessage, adoptView]);
+
+  const runTask = async (
+    label: string,
+    task: (signal: AbortSignal) => Promise<void>,
+  ): Promise<void> => {
+    controller.current?.abort();
+    const abort = new AbortController();
+    controller.current = abort;
+    setStatus(label);
+    setError(null);
+    setNotice(null);
+
+    try {
+      await task(abort.signal);
+    } catch (failure) {
+      if (!abort.signal.aborted)
+        setError(failure instanceof Error ? failure.message : copy.failure);
+    } finally {
+      if (!abort.signal.aborted) setStatus(null);
+    }
+  };
+
+  const addPhotos = (files: FileList | null): void => {
+    if (files === null) return;
+    const selected = [...files];
+    const failure = validateMenuFiles([...photos.map((photo) => photo.file), ...selected]);
+
+    if (failure !== null) {
+      setError(failure);
+
+      return;
+    }
+
+    setError(null);
+    setPhotos((previous) => [
+      ...previous,
+      ...selected.map((file) => {
+        const previewUrl = URL.createObjectURL(file);
+        previewUrls.current.add(previewUrl);
+
+        return { id: crypto.randomUUID(), file, previewUrl };
+      }),
+    ]);
+  };
+
+  const movePhoto = (id: string, direction: -1 | 1): void =>
+    setPhotos((previous) => {
+      const next = [...previous];
+      const index = next.findIndex((photo) => photo.id === id);
+      const source = next[index];
+      const destination = next[index + direction];
+
+      if (source === undefined || destination === undefined) return previous;
+      next[index] = destination;
+      next[index + direction] = source;
+
+      return next;
+    });
+
+  const analyze = (): void => {
+    void runTask(copy.analyzing, async (signal) => {
+      if (photos.length === 0) throw new Error(copy.empty);
+      const branch = branchId === "" ? null : z.uuid().parse(branchId);
+
+      if (scanId !== null) await menuScanClient.remove(scanId, signal);
+      const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
+      setScanId(created.id);
+      sessionStorage.setItem(storageScan, created.id);
+      sessionStorage.setItem(storageOwner, owner);
+
+      for (const [index, photo] of photos.entries()) {
+        setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
+        // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
+        await menuScanClient.attach(created.id, index + 1, photo.file, signal);
+      }
+
+      setStatus(copy.analyzing);
+      const next = await menuScanClient.extract(created.id, signal);
+
+      if (!signal.aborted) adoptView(next);
+    });
+  };
+
+  const saveRevision = (): void => {
+    if (document === null || view?.scan.current_revision === null || view === null) return;
+    const expectedRevision = view.scan.current_revision;
+    const parsed = menuScanDocumentSchema.safeParse(document);
+
+    if (!parsed.success) {
+      setError(parsed.error.issues.map((issue) => issue.message).join("; "));
+
+      return;
+    }
+
+    void runTask(copy.saving, async (signal) =>
+      adoptView(
+        await menuScanClient.revise(
+          { scanId: view.scan.id, expectedRevision, document: parsed.data },
+          signal,
+        ),
+      ),
+    );
+  };
+
+  const submitContribution = (): void => {
+    if (view === null || view.scan.current_revision === null || !consent || dirty) return;
+    const revision = view.scan.current_revision;
+    void runTask(copy.contributing, async (signal) => {
+      const requestedVenue = branchId === "" ? null : z.uuid().parse(branchId);
+      await menuScanClient.contribute(
+        {
+          scanId: view.scan.id,
+          revision,
+          consent: true,
+          termsVersion: "menu-facts-v1",
+          venueId: requestedVenue,
+        },
+        signal,
+      );
+      adoptView(await menuScanClient.get(view.scan.id, signal));
+    });
+  };
+
+  return (
+    <article className="menu-scan-page" lang={locale === "vi" ? "vi" : "en"}>
+      <header>
+        <h1 className="font-display text-4xl">{copy.title}</h1>
+        <p>{copy.introduction}</p>
+      </header>
+      <p className="scan-privacy">
+        {copy.privacy}{" "}
+        <a href="https://dev.meta.ai/legal/terms-of-service" target="_blank" rel="noreferrer">
+          Meta terms
+        </a>
+      </p>
+      {error !== null && (
+        <p role="alert" className="scan-error">
+          {error}
+        </p>
+      )}
+      <output className="scan-status" aria-live="polite">
+        {status ?? notice}
+      </output>
+      {claimCandidate !== null && (
+        <section className="scan-claim">
+          <p>{copy.claimHelp}</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void runTask(copy.claiming, async (signal) => {
+                const next = await menuScanClient.claim(claimCandidate, signal);
+                sessionStorage.setItem(storageScan, next.scan.id);
+                sessionStorage.setItem(storageOwner, owner);
+                adoptView(next);
+                setClaimCandidate(null);
+              });
+            }}
+          >
+            {copy.claim}
+          </button>
+        </section>
+      )}
+      {document === null && (
+        <section className="scan-upload" aria-label={copy.pages} aria-busy={busy}>
+          <label htmlFor="scan-camera">{copy.camera}</label>
+          <input
+            id="scan-camera"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            disabled={busy}
+            aria-describedby="scan-camera-help"
+            onChange={(event) => {
+              addPhotos(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <label htmlFor="scan-gallery">{copy.gallery}</label>
+          <input
+            id="scan-gallery"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            disabled={busy}
+            aria-describedby="scan-camera-help"
+            onChange={(event) => {
+              addPhotos(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <p id="scan-camera-help">{copy.cameraHelp}</p>
+          <label htmlFor="scan-target-language">{copy.language}</label>
+          <select
+            id="scan-target-language"
+            value={targetLanguage}
+            disabled={busy}
+            onChange={(event) => setTargetLanguage(menuLanguageSchema.parse(event.target.value))}
+          >
+            {menuLanguages.map((language) => (
+              <option key={language} value={language}>
+                {menuLanguageNames.get(language)}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="scan-branch">{copy.branch}</label>
+          <input
+            id="scan-branch"
+            value={branchId}
+            disabled={busy}
+            maxLength={36}
+            aria-describedby="scan-branch-help"
+            onChange={(event) => setBranchId(event.target.value)}
+          />
+          <p id="scan-branch-help">{copy.branchHelp}</p>
+          <ol className="scan-photo-list">
+            {photos.map((photo, index) => (
+              <li key={photo.id}>
+                <img src={photo.previewUrl} alt={`${copy.pages} ${index + 1}`} />
+                <p>
+                  {index + 1}. {photo.file.name}
+                </p>
+                <div className="scan-photo-actions">
+                  <button
+                    type="button"
+                    disabled={busy || index === 0}
+                    onClick={() => movePhoto(photo.id, -1)}
+                    aria-label={`${copy.earlier}: ${index + 1}`}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || index === photos.length - 1}
+                    onClick={() => movePhoto(photo.id, 1)}
+                    aria-label={`${copy.later}: ${index + 1}`}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      URL.revokeObjectURL(photo.previewUrl);
+                      previewUrls.current.delete(photo.previewUrl);
+                      setPhotos((previous) => previous.filter((entry) => entry.id !== photo.id));
+                    }}
+                  >
+                    {copy.removePhoto}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {photos.length === 0 && <p>{copy.empty}</p>}
+          <button
+            type="button"
+            className="menu-order-primary"
+            disabled={busy || photos.length === 0}
+            onClick={analyze}
+          >
+            {scanId === null ? copy.analyze : copy.retry}
+          </button>
+          {scanId !== null && <p>{copy.uploadRetry}</p>}
+        </section>
+      )}
+      {view?.scan.status === "processing" && <p>{copy.processing}</p>}
+      {scanId !== null && (
+        <div className="scan-session-actions">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void runTask(copy.loading, async (signal) =>
+                adoptView(await menuScanClient.get(scanId, signal)),
+              );
+            }}
+          >
+            {copy.refresh}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void runTask(copy.deleting, async (signal) => {
+                await menuScanClient.remove(scanId, signal);
+                sessionStorage.removeItem(storageScan);
+                setScanId(null);
+                setView(null);
+                setDocument(null);
+                setDirty(false);
+                setConsent(false);
+                setNotice(copy.deleted);
+              });
+            }}
+          >
+            {copy.delete}
+          </button>
+        </div>
+      )}
+      {document !== null && view !== null && (
+        <>
+          <p>
+            {copy.revision}: {view.scan.current_revision} · {copy.expired}:{" "}
+            <time dateTime={view.scan.expires_at}>
+              {new Date(view.scan.expires_at).toLocaleString(locale)}
+            </time>
+          </p>
+          <InteractiveMenuView
+            key={`${owner}:${view.scan.id}`}
+            menu={presentScan(document, view.scan.venue_name)}
+            locale={locale}
+            photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+          />
+          <details className="scan-corrections">
+            <summary>
+              {locale === "vi" ? "Kiểm tra hoặc sửa thông tin" : "Check or correct the extraction"}
+            </summary>
+            <label htmlFor="scan-source-language">{copy.sourceLanguage}</label>
+            <select
+              id="scan-source-language"
+              value={document.sourceLanguage ?? ""}
+              disabled={busy}
+              onChange={(event) => {
+                setDocument({
+                  ...document,
+                  sourceLanguage:
+                    event.target.value === "" ? null : menuLanguageSchema.parse(event.target.value),
+                });
+                setDirty(true);
+                setConsent(false);
+              }}
+            >
+              <option value="">{copy.unknown}</option>
+              {menuLanguages.map((language) => (
+                <option key={language} value={language}>
+                  {menuLanguageNames.get(language)}
+                </option>
+              ))}
+            </select>
+            <ScanEditor
+              document={document}
+              onChange={(next) => {
+                setDocument(next);
+                setDirty(true);
+                setConsent(false);
+              }}
+            />
+            {dirty && <output>{copy.unsaved}</output>}
+            <button type="button" disabled={busy || !dirty} onClick={saveRevision}>
+              {copy.save}
+            </button>
+          </details>
+          <section className="scan-contribution">
+            <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
+            {view.contribution !== null ? (
+              <p>
+                {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
+                {view.contribution.revision}
+              </p>
+            ) : (
+              <>
+                <p>{copy.contributeHelp}</p>
+                <label htmlFor="scan-contribution-branch">{copy.branch}</label>
+                <input
+                  id="scan-contribution-branch"
+                  value={branchId}
+                  maxLength={36}
+                  disabled={busy}
+                  onChange={(event) => setBranchId(event.target.value)}
+                />
+                <label className="scan-consent">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    disabled={busy || dirty}
+                    onChange={(event) => setConsent(event.target.checked)}
+                  />
+                  {copy.consent}
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || !consent || dirty}
+                  onClick={submitContribution}
+                >
+                  {copy.contribute}
+                </button>
+              </>
+            )}
+          </section>
+        </>
+      )}
+    </article>
+  );
+}
