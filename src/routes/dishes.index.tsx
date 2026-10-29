@@ -58,7 +58,11 @@ function DishSearch() {
         {data.items.map((dish) => (
           <li key={dish.id} className="discovery-card">
             <h2>
-              <Link to="/dishes/$slug" params={{ slug: dish.slug }} search={{ lang: search.lang }}>
+              <Link
+                to="/dishes/$dishId"
+                params={{ dishId: dish.slug }}
+                search={{ lang: search.lang }}
+              >
                 {dish.name ?? dish.englishName ?? dish.slug}
               </Link>
             </h2>

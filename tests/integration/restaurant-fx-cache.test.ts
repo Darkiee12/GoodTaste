@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import postgres from "postgres";
 
 import {
@@ -69,6 +69,78 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL FX cache with mocked provider", () => {
+  test("interruption stops the provider and leaves a bounded lease cooldown", async () => {
+    const id = `test-fx-${crypto.randomUUID()}`;
+    providers.push(id);
+    const started = Deferred.makeUnsafe<void>();
+    let finalized = false;
+
+    const provider = FxProvider.of({
+      id,
+      pair: () =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(
+            Effect.sync(() => {
+              finalized = true;
+            }),
+          ),
+        ),
+      currencies: Effect.succeed(["VND", "USD"]),
+    });
+
+    const fx = makeFxRates(provider, { provider: id, refreshMs: 86400000, maxAgeMs: 72 * 3600000 });
+    await run(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(fx.rate("VND", "USD"));
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+    expect(finalized).toBe(true);
+
+    const leases =
+      await sql`SELECT expires_at>now() AS cooling_down, expires_at<now()+INTERVAL '6 minutes' AS bounded FROM feastjourney.currency_refresh_leases WHERE key=${id + ":VND:USD"}`;
+
+    expect(leases[0]?.cooling_down).toBe(true);
+    expect(leases[0]?.bounded).toBe(true);
+
+    const rates =
+      await sql`SELECT rate FROM feastjourney.currency_exchange_rates WHERE provider=${id}`;
+
+    expect(rates).toHaveLength(0);
+  });
+
+  test("lease cleanup failure preserves the original provider failure", async () => {
+    const id = `test-fx-${crypto.randomUUID()}`;
+    providers.push(id);
+    const isolated = postgres(process.env.DATABASE_URL ?? "", { max: 1 });
+
+    const provider = FxProvider.of({
+      id,
+      pair: () =>
+        Effect.gen(function* () {
+          yield* Effect.tryPromise({
+            try: () => isolated.end(),
+            catch: () => new FxUnavailable({ reason: "Synthetic test client teardown failure" }),
+          });
+
+          return yield* new FxUnavailable({ reason: "Original synthetic provider failure" });
+        }),
+      currencies: Effect.succeed(["VND", "USD"]),
+    });
+
+    const fx = makeFxRates(provider, { provider: id, refreshMs: 86400000, maxAgeMs: 72 * 3600000 });
+
+    const failure = await Effect.runPromise(
+      Effect.provideService(Effect.flip(fx.rate("VND", "USD")), Database, { sql: isolated }),
+    );
+
+    expect(failure._tag).toBe("FxUnavailable");
+
+    if (failure instanceof FxUnavailable)
+      expect(failure.reason).toBe("Original synthetic provider failure");
+  });
   test("cold miss is persisted and a cache hit avoids provider HTTP", async () => {
     const fixtureFx = fixture();
     const first = await run(fixtureFx.fx.rate("VND", "USD"));

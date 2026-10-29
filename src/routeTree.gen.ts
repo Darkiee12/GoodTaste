@@ -17,6 +17,7 @@ import { Route as RecommendRouteImport } from './routes/recommend'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RestaurantsRouteImport } from './routes/restaurants'
 import { Route as SavedRouteImport } from './routes/saved'
+import { Route as ScanRouteImport } from './routes/scan'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
@@ -27,6 +28,7 @@ import { Route as AdminRestaurantsRouteImport } from './routes/admin.restaurants
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as ApiMenuScansRouteImport } from './routes/api/menu-scans'
 import { Route as DishesIndexRouteImport } from './routes/dishes.index'
 import { Route as DishesDishIdRouteImport } from './routes/dishes.$dishId'
 import { Route as HealthLiveRouteImport } from './routes/health.live'
@@ -105,6 +107,11 @@ const SavedRoute = SavedRouteImport.update({
   path: '/saved',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScanRoute = ScanRouteImport.update({
+  id: '/scan',
+  path: '/scan',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
@@ -154,6 +161,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => AdminRoute,
+} as any)
+const ApiMenuScansRoute = ApiMenuScansRouteImport.update({
+  id: '/api/menu-scans',
+  path: '/api/menu-scans',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const DishesIndexRoute = DishesIndexRouteImport.update({
   id: '/',
@@ -358,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/restaurants': typeof RestaurantsRouteWithChildren
   '/saved': typeof SavedRoute
+  '/scan': typeof ScanRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
@@ -367,6 +380,7 @@ export interface FileRoutesByFullPath {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -412,6 +426,7 @@ export interface FileRoutesByTo {
   '/recommend': typeof RecommendRoute
   '/reset-password': typeof ResetPasswordRoute
   '/saved': typeof SavedRoute
+  '/scan': typeof ScanRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
@@ -421,6 +436,7 @@ export interface FileRoutesByTo {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -470,6 +486,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/restaurants': typeof RestaurantsRouteWithChildren
   '/saved': typeof SavedRoute
+  '/scan': typeof ScanRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/verify-email': typeof VerifyEmailRoute
@@ -479,6 +496,7 @@ export interface FileRoutesById {
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
   '/health/live': typeof HealthLiveRoute
   '/health/ready': typeof HealthReadyRoute
@@ -529,6 +547,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/restaurants'
     | '/saved'
+    | '/scan'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
@@ -538,6 +557,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/api/menu-scans'
     | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
@@ -583,6 +603,7 @@ export interface FileRouteTypes {
     | '/recommend'
     | '/reset-password'
     | '/saved'
+    | '/scan'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
@@ -592,6 +613,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/api/menu-scans'
     | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
@@ -640,6 +662,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/restaurants'
     | '/saved'
+    | '/scan'
     | '/sign-in'
     | '/sign-up'
     | '/verify-email'
@@ -649,6 +672,7 @@ export interface FileRouteTypes {
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
+    | '/api/menu-scans'
     | '/dishes/$dishId'
     | '/health/live'
     | '/health/ready'
@@ -698,9 +722,11 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   RestaurantsRoute: typeof RestaurantsRouteWithChildren
   SavedRoute: typeof SavedRoute
+  ScanRoute: typeof ScanRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
+  ApiMenuScansRoute: typeof ApiMenuScansRoute
   HealthLiveRoute: typeof HealthLiveRoute
   HealthReadyRoute: typeof HealthReadyRoute
   SettingsAccountRoute: typeof SettingsAccountRoute
@@ -776,6 +802,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SavedRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scan': {
+      id: '/scan'
+      path: '/scan'
+      fullPath: '/scan'
+      preLoaderRoute: typeof ScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in': {
       id: '/sign-in'
       path: '/sign-in'
@@ -845,6 +878,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/api/menu-scans': {
+      id: '/api/menu-scans'
+      path: '/api/menu-scans'
+      fullPath: '/api/menu-scans'
+      preLoaderRoute: typeof ApiMenuScansRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/dishes/': {
       id: '/dishes/'
@@ -1289,9 +1329,11 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   RestaurantsRoute: RestaurantsRouteWithChildren,
   SavedRoute: SavedRoute,
+  ScanRoute: ScanRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   VerifyEmailRoute: VerifyEmailRoute,
+  ApiMenuScansRoute: ApiMenuScansRoute,
   HealthLiveRoute: HealthLiveRoute,
   HealthReadyRoute: HealthReadyRoute,
   SettingsAccountRoute: SettingsAccountRoute,

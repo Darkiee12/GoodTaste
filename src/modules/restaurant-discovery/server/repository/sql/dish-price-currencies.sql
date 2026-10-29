@@ -24,4 +24,4 @@ offerings AS(SELECT v.id,v.business_id,v.name,v.address,v.area,v.country_code,v.
  CROSS JOIN request f LEFT JOIN feastjourney.restaurant_selected_prices p ON p.variant_id=vr.id AND p.sales_channel=f.channel
  WHERE e.observed_at IS NOT NULL AND e.match_kind IS NOT NULL AND e.dish_id=f.dish AND (f.portion IS NULL OR vr.comparison_key=f.portion)
  AND (f.q='' OR EXISTS(SELECT 1 FROM feastjourney.restaurant_venue_names n WHERE n.venue_id=v.id AND strpos(n.normalized_name,lower(public.unaccent(f.q)))>0))) SELECT DISTINCT currency FROM offerings
-WHERE currency IS NOT NULL AND current_enough AND price_kind='listed' ORDER BY currency LIMIT 13;
+WHERE currency IS NOT NULL AND current_enough AND price_kind='listed' AND tax_treatment='included' ORDER BY currency LIMIT 13;

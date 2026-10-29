@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getRouteApi } from "@tanstack/react-router";
 import { useState, useSyncExternalStore } from "react";
 
 import {
@@ -9,7 +10,9 @@ import { currencyPreferenceFn, saveCurrencyPreferenceFn } from "@/modules/user/c
 import { convertAmount, formatMoney, isCurrency } from "@/shared/money";
 import type { ExchangeRate } from "@/shared/money";
 
-const preferenceKey = ["currency-preference"];
+const rootRoute = getRouteApi("__root__");
+
+export const currencyPreferenceKey = (userId: string) => ["currency-preference", userId];
 
 const localCurrency = () => {
   try {
@@ -33,13 +36,16 @@ const subscribeToCurrency = (notify: () => void) => {
 
 export function usePreferredCurrency() {
   const client = useQueryClient();
+  const { session } = rootRoute.useRouteContext();
+  const userId = session.status === "signed-in" ? session.user.id : null;
   const local = useSyncExternalStore(subscribeToCurrency, localCurrency, () => "");
-  const [choice, setChoice] = useState<string>();
+  const [choice, setChoice] = useState<{ owner: string | null; currency: string }>();
   const [storageError, setStorageError] = useState(false);
 
   const account = useQuery({
-    queryKey: preferenceKey,
+    queryKey: currencyPreferenceKey(userId ?? "signed-out"),
     queryFn: () => currencyPreferenceFn(),
+    enabled: userId !== null,
     staleTime: 60000,
     retry: false,
   });
@@ -52,12 +58,18 @@ export function usePreferredCurrency() {
   });
 
   const save = useMutation({
-    mutationFn: (currency: string | null) => saveCurrencyPreferenceFn({ data: { currency } }),
-    onSuccess: (result) =>
-      client.setQueryData(preferenceKey, { member: true, currency: result.preferred_currency }),
+    mutationFn: (input: { currency: string | null; userId: string }) =>
+      saveCurrencyPreferenceFn({
+        data: { currency: input.currency, expectedUserId: input.userId },
+      }),
+    onSuccess: (_result, saved) =>
+      client.invalidateQueries({ queryKey: currencyPreferenceKey(saved.userId) }),
   });
 
-  const currency = choice ?? account.data?.currency ?? local;
+  const confirmedCurrency =
+    account.status === "success" && account.data.userId === userId ? account.data.currency : null;
+
+  const currency = choice?.owner === userId ? choice.currency : (confirmedCurrency ?? local);
 
   return {
     currency,
@@ -68,7 +80,7 @@ export function usePreferredCurrency() {
     saving: save.isPending,
     error: save.isError || account.isError,
     change: (code: string) => {
-      setChoice(code);
+      setChoice({ owner: userId, currency: code });
 
       try {
         localStorage.setItem("feastjourney.currency", code);
@@ -77,7 +89,8 @@ export function usePreferredCurrency() {
         setStorageError(true);
       }
 
-      if (account.data?.member === true) save.mutate(code === "" ? null : code);
+      if (userId !== null && account.data?.userId === userId)
+        save.mutate({ currency: code === "" ? null : code, userId });
     },
   };
 }

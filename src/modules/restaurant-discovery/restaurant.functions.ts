@@ -55,13 +55,12 @@ export const exchangeRatesFn = createServerFn({ method: "GET" })
     return runClientOperation(
       Effect.gen(function* () {
         const fx = yield* FxRates;
-        const rates = [];
 
-        for (const base of new Set(data.bases)) {
-          if (base !== data.quote) rates.push(yield* fx.rate(base, data.quote));
-        }
-
-        return rates;
+        return yield* Effect.forEach(
+          [...new Set(data.bases)].filter((base) => base !== data.quote),
+          (base) => fx.rate(base, data.quote),
+          { concurrency: 4 },
+        );
       }),
     );
   });

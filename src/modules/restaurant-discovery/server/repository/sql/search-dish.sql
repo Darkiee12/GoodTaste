@@ -28,7 +28,7 @@ fx AS(SELECT unnest(:currencies::text[]) AS currency,unnest(:rates::numeric[]) A
 qualified AS(SELECT o.*,o.amount*fx.rate AS comparison_amount FROM offerings o CROSS JOIN options s
 LEFT JOIN fx ON fx.currency=o.currency
 WHERE ((s.sort NOT IN ('price_low','price_high') AND s.budget IS NULL) OR
-  (o.current_enough AND o.price_kind='listed' AND fx.rate IS NOT NULL AND (s.budget IS NULL OR o.amount*fx.rate<s.budget)))),
+  (o.current_enough AND o.price_kind='listed' AND o.tax_treatment='included' AND fx.rate IS NOT NULL AND (s.budget IS NULL OR o.amount*fx.rate<s.budget)))),
 chosen AS(SELECT DISTINCT ON(o.id) o.* FROM qualified o CROSS JOIN options s
 ORDER BY o.id,
  CASE WHEN s.sort='price_high' THEN o.comparison_amount END DESC NULLS LAST,

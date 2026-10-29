@@ -25,6 +25,7 @@ import itemQuery from "@/modules/restaurant-discovery/server/repository/sql/admi
 import menuStatusQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-menu-status.sql";
 import menuQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-menu.sql";
 import priceQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-price.sql";
+import publishReviewedItem from "@/modules/restaurant-discovery/server/repository/sql/admin-publish-reviewed-item.sql";
 import receiptQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-receipt.sql";
 import reviewEvidence from "@/modules/restaurant-discovery/server/repository/sql/admin-review-evidence.sql";
 import reviewPrice from "@/modules/restaurant-discovery/server/repository/sql/admin-review-price.sql";
@@ -40,6 +41,7 @@ import { Authorization, recordAuditEvent } from "@/modules/user/server/index";
 import { Actor } from "@/server/auth/actor";
 import { CurrentActor } from "@/server/auth/current-actor";
 import { withTransaction } from "@/server/database/client";
+import { PersistenceConflict } from "@/server/database/errors";
 import { runQuery } from "@/server/database/query";
 
 const authorize = (action: "manage" | "review") =>
@@ -232,7 +234,7 @@ export const importMenu = Effect.fn("restaurants.importMenu")(function* (request
           url: input.source.url ?? null,
           object_key: input.source.privateObjectKey ?? null,
           deduplication: input.source.deduplicationKey,
-          verified: input.source.restaurantVerified,
+          verified: false,
           observed: input.source.observedAt,
           until: input.source.validUntil,
           actor: actorId,
@@ -372,7 +374,18 @@ export const reviewObservation = Effect.fn("restaurants.reviewObservation")(func
           ? yield* runQuery("restaurants/review-price", (sql) => reviewPrice.run(sql, params))
           : yield* runQuery("restaurants/review-serving", (sql) => reviewEvidence.run(sql, params));
 
-      if (result === null) return yield* new RestaurantNotFound();
+      if (result === null)
+        return yield* new PersistenceConflict({
+          operation: "restaurants/review",
+          constraint: "observation_pending",
+        });
+
+      if (input.status === "approved") {
+        yield* runQuery("restaurants/publish-reviewed-item", (sql) =>
+          publishReviewedItem.run(sql, { id: input.id, kind: input.kind }),
+        );
+      }
+
       yield* recordAuditEvent({
         actorUserId: actorId,
         sessionId: null,
@@ -418,6 +431,8 @@ export const setOfferingStatus = Effect.fn("restaurants.setOfferingStatus")(func
   input: z.infer<typeof offeringStatusSchema>,
 ) {
   const actorId = yield* authorize("manage");
+
+  if (input.kind === "item" && input.status === "published") yield* authorize("review");
 
   return yield* withTransaction(
     "restaurants/offering-status",

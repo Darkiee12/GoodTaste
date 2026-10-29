@@ -62,6 +62,23 @@ describe("exact food-price arithmetic and presentation", () => {
 });
 
 describe("restaurant HTTP input", () => {
+  test("an import cannot claim restaurant verification", () => {
+    const result = menuImportSchema.safeParse({
+      venueId: crypto.randomUUID(),
+      menuName: "Unverified customer photo",
+      source: {
+        category: "official_menu",
+        url: "https://example.com/menu",
+        deduplicationKey: "claim",
+        restaurantVerified: true,
+        observedAt: "2026-01-01T00:00:00Z",
+        validUntil: "2027-01-01T00:00:00Z",
+      },
+      items: [{ name: "Printed dish", variants: [{ name: "As listed" }] }],
+    });
+
+    expect(result.success).toBe(false);
+  });
   test("browsing needs no user location or AI questionnaire", () => {
     expect(restaurantSearchSchema.safeParse({}).success).toBe(true);
   });

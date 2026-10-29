@@ -1,6 +1,7 @@
 @import "tailwindcss" source("./");
 @import "tw-animate-css";
 @import "maplibre-gl/dist/maplibre-gl.css";
+@import "./modules/restaurant-discovery/components/menu-order.css";
 
 @theme {
   --color-brand-blue: #2563eb;

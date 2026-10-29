@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import postgres from "postgres";
 
 import { DishService } from "@/modules/food-discovery/server/index";
@@ -19,6 +19,7 @@ import {
   searchRestaurants,
   writeVenue,
   getRestaurant,
+  setOfferingStatus,
 } from "@/modules/restaurant-discovery/server/index";
 import { validateReceiptPrice } from "@/modules/restaurant-discovery/server/operations/admin";
 import {
@@ -57,7 +58,7 @@ const source = (key: string, daysAgo = 1) => ({
   category: "official_menu" as const,
   url: "https://example.com/synthetic-menu",
   deduplicationKey: `${stamp}:${key}`,
-  restaurantVerified: true,
+  restaurantVerified: false,
   observedAt: new Date(Date.now() - daysAgo * 86400000).toISOString(),
   validUntil: new Date(Date.now() + (30 - daysAgo) * 86400000).toISOString(),
 });
@@ -459,15 +460,15 @@ describe("observation integrity and RBAC", () => {
 describe("price provenance regression cases", () => {
   test("currency preferences are scoped to verified members; guests need no account", async () => {
     await run(withActor(actor, setPreferredCurrency("USD")));
-    expect(await run(withActor(actor, getPreferredCurrency))).toEqual({
+    expect(await run(withActor(actor, getPreferredCurrency))).toMatchObject({
       member: true,
       currency: "USD",
     });
-    expect(await run(withActor(member, getPreferredCurrency))).toEqual({
+    expect(await run(withActor(member, getPreferredCurrency))).toMatchObject({
       member: true,
       currency: null,
     });
-    expect(await run(withActor(Actor.Guest(), getPreferredCurrency))).toEqual({
+    expect(await run(withActor(Actor.Guest(), getPreferredCurrency))).toMatchObject({
       member: false,
       currency: null,
     });
@@ -663,4 +664,188 @@ describe("price provenance regression cases", () => {
     ]);
     expect(after.dishItems.filter((row) => row.id === c)).toHaveLength(1);
   });
+});
+
+describe("PR4 remediation regressions", () => {
+  test("an unpublished best association does not hide a second published match", async () => {
+    const venue = await makeVenue("Published association fallback");
+
+    const [top] =
+      await sql`INSERT INTO feastjourney.dishes(slug,status) VALUES(${`pr4-top-match-${stamp}`},'published') RETURNING id::text AS id`;
+
+    if (top === undefined) throw new Error("Missing synthetic dish fixture");
+
+    try {
+      const request = inputFor(venue, "123", "top-match");
+      const first = request.items[0];
+
+      if (first === undefined) throw new Error("Missing synthetic item fixture");
+
+      const topImport = await menuImportResult({
+        ...request,
+        items: [{ ...first, dishId: top.id }],
+      });
+
+      await approve(topImport);
+      const item = topImport.offeringIds[0];
+
+      if (item === undefined) throw new Error("Missing imported item fixture");
+
+      const alternative = await menuImportResult({
+        ...inputFor(venue, null, "alternate-match"),
+        menuId: topImport.menuId,
+        items: [
+          {
+            ...first,
+            itemId: item.itemId,
+            dishId,
+            matchKind: "variant",
+            variants: [
+              { name: "Regular bowl", variantId: item.variantId, comparisonKey: "regular-bowl" },
+            ],
+          },
+        ],
+      });
+
+      await approve(alternative);
+      const before = await run(getRestaurant(venue, "dine_in"));
+      expect(before.offerings.every((offering) => offering.dish_id === top.id)).toBe(true);
+      await sql`UPDATE feastjourney.dishes SET status='draft' WHERE id=${top.id}`;
+      const after = await run(getRestaurant(venue, "dine_in"));
+      expect(after.offerings).toHaveLength(2);
+      expect(
+        after.offerings.every(
+          (offering) => offering.dish_id === dishId && offering.match_kind === "variant",
+        ),
+      ).toBe(true);
+    } finally {
+      await sql`DELETE FROM feastjourney.restaurant_serving_evidence WHERE dish_id=${top.id}`;
+      await sql`DELETE FROM feastjourney.dishes WHERE id=${top.id}`;
+    }
+  });
+  test("reviewers can publish a price-free item, while a manage-only actor cannot", async () => {
+    const venue = await makeVenue("Price-free menu");
+    const input = inputFor(venue, null, "price-free");
+
+    for (const item of input.items) {
+      item.dishId = undefined;
+
+      for (const variant of item.variants) variant.price = undefined;
+    }
+
+    const imported = await menuImportResult(input);
+    const item = imported.offeringIds[0];
+
+    if (item === undefined) throw new Error("Missing price-free item fixture");
+    const session = await auth.signupSignin(`pr4-manager-only-${stamp}`);
+    const role = `pr4-manager-only-${stamp}`;
+    await sql`INSERT INTO feastjourney.roles(id,slug,name) VALUES(${role},${role},'Synthetic manage-only role')`;
+
+    try {
+      await sql`INSERT INTO feastjourney.role_permissions(role_id,permission_key) VALUES(${role},'restaurant:manage')`;
+      await auth.grantRole(session.userId, role);
+      const manager = Actor.Member({ userId: session.userId });
+
+      const denied = await run(
+        withActor(
+          manager,
+          setOfferingStatus({ kind: "item", id: item.itemId, status: "published" }),
+        ).pipe(Effect.result),
+      );
+
+      expect(Result.isFailure(denied)).toBe(true);
+      expect((await run(getRestaurant(venue, "dine_in"))).offerings).toEqual([]);
+      await run(
+        withActor(actor, setOfferingStatus({ kind: "item", id: item.itemId, status: "published" })),
+      );
+      const menu = await run(getRestaurant(venue, "dine_in"));
+      expect(menu.offerings).toHaveLength(2);
+      expect(
+        menu.offerings.every((offering) => offering.amount === null && offering.dish_id === null),
+      ).toBe(true);
+    } finally {
+      await sql`DELETE FROM feastjourney.roles WHERE id=${role}`;
+    }
+  });
+  test("pending menu names remain private until a fact is reviewed", async () => {
+    const venue = await makeVenue("Private pending menu");
+    const imported = await menuImportResult(inputFor(venue, "123", "private-pending"));
+    expect((await run(getRestaurant(venue, "dine_in"))).offerings).toEqual([]);
+    await approve(imported);
+    expect((await run(getRestaurant(venue, "dine_in"))).offerings).toHaveLength(2);
+  });
+
+  test("a manager import cannot claim independently verified restaurant authority", async () => {
+    const imported = await menuImportResult(inputFor(a, "123", "unverified-source"));
+
+    const rows =
+      await sql`SELECT restaurant_verified FROM feastjourney.restaurant_sources WHERE id=${imported.sourceId}`;
+
+    expect(rows[0]?.restaurant_verified).toBe(false);
+  });
+
+  test("concurrent reviewer decisions have one winner and preserve its attribution", async () => {
+    const imported = await menuImportResult(inputFor(a, "123", "concurrent-review"));
+    const id = imported.priceIds[0];
+
+    if (id === undefined) throw new Error("Missing price fixture");
+
+    const decisions = await Promise.all(
+      (["approved", "rejected"] as const).map((status) =>
+        run(withActor(actor, reviewObservation({ kind: "price", id, status })).pipe(Effect.result)),
+      ),
+    );
+
+    expect(decisions.filter(Result.isSuccess)).toHaveLength(1);
+    expect(decisions.filter(Result.isFailure)).toHaveLength(1);
+
+    const rows =
+      await sql`SELECT review_status,reviewed_by,reviewed_at FROM feastjourney.restaurant_price_observations WHERE id=${id}`;
+
+    expect(rows[0]?.reviewed_by).not.toBeNull();
+    expect(rows[0]?.reviewed_at).not.toBeNull();
+
+    const repeated = await run(
+      withActor(actor, reviewObservation({ kind: "price", id, status: "approved" })).pipe(
+        Effect.result,
+      ),
+    );
+
+    expect(Result.isFailure(repeated)).toBe(true);
+
+    const after =
+      await sql`SELECT review_status,reviewed_by,reviewed_at FROM feastjourney.restaurant_price_observations WHERE id=${id}`;
+
+    expect(after).toEqual(rows);
+  });
+
+  test.each(["excluded", "unknown"] as const)(
+    "strict comparison excludes tax %s observations",
+    async (taxTreatment) => {
+      const venue = await makeVenue(`Tax ${taxTreatment}`);
+      const request = inputFor(venue, "1", `tax-${taxTreatment}`);
+
+      for (const item of request.items) {
+        for (const variant of item.variants) {
+          if (variant.price !== undefined) variant.price.taxTreatment = taxTreatment;
+        }
+      }
+
+      const imported = await menuImportResult(request);
+      await approve(imported);
+
+      const output = await run(
+        searchRestaurants(
+          criteria({ dish: dishId, portion: "regular-bowl", currency: "VND", sort: "price_low" }),
+        ),
+      );
+
+      expect(output.dishItems.some((row) => row.id === venue)).toBe(false);
+      const menu = await run(getRestaurant(venue, "dine_in"));
+
+      expect(
+        menu.offerings.find((offering) => offering.comparison_key === "regular-bowl")?.amount,
+      ).toBe("1");
+    },
+  );
 });

@@ -24,7 +24,10 @@ export const currencyPreferenceFn = createServerFn({ method: "GET" }).handler(as
 
 export const saveCurrencyPreferenceFn = createServerFn({ method: "POST" })
   .validator(
-    z.object({ currency: z.string().refine(isCurrency, "Invalid ISO currency").nullable() }),
+    z.object({
+      expectedUserId: z.string().min(1),
+      currency: z.string().refine(isCurrency, "Invalid ISO currency").nullable(),
+    }),
   )
   .handler(async ({ data }) => {
     const { getRequestHeaders } = await import("@tanstack/react-start/server");
@@ -34,6 +37,13 @@ export const saveCurrencyPreferenceFn = createServerFn({ method: "POST" })
     const { setPreferredCurrency } = await import("@/modules/user/server/index");
     const { runClientOperation } = await import("@/server/http/run-client-operation");
     const session = await runClientOperation(requireAuthenticatedActor(getRequestHeaders()));
+
+    if (session.userId !== data.expectedUserId) {
+      const { Effect } = await import("effect");
+      const { OwnershipDenied } = await import("@/server/auth/errors");
+
+      return runClientOperation(Effect.fail(new OwnershipDenied({ reason: "Account changed" })));
+    }
 
     return runClientOperation(
       withActor(Actor.Member({ userId: session.userId }), setPreferredCurrency(data.currency)),

@@ -120,7 +120,7 @@ export const menuImportSchema = z
         .optional(),
       privateObjectKey: z.string().min(1).max(500).optional(),
       deduplicationKey: z.string().min(1).max(200),
-      restaurantVerified: z.boolean().default(false),
+      restaurantVerified: z.literal(false).default(false),
       observedAt: z.iso.datetime({ offset: true }),
       validUntil: z.iso.datetime({ offset: true }),
     }),
