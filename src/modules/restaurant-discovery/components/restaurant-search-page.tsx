@@ -85,6 +85,7 @@ export function RestaurantSearchPage() {
         void navigate({
           search: {
             ...search,
+            area: "",
             longitude: position.coords.longitude,
             latitude: position.coords.latitude,
             west: undefined,
@@ -110,6 +111,9 @@ export function RestaurantSearchPage() {
         </Link>
         <Link to="/restaurants" search={{ lang: search.lang }} aria-current="page">
           Find restaurants
+        </Link>
+        <Link to="/scan" search={{ lang: search.lang }}>
+          Scan menu
         </Link>
       </nav>
       <header>
@@ -290,6 +294,7 @@ export function RestaurantSearchPage() {
                   search: {
                     ...search,
                     ...bounds,
+                    area: "",
                     longitude: undefined,
                     latitude: undefined,
                     sort: search.sort === "nearest" ? "recommended" : search.sort,

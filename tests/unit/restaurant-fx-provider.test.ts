@@ -82,6 +82,52 @@ describe("Frankfurter v2 adapter (mock HTTP only)", () => {
 
     expect(await Effect.runPromise(provider.currencies)).toEqual(["VND", "USD"]);
   });
+  test("cancels oversized streamed bodies before reading the entire response", async () => {
+    let cancelled = false;
+    let chunks = 0;
+
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunks += 1;
+        controller.enqueue(new Uint8Array(100000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const provider = frankfurterProvider(
+      "https://fx.example.test/v2/",
+      async () => new Response(stream),
+    );
+
+    expect((await Effect.runPromise(Effect.flip(provider.pair("VND", "USD"))))._tag).toBe(
+      "FxUnavailable",
+    );
+    expect(cancelled).toBe(true);
+    expect(chunks).toBeLessThanOrEqual(3);
+  });
+  test("rejects declared oversized bodies without consuming them", async () => {
+    let cancelled = false;
+
+    const provider = frankfurterProvider(
+      "https://fx.example.test/v2/",
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "content-length": "150001" } },
+        ),
+    );
+
+    expect((await Effect.runPromise(Effect.flip(provider.pair("VND", "USD"))))._tag).toBe(
+      "FxUnavailable",
+    );
+    expect(cancelled).toBe(true);
+  });
   test("measures holiday/weekend freshness using effective date rather than fetch date", () => {
     const friday = {
       base: "USD",

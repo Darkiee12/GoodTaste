@@ -1,13 +1,15 @@
 # Restaurant discovery and observed prices
 
 PR #4 owns `src/modules/restaurant-discovery/`, its additive Flyway migration
-`V20261028_100`–`106`, and restaurant routes/tests. Shared changes are limited to
+`V20261028_100`–`106` plus `V20261029_001`–`002`, and restaurant routes/tests. Shared changes are limited to
 runtime composition, the permission vocabulary, User currency preference,
 home navigation, and the documented public contracts. Food Discovery's
 canonical identity and private queries remain read-only dependencies.
 
-The outcome is two public journeys: dish → sourced restaurant offering, and
-restaurant → menu → canonical dish. No questionnaire or AI is required.
+The outcome is three public journeys: dish → sourced restaurant offering,
+restaurant → menu → canonical dish, and guest menu scan → bilingual waiter
+order card. No questionnaire is required; Muse vision is used only for the
+scan journey.
 
 ## Persistence and trust
 
@@ -38,8 +40,10 @@ Receipts retain only structured food-line amounts and semantics, never card,
 customer or transaction identifiers. A derived paid unit amount must multiply exactly by quantity to reproduce the
 known net food-line total. Explicit unit prices must match the observed amount.
 Discount/fee breakdowns may be NULL when unknown; they never default to zero.
-Public receipt/photo submission and extraction are deferred; admin entry
-supports their reviewed observation contract without OCR infrastructure.
+Menu photographs are private scan evidence (Garage + `menu_scan_*` tables),
+never public menu authority; admin entry keeps the reviewed observation
+contract, and curator promotion writes through the same approved
+menu/evidence/price workflows.
 
 ## Currency contract
 
@@ -83,8 +87,31 @@ states and a mobile list/map toggle. The map is lazily mounted in ClientOnly.
 Verification covers fresh Flyway migration/validation, actual PostgreSQL/PostGIS
 queries and constraints, mocked FX failure/concurrency/decimal tests, production
 SSR/build and browser checks. Synthetic fixtures never become product data.
-Global geographic price analytics, public crowdsourcing, OCR, POS integration
+Global geographic price analytics, public crowdsourcing, POS integration
 and live availability are outside this slice.
+
+## Menu scanner (Implemented)
+
+Guests can scan a physical menu without registration at `/scan`: up to six
+JPEG/PNG/WebP photographs (8 MiB each, 24 MiB total), target-language choice,
+optional branch association, Muse `muse-spark-1.3` structured extraction,
+customer correction as a new immutable revision, dish/variant/quantity
+selection with an exact-decimal subtotal, and a bilingual waiter-facing order
+card. The deterministic React renderer feeds both reviewed relational menus
+and private scan drafts; the model never generates UI code.
+
+Private scans expire after 24 hours; contributions under explicit
+`menu-facts-v1` consent are retained up to 30 days for review. Photos stay in
+the private Garage bucket (server-only credentials, signed owner-scoped
+reads); structured drafts stay in PostgreSQL JSONB. Guest access uses a
+server-issued unguessable capability (sha256-persisted, short-lived cookie);
+members claim scans into their account after sign-in. Reviewers inspect photo
++ extraction + branch + price associations through `/admin/restaurants` and
+promote approved facts through the existing menu/evidence/price operations —
+never by flipping a draft public. `restaurantVerified` cannot be self-asserted
+(schema accepts only `false`; imports force `false`); approving a price or
+serving observation publishes the item through a review-gated status change
+requiring `restaurant:review`.
 
 ## Operating the MVP
 
@@ -98,8 +125,11 @@ slice does not implement uploading, OCR or public receipt collection.
 
 Optional settings are listed in `.env.example`: `FX_ENDPOINT`,
 `FX_REFRESH_HOURS` (24), `FX_MAX_AGE_HOURS` (72),
-`RESTAURANT_REVIEW_DAYS` (90), and the browser-visible licensed
-`VITE_MAP_STYLE_URL`. Without a style URL, the restaurant list remains usable.
+`RESTAURANT_REVIEW_DAYS` (90), the browser-visible licensed
+`VITE_MAP_STYLE_URL`, the scanner group (`MENU_SCANNER_ENABLED=false` by
+default plus `MENU_SCAN_*` bounds; reuses `MODEL_API_KEY`/`MODEL_BASE_URL`),
+and the private-bucket group (`S3_ENDPOINT_INTERNAL`, `S3_REGION`,
+`S3_BUCKET_PRIVATE`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`). Without a style URL, the restaurant list remains usable.
 The [Frankfurter documentation](https://frankfurter.dev/) describes its public,
 keyless daily-reference API and encourages caching; provider availability and
 abuse limits still apply. Currency vocabulary comes from
@@ -110,5 +140,7 @@ verifiable sources before results appear. New discovery labels are currently
 English. Hosted map tiles and provider billing/restrictions must be configured
 for the deployment; browser verification used an intercepted empty test style.
 Live Frankfurter access was checked separately; ordinary tests use mocked FX.
-Public crowdsourcing, binary-source verification, OCR/POS integrations, global
+Live Muse extraction was exercised only through mocked provider contracts;
+no real customer image leaves the test suite. Public crowdsourcing,
+binary-source verification, POS integrations, global
 origin-country price comparisons and live availability remain deferred.

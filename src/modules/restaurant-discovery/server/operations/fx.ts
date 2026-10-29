@@ -1,4 +1,4 @@
-import { Clock, Config, Context, Effect, Layer } from "effect";
+import { Clock, Config, Context, Effect, Exit, Layer } from "effect";
 
 import {
   acceptableRate,
@@ -59,7 +59,7 @@ export function makeFxRates(provider: FxProvider["Service"], policy: FxPolicy) {
       return yield* new FxUnavailable({ reason: "Currency catalog is refreshing; retry shortly" });
     }
 
-    return yield* Effect.ensuring(
+    return yield* Effect.onExit(
       provider.currencies.pipe(
         Effect.tap((codes) =>
           Effect.gen(function* () {
@@ -77,7 +77,17 @@ export function makeFxRates(provider: FxProvider["Service"], policy: FxPolicy) {
           first === undefined ? Effect.fail(error) : Effect.succeed(cachedCodes),
         ),
       ),
-      runQuery("fx/catalog-release", (sql) => release.run(sql, { key, token })).pipe(Effect.orDie),
+      (exit) =>
+        runQuery("fx/catalog-release", (sql) => release.run(sql, { key, token })).pipe(
+          Effect.catch((error) => {
+            if (Exit.isSuccess(exit)) return Effect.fail(error);
+
+            return Effect.logWarning(
+              "FX catalog lease cleanup failed; lease expires automatically",
+              { tag: error._tag },
+            );
+          }),
+        ),
     );
   });
 
@@ -115,7 +125,7 @@ export function makeFxRates(provider: FxProvider["Service"], policy: FxPolicy) {
         return yield* new FxUnavailable({ reason: "Reference rate is refreshing; retry shortly" });
       }
 
-      return yield* Effect.ensuring(
+      return yield* Effect.onExit(
         Effect.gen(function* () {
           const result = yield* provider.pair(base, quote);
           const fetchedAt = yield* Clock.currentTimeMillis;
@@ -152,7 +162,16 @@ export function makeFxRates(provider: FxProvider["Service"], policy: FxPolicy) {
             usable ? Effect.succeed(cached) : Effect.fail(error),
           ),
         ),
-        runQuery("fx/release", (sql) => release.run(sql, { key, token })).pipe(Effect.orDie),
+        (exit) =>
+          runQuery("fx/release", (sql) => release.run(sql, { key, token })).pipe(
+            Effect.catch((error) => {
+              if (Exit.isSuccess(exit)) return Effect.fail(error);
+
+              return Effect.logWarning("FX lease cleanup failed; lease expires automatically", {
+                tag: error._tag,
+              });
+            }),
+          ),
       );
     });
 

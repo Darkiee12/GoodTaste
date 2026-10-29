@@ -68,6 +68,44 @@ const providerCurrencies = z
   )
   .max(500);
 
+const MAX_PROVIDER_RESPONSE_BYTES = 150000;
+
+async function readProviderBody(response: Response): Promise<string> {
+  const declared = response.headers.get("content-length");
+
+  if (declared !== null && Number(declared) > MAX_PROVIDER_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    throw new Error("Provider response too large");
+  }
+
+  if (response.body === null) throw new Error("Provider response is empty");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let length = 0;
+  let body = "";
+  let done = false;
+
+  try {
+    while (!done) {
+      // oxlint-disable-next-line no-await-in-loop -- Consume the stream sequentially to enforce a byte bound before allocating the next chunk.
+      const next = await reader.read();
+
+      done = next.done;
+
+      if (next.done) break;
+      length += next.value.byteLength;
+
+      if (length > MAX_PROVIDER_RESPONSE_BYTES) throw new Error("Provider response too large");
+      body += decoder.decode(next.value, { stream: true });
+    }
+
+    return body + decoder.decode();
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
+}
+
 export function frankfurterProvider(
   endpoint: string,
   fetcher: (input: URL, init: RequestInit) => Promise<Response> = fetch,
@@ -92,11 +130,8 @@ export function frankfurterProvider(
         });
 
         if (!response.ok) throw new Error(`Provider HTTP ${response.status}`);
-        const text = await response.text();
 
-        if (text.length > 150000) throw new Error("Provider response too large");
-
-        return text;
+        return readProviderBody(response);
       },
       catch: () => new FxUnavailable({ reason: "Reference-rate provider is unavailable" }),
     });

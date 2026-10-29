@@ -88,7 +88,7 @@ function MenuItem({
         </div>
       )}
       {selected.dish_id !== null && (
-        <Link to="/dishes/$slug" params={{ slug: selected.dish_id }} search={{ lang }}>
+        <Link to="/dishes/$dishId" params={{ dishId: selected.dish_id }} search={{ lang }}>
           Explore this dish · {selected.match_kind} match
         </Link>
       )}

@@ -34,8 +34,9 @@ The default production build targets Bun. For Node, rebuild with `bun run build:
 
 ## Routes
 
-- `/dishes`, `/dishes/$slug` — public catalog search and detail, with canonical dish IDs carried into restaurant search.
+- `/dishes`, `/dishes/$dishId` — public catalog search and detail, with canonical dish IDs carried into restaurant search.
 - `/restaurants`, `/restaurants/$venueId` — independent public restaurant search, optional map/geolocation, branch menus, exact observed prices and optional dated currency equivalents.
+- `/scan` — guest-accessible multilingual menu scanner: private photo upload, Muse structured extraction, customer corrections, dish/variant/quantity selection with exact subtotals, and a bilingual waiter-facing order card. Optional `menu-facts-v1` contribution sends the saved revision to curator review; approved facts enter the relational menu/price model.
 - `/admin/restaurants` — RBAC-protected venue and menu entry, structured source imports, offering retirement and separate price/serving review.
 
 - `/` — public landing page with dish discovery (English default, `?lang=` switch for vi/hi/es/zh, validated by Zod; no cookie persistence).

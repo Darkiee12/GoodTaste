@@ -48,6 +48,11 @@ import { RateLimiterLive, RateLimitPolicyLive } from "@/server/http/rate-limit";
 import type { RateLimitPolicy } from "@/server/http/rate-limit";
 import { MetaClientLive } from "@/server/integrations/meta-client";
 import type { MetaClient } from "@/server/integrations/meta-client";
+import { MenuExtractorLive, type MenuExtractor } from "@/server/integrations/muse-menu";
+import {
+  PrivateMenuStorageLive,
+  type PrivateMenuStorage,
+} from "@/server/integrations/private-menu-storage";
 
 const CurationLive = Layer.provide(CurationServiceLive, RepositoriesLive);
 const FxLive = Layer.provide(FxRatesLive, FxProviderLive);
@@ -82,9 +87,13 @@ export const AppLive = Layer.mergeAll(
   UserLive,
   MetaClientLive,
   RecommendationLive,
+  MenuExtractorLive,
+  PrivateMenuStorageLive,
 );
 
 export type AppServices =
+  | MenuExtractor
+  | PrivateMenuStorage
   | FxRates
   | Database
   | PersistenceRateLimiter.RateLimiter

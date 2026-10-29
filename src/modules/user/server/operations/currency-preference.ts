@@ -11,10 +11,10 @@ export const getPreferredCurrency = Effect.gen(function* () {
   const actor = yield* CurrentActor;
 
   return yield* Actor.$match(actor, {
-    Guest: () => Effect.succeed({ member: false, currency: null }),
+    Guest: () => Effect.succeed({ member: false, currency: null, userId: null }),
     Member: ({ userId }) =>
       runQuery("user/currency", (sql) => preference.run(sql, { user: userId })).pipe(
-        Effect.map((row) => ({ member: true, currency: row?.preferred_currency ?? null })),
+        Effect.map((row) => ({ member: true, currency: row?.preferred_currency ?? null, userId })),
       ),
   });
 });

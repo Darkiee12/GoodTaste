@@ -9,6 +9,7 @@ JOIN feastjourney.restaurant_venues r ON r.id=i.venue_id
 JOIN feastjourney.restaurant_menu_item_variants v ON(v.menu_item_id,v.venue_id)=(i.id,i.venue_id)
 LEFT JOIN feastjourney.restaurant_selected_prices p ON p.variant_id=v.id AND p.sales_channel=:channel::text
 LEFT JOIN LATERAL(SELECT ev.dish_id,ev.match_kind FROM feastjourney.restaurant_eligible_evidence ev
- WHERE ev.menu_item_id=i.id ORDER BY ev.evidence_tier,ev.observed_at DESC,ev.id LIMIT 1) e ON true
+ WHERE ev.menu_item_id=i.id AND ev.dish_id = ANY(:published_dish_ids::bigint[])
+ ORDER BY ev.evidence_tier,ev.observed_at DESC,ev.id LIMIT 1) e ON true
 WHERE v.status='published' AND i.venue_id=:id::uuid AND r.status='published' AND m.status='published' AND i.status='published'
 ORDER BY m.name,m.id,i.name,i.id,v.name,v.id;

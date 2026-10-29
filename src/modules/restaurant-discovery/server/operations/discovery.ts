@@ -8,6 +8,7 @@ import areas from "@/modules/restaurant-discovery/server/repository/sql/areas.sq
 import comparisons from "@/modules/restaurant-discovery/server/repository/sql/comparisons.sql";
 import currencies from "@/modules/restaurant-discovery/server/repository/sql/dish-price-currencies.sql";
 import localRanges from "@/modules/restaurant-discovery/server/repository/sql/local-price-ranges.sql";
+import menuDishCandidates from "@/modules/restaurant-discovery/server/repository/sql/menu-dish-candidates.sql";
 import menu from "@/modules/restaurant-discovery/server/repository/sql/menu.sql";
 import searchArea from "@/modules/restaurant-discovery/server/repository/sql/search-area.sql";
 import searchDish from "@/modules/restaurant-discovery/server/repository/sql/search-dish.sql";
@@ -52,27 +53,25 @@ export const getRestaurant = Effect.fn("restaurants.getRestaurant")(function* (
 
   if (detail === null) return yield* new RestaurantNotFound();
 
-  const offerings = yield* runQuery("restaurants/menu", (sql) =>
-    menu.run(sql, { id: venueId, channel }),
+  const candidates = yield* runQuery("restaurants/menu-dish-candidates", (sql) =>
+    menuDishCandidates.run(sql, { id: venueId }),
   );
 
-  // Review never implies perpetual canonical publication. Resolve unique links through Food's public API.
-  const dishIds = [
-    ...new Set(offerings.flatMap((item) => (item.dish_id === null ? [] : [item.dish_id]))),
-  ];
+  const published = yield* getPublishedDishIdentities(
+    candidates.flatMap((row) => (row.dish_id === null ? [] : [row.dish_id])),
+  );
 
-  const published = new Set((yield* getPublishedDishIdentities(dishIds)).map((dish) => dish.id));
+  const offerings = yield* runQuery("restaurants/menu", (sql) =>
+    menu.run(sql, {
+      id: venueId,
+      channel,
+      published_dish_ids: published.map((dish) => BigInt(dish.id)),
+    }),
+  );
 
   return {
     venue: detail,
-    offerings: offerings.map((item) => {
-      if (item.dish_id !== null && !published.has(item.dish_id)) {
-        item.dish_id = null;
-        item.match_kind = null;
-      }
-
-      return item;
-    }),
+    offerings,
   };
 });
 
@@ -149,15 +148,24 @@ export const searchRestaurants = Effect.fn("restaurants.searchRestaurants")(func
     const fx = yield* FxRates;
 
     // One fixed rate per pair for all qualifying offerings, before the price query executes.
-    for (const original of originals) {
-      const base = original.currency;
+    // The quote currency converts at exactly one; every other pair resolves concurrently.
+    const bases = [
+      ...new Set(
+        originals.flatMap((original) => (original.currency === null ? [] : [original.currency])),
+      ),
+    ];
 
-      if (base === null) continue;
-      rateCurrencies.push(base);
+    for (const base of bases) {
+      if (base === quote) {
+        rateCurrencies.push(base);
+        rateValues.push("1");
+      }
+    }
 
-      if (base === quote) rateValues.push("1");
-      else {
-        const rate = yield* fx.rate(base, quote).pipe(
+    const rates = yield* Effect.forEach(
+      bases.filter((base) => base !== quote),
+      (base) =>
+        fx.rate(base, quote).pipe(
           Effect.mapError((error) => {
             if (error instanceof FxUnavailable)
               return new FxUnavailable({
@@ -167,11 +175,15 @@ export const searchRestaurants = Effect.fn("restaurants.searchRestaurants")(func
 
             return error;
           }),
-        );
+          Effect.map((rate) => ({ base, value: rate.rate, rate })),
+        ),
+      { concurrency: 4 },
+    );
 
-        rateValues.push(rate.rate);
-        comparisonRates.push(rate);
-      }
+    for (const entry of rates) {
+      rateCurrencies.push(entry.base);
+      rateValues.push(entry.value);
+      comparisonRates.push(entry.rate);
     }
   }
 
