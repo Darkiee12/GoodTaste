@@ -29,6 +29,13 @@ Public read operations (`DishService`, `CatalogService`) serve guests and member
   published dishes, ranked by shared relations.
 - `listPlaces` returns places plus parent edges (hierarchy built client-side);
   `searchPlaces` resolves names in supported languages.
+- `listCountries` returns only kind=`country` places with verified ISO 3166
+  identity for the recommendation region step; filtering happens in SQL
+  before the limit so no eligible country can hide behind other places.
+- Member saved dishes: `listFavorites` (paged enumeration, limit+offset),
+  `favoriteStatus` (membership probe for exactly the visible dish ids, so
+  cards stay correct at any saved total), `addFavorite`/`removeFavorite`
+  (idempotent conflicts surfaced as `FavoriteExists`/`FavoriteNotFound`).
 
 Administrative writes (`AdminService`) require a verified session whose
 database grants cover the operation (see `access-control.md` for the
@@ -90,6 +97,8 @@ Before implementing a public operation, specify:
 - one guest/member test and one missing/contradictory-data test when relevant.
 
 Define multi-case domain outcomes with Effect's `Data.TaggedEnum` (or `Schema.TaggedUnion` where true codec support is necessary) rather than arbitrary stringly typed `kind` payloads. Use `Data.TaggedError`/`Schema.TaggedError` for typed failures and `Effect.catchTag` at appropriate boundaries. A trusted `Actor` is provided from the verified session, never a decoded client choice. See [domain modeling](domain-modeling.md) and [access control](access-control.md).
+
+Public recommendation outcomes (`Ready` with dishes + ranking mode, `Uncertain`, `Empty`) follow the same rule: the service returns the tagged union and the transport maps it to `{mode, dishes, warnings, reasons}`. The `mode` field tells clients exactly which path produced the result (`ai`, `deterministic`, `uncertain`, `empty`) — a deterministic fallback is never labeled as AI output.
 
 Do not expose raw SQL/driver exceptions through RPC. Translate expected Effect failures to client-safe outcomes at the transport edge.
 

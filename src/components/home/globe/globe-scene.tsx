@@ -203,10 +203,27 @@ export function GlobeScene({
   } = useGlobeDishes(bridgeRef, copy);
 
   const [ready, setReady] = useState(false);
+  const [showStatic, setShowStatic] = useState(true);
 
   const handleReady = useCallback(() => {
     setReady(true);
   }, []);
+
+  useEffect(() => {
+    let timer: number | undefined;
+
+    if (ready) {
+      timer = window.setTimeout(() => {
+        setShowStatic(false);
+      }, 700);
+    }
+
+    return () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [ready]);
 
   if (reducedMotion) {
     return <GlobeFallback label={copy.globeStaticLabel} />;
@@ -214,6 +231,14 @@ export function GlobeScene({
 
   return (
     <>
+      {showStatic ? (
+        <div
+          aria-hidden="true"
+          className={`absolute inset-0 transition-opacity duration-700 ease-out ${ready ? "opacity-0" : "opacity-100"}`}
+        >
+          <GlobeFallback label={copy.globeStaticLabel} />
+        </div>
+      ) : null}
       <div
         aria-hidden="true"
         className={`absolute inset-0 transition-opacity duration-700 ease-out ${ready ? "opacity-100" : "opacity-0"}`}

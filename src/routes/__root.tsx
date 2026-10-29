@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
@@ -6,6 +6,7 @@ import {
   Scripts,
   createRootRoute,
   stripSearchParams,
+  useNavigate,
 } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, GlobeIcon } from "lucide-react";
@@ -19,19 +20,37 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { authorizeFn } from "@/modules/user/admin.functions";
+import { signOutFn } from "@/modules/user/auth.functions";
+import { clearFavoriteCaches } from "@/modules/user/components/save-dish-button";
+import { getSessionStateFn } from "@/modules/user/session.functions";
 import {
   bcp47TagFor,
+  displayLocales,
   localeNameFor,
   localeSearchSchema,
-  locales,
   messagesFor,
 } from "@/shared/i18n";
+import type { Locale } from "@/shared/i18n";
 
 import stylesheet from "@/styles.css?url";
 
 export const Route = createRootRoute({
   validateSearch: localeSearchSchema,
   search: { middlewares: [stripSearchParams({ lang: "en" })] },
+  beforeLoad: async () => {
+    const session = await getSessionStateFn();
+
+    if (session.status !== "signed-in") {
+      return { session, isAdmin: false as const };
+    }
+
+    const { allowed } = await authorizeFn({
+      data: { checks: [{ resource: "admin", actions: ["access"] }] },
+    });
+
+    return { session, isAdmin: allowed };
+  },
   head: ({ match }) => ({
     meta: [
       { charSet: "utf-8" },
@@ -73,8 +92,117 @@ function Document({ children }: { children: ReactNode }) {
   );
 }
 
+function MemberNav({ lang, isAdmin }: { lang: Locale; isAdmin: boolean }) {
+  const copy = messagesFor(lang);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [signOutFailed, setSignOutFailed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const signOut = (): void => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
+    setSignOutFailed(false);
+
+    void signOutFn().then(
+      () => {
+        clearFavoriteCaches(queryClient);
+        void navigate({ to: "/", search: { lang } });
+      },
+      () => {
+        setSigningOut(false);
+        setSignOutFailed(true);
+      },
+    );
+  };
+
+  return (
+    <>
+      <Link
+        to="/saved"
+        search={{ lang }}
+        activeOptions={{ exact: true }}
+        activeProps={{ "aria-current": "page" }}
+        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
+      >
+        Saved
+      </Link>
+      <Link
+        to="/settings/account"
+        search={{ lang }}
+        activeProps={{ "aria-current": "page" }}
+        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
+      >
+        {copy.authAccount}
+      </Link>
+      {isAdmin ? (
+        <Link
+          to="/admin"
+          search={{ lang }}
+          className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-mango no-underline hover:bg-white/10 hover:text-white"
+        >
+          {copy.adminWorkspace}
+        </Link>
+      ) : null}
+      <button
+        type="button"
+        onClick={signOut}
+        disabled={signingOut}
+        aria-busy={signingOut}
+        className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-70"
+      >
+        {signingOut ? copy.settingsSigningOut : copy.authSignOut}
+      </button>
+      {signOutFailed && !signingOut ? (
+        <span
+          role="alert"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-mango"
+        >
+          {copy.settingsSignOutFailed}
+          <button
+            type="button"
+            onClick={signOut}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-mango/60 px-3 text-xs font-bold text-mango hover:bg-white/10"
+          >
+            {copy.commonRetry}
+          </button>
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function GuestNav({ lang }: { lang: Locale }) {
+  const copy = messagesFor(lang);
+
+  return (
+    <>
+      <Link
+        to="/sign-in"
+        search={{ lang, returnTo: "/" }}
+        activeProps={{ "aria-current": "page" }}
+        className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
+      >
+        {copy.authSignIn}
+      </Link>
+      <Link
+        to="/sign-up"
+        search={{ lang, returnTo: "/" }}
+        activeProps={{ "aria-current": "page" }}
+        className="inline-flex min-h-11 items-center rounded-full border border-white/25 px-4 text-sm font-bold text-white no-underline hover:border-white/50 hover:bg-white/10 aria-current:bg-white/15"
+      >
+        {copy.authSignUp}
+      </Link>
+    </>
+  );
+}
+
 function AppLayout() {
   const { lang } = Route.useSearch();
+  const { session, isAdmin } = Route.useRouteContext();
   const copy = messagesFor(lang);
   const [queryClient] = useState(() => new QueryClient());
 
@@ -88,12 +216,12 @@ function AppLayout() {
       </a>
 
       <header className="site-header sticky top-0 z-50 border-b border-white/10 bg-space-deep">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 sm:px-6">
           <Link
             to="/"
             search={{ lang }}
             aria-label={copy.homeLabel}
-            className="font-display flex items-center gap-3 text-2xl leading-none tracking-wide text-white no-underline md:text-3xl"
+            className="font-display mr-auto flex items-center gap-3 text-2xl leading-none tracking-wide text-white no-underline md:text-3xl"
           >
             <img
               src="/applogo.png"
@@ -105,6 +233,31 @@ function AppLayout() {
             />
             FeastJourney
           </Link>
+
+          <nav aria-label="FeastJourney" className="flex flex-wrap items-center gap-1">
+            <Link
+              to="/"
+              search={{ lang }}
+              hash="discover"
+              resetScroll={false}
+              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+            >
+              Discover
+            </Link>
+            <Link
+              to="/recommend"
+              search={{ lang }}
+              activeProps={{ "aria-current": "page" }}
+              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-current:bg-white/15 aria-current:text-white"
+            >
+              {copy.ctaRecommend}
+            </Link>
+            {session.status === "signed-in" ? (
+              <MemberNav lang={lang} isAdmin={isAdmin} />
+            ) : (
+              <GuestNav lang={lang} />
+            )}
+          </nav>
 
           <nav aria-label={copy.languageLabel}>
             {/* Non-modal: opening the menu must not lock scroll or shift the page. */}
@@ -121,13 +274,13 @@ function AppLayout() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
-                  {locales.map((locale) => {
+                  {displayLocales.map((locale) => {
                     const isCurrent = locale === lang;
 
                     return (
                       <DropdownMenuItem key={locale} asChild>
                         <Link
-                          to="/"
+                          to="."
                           search={(previous) => ({ ...previous, lang: locale })}
                           hash={true}
                           resetScroll={false}
@@ -149,6 +302,15 @@ function AppLayout() {
           </nav>
         </div>
       </header>
+
+      {session.status === "unavailable" ? (
+        <p
+          role="note"
+          className="border-b border-mango/40 bg-cream px-4 py-2 text-center text-sm font-semibold text-ink"
+        >
+          Sign-in status is unavailable — discovery still works, saving is paused.
+        </p>
+      ) : null}
 
       <main id="main" tabIndex={-1}>
         <Outlet />

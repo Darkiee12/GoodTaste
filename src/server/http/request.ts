@@ -13,9 +13,13 @@ export const requestIdFromHeaders = (headers: Headers): string => {
   return crypto.randomUUID();
 };
 
-export const resolveClientIdentity = (request: Request, config: AppConfig): string => {
+export const resolveClientIdentity = (request: Request, config: AppConfig): string =>
+  resolveIdentityFromHeaders(request.headers, config);
+
+/** Identity for contexts that only expose headers (e.g. server functions). */
+export const resolveIdentityFromHeaders = (headers: Headers, config: AppConfig): string => {
   if (config.trustedProxies.length > 0) {
-    const forwarded = request.headers.get("x-forwarded-for");
+    const forwarded = headers.get("x-forwarded-for");
     const first = forwarded?.split(",")[0]?.trim() ?? "";
 
     if (first.length > 0) {

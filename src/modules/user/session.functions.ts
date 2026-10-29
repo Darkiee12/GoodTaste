@@ -250,6 +250,83 @@ export const getSessionFn = createServerFn({ method: "GET" }).handler(async () =
   );
 });
 
+/**
+ * Navigation-grade session state. Unlike {@link getSessionFn} (which folds
+ * every failure into `user: null`), this distinguishes three cases so the
+ * shell never shows member links to a signed-out guest and never shows an
+ * auth wall to a guest when the store itself is unreachable:
+ * - `signed-in`: verified session with identity.
+ * - `signed-out`: no session, expired session, or suspended account.
+ * - `unavailable`: the session store or request timed out; the visitor may
+ *   or may not be signed in, so discovery stays open and member actions
+ *   report the outage instead of redirecting to sign-in.
+ */
+export type SessionState =
+  | {
+      readonly status: "signed-in";
+      readonly user: { readonly id: string; readonly name: string; readonly email: string };
+    }
+  | { readonly status: "signed-out" }
+  | { readonly status: "unavailable" };
+
+/**
+ * Failure-tag probe for navigation-grade session state. Thrown failures are
+ * untrusted transport input; the tag is validated here at the I/O boundary
+ * before {@link classifySessionFailure} branches on the domain value.
+ */
+export const sessionFailureSchema = z.object({ _tag: z.string() });
+
+const outageTagSchema = z.enum(["DatabaseUnavailable", "RequestTimeout"]);
+
+const signedOutTagSchema = z.enum(["SignInRequired", "UserSuspended"]);
+
+export type SessionFailureParse = ReturnType<typeof sessionFailureSchema.safeParse>;
+
+/**
+ * Pure mapping behind {@link getSessionStateFn}: store outages and request
+ * timeouts mean "unavailable" (the visitor may or may not be signed in).
+ * Only genuine authentication outcomes — no session, or a suspended account —
+ * mean "signed-out". Every other failure (unexpected shapes, defects) is
+ * "unavailable": an unknown infrastructure failure must never masquerade as
+ * proof that the visitor signed out. Exported for server-testable verification.
+ */
+export const classifySessionFailure = (parsed: SessionFailureParse): SessionState => {
+  if (parsed.success && outageTagSchema.safeParse(parsed.data._tag).success) {
+    return { status: "unavailable" };
+  }
+
+  if (parsed.success && signedOutTagSchema.safeParse(parsed.data._tag).success) {
+    return { status: "signed-out" };
+  }
+
+  return { status: "unavailable" };
+};
+
+export const getSessionStateFn = createServerFn({ method: "GET" }).handler(
+  async (): Promise<SessionState> => {
+    const { server, session, runtime } = await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    try {
+      const trusted = await runtime.runApp(
+        session.resolveSession(headers),
+        "fn/user/session-state",
+        15000,
+        requestId,
+      );
+
+      return {
+        status: "signed-in",
+        user: { id: trusted.userId, name: trusted.name, email: trusted.email },
+      };
+    } catch (error) {
+      return classifySessionFailure(sessionFailureSchema.safeParse(error));
+    }
+  },
+);
+
 export const unlinkAccountFn = createServerFn({ method: "POST" })
   .validator(unlinkAccountSchema)
   .handler(async ({ data }) => {

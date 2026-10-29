@@ -24,7 +24,7 @@ typography:
     fontFamily: "Bangers"
     fontSize: 2rem
   body-md:
-    fontFamily: "Bangers"
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
     fontSize: 1rem
   label-caps:
     fontFamily: "IBM Plex Mono"
@@ -52,6 +52,13 @@ Playful, character-driven design with expressive typography and bold graphics fo
 - **Typography weights:** 100, 200, 300, 400, 500, 600, 700, 800, 900
 - **Color palette:** primary, secondary, neutral, success, warning, danger
 - **Spacing scale:** 4/8/12/16/24/32
+
+## Typography roles
+
+- **Display (Bangers):** headings, legends, and hero numerals only. Never body copy, forms, tables, or buttons.
+- **Body (system stack):** all body text, form labels/inputs, tables, checkboxes, and buttons. Loaded via `--font-body`; no webfont needed.
+- **Mono (IBM Plex Mono):** small caps labels and code only.
+- Vietnamese diacritics plus CJK/Devanagari text always fall back to system fonts; no font binaries are distributed.
 
 ## Colors
 
