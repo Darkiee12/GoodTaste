@@ -251,14 +251,6 @@ function AppLayout() {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Link
-                    to="/"
-                    search={{ lang }}
-                    aria-label={copy.adminExitLab}
-                    className="inline-flex min-h-11 items-center rounded-full border border-white/25 px-3 text-sm font-semibold text-mango no-underline hover:bg-white/10 hover:text-white"
-                  >
-                    ← {copy.adminExitLab}
-                  </Link>
                 </>
               ) : (
                 <>
