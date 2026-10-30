@@ -1,32 +1,279 @@
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { getRouteApi } from "@tanstack/react-router";
+import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
+import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
-  FOOD_LOCATIONS,
-  dishesInCategory,
-  localizedDishText,
-  type FoodCategory,
-} from "@/components/home/globe/food-locations";
+  DiscoveryFallback,
+  DiscoveryLoadingState,
+  resolveDiscoveryFallbackState,
+} from "@/components/home/discovery-fallback";
+import {
+  DiscoveryLocation,
+  discoveryHeadingFor,
+  discoveryServedScopeFor,
+  discoverySubtitleFor,
+  type DiscoveryServedScope,
+} from "@/components/home/discovery-location";
+import { sanitizeCountryCode } from "@/components/home/recommend/quiz-model";
+import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
+import { getLocalCarouselFn, listCountriesFn } from "@/modules/food-discovery/food.functions";
+import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
+import { useFavoriteStatus } from "@/modules/user/components/save-dish-button";
 import type { Locale, Messages } from "@/shared/i18n";
 
+const rootRoute = getRouteApi("__root__");
+
+const CAROUSEL_LIMIT = 5;
+
+function countryNameFor(
+  countries:
+    | ReadonlyArray<{ readonly iso3166: string | null; readonly displayName: string | undefined }>
+    | undefined,
+  code: string | null,
+): string | null {
+  if (code === null) {
+    return null;
+  }
+
+  return countries?.find((entry) => entry.iso3166 === code)?.displayName ?? code;
+}
+
 /**
- * Discovery filter: "all" plus the FoodCategory TaggedEnum discriminant tags.
- * Tags (not enum instances) keep button identity and React keys on plain
- * string equality; dish matching below stays exhaustive via $match.
+ * Homepage food discovery: show relevant published dishes immediately,
+ * letting location improve relevance rather than gate it. One exclusive
+ * scope per request (precise nearby, country, or worldwide); the server
+ * falls back automatically (nearby -> country -> worldwide) and labels the
+ * served scope honestly. Cards on screen are always described by the scope
+ * that served them — never by a newly selected region — because headings
+ * follow the last served response, not the pending request.
  */
-type FilterId = FoodCategory["_tag"] | "all";
-
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
-  const [filter, setFilter] = useState<FilterId>("all");
+  const { session } = rootRoute.useRouteContext();
 
-  const filters: Array<{ id: FilterId; label: string }> = [
-    { id: "all", label: copy.discoverAll },
-    { id: "LocalFavorites", label: copy.categoryLocalFavorites },
-    { id: "StreetFood", label: copy.categoryStreetFood },
-    { id: "ComfortingBowls", label: copy.categoryComfortingBowls },
-    { id: "WorthTravelling", label: copy.categoryWorthTravelling },
-  ];
+  // Precise location is explicit-only: the shared locator never prompts on
+  // mount or on render. Coordinates never enter query keys, logs, or
+  // persisted state — the precise scope keys on the locator success count.
+  const precise = usePreciseLocation();
 
-  const dishes = filter === "all" ? FOOD_LOCATIONS : dishesInCategory(FOOD_LOCATIONS, filter);
+  // Explicit visitor choices. The destination overrides trusted detection;
+  // worldwide is an explicit mode. Neither is overwritten by async detection.
+  const [worldwide, setWorldwide] = useState(false);
+  const [destination, setDestination] = useState<string | null>(null);
+  // Rotation seed for another set: same scope + same seed renders the same
+  // set (stable within the session); bumping it renders another set.
+  const [rotation, setRotation] = useState(0);
+  const [activeScope, setActiveScope] = useState<string | null>(null);
+
+  // Last SERVED response (scope + country + supplemented + precise flag).
+  // Labels and the selector always describe these cards; a pending refetch
+  // keeps the old labels until its own response commits.
+  const [served, setServed] = useState<{
+    key: string;
+    scopeKey: string | null;
+    country: string | null;
+    precise: boolean;
+    supplemented: boolean;
+  } | null>(null);
+
+  // Trusted approximate country shared with the quiz cache key, so the
+  // homepage issues one region request, not two. Cloudflare `cf-*` headers
+  // are only honored behind a verified trusted proxy (see trusted-region);
+  // locally only DEV_VISITOR_COUNTRY applies, otherwise the answer is an
+  // honest null and discovery falls back to worldwide automatically.
+  const quizRegionQuery = useQuery({
+    queryKey: ["geo", "quiz-region"],
+    queryFn: () => getQuizRegionFn(),
+    retry: 1,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+  const trustedCountry = sanitizeCountryCode(quizRegionQuery.data?.country ?? "");
+
+  const countriesQuery = useQuery({
+    queryKey: ["catalog", "countries", lang],
+    queryFn: () => listCountriesFn({ data: { locale: lang } }),
+    retry: 1,
+    staleTime: 5 * 60_000,
+  });
+
+  const effectiveCountry = destination ?? trustedCountry;
+  const preciseFix = precise.status === "success" ? precise.fix : null;
+  const geoSettled = !quizRegionQuery.isPending;
+
+  // Exactly one scope per request — never coordinates alongside worldwide.
+  let scopeKey: string | null = null;
+
+  if (worldwide) {
+    scopeKey = "world";
+  } else if (preciseFix !== null) {
+    scopeKey = `nearby-${precise.successCount.toString()}`;
+  } else if (effectiveCountry !== null) {
+    scopeKey = `country-${effectiveCountry}`;
+  } else if (geoSettled) {
+    scopeKey = "world-auto";
+  }
+
+  const isAutoWorldwide = scopeKey === "world-auto";
+
+  if (scopeKey !== activeScope) {
+    setActiveScope(scopeKey);
+    setRotation(0);
+  }
+
+  const carouselQuery = useQuery({
+    enabled: scopeKey !== null,
+    queryKey: ["catalog", "local-carousel", lang, scopeKey ?? "none", rotation],
+    placeholderData: keepPreviousData,
+    queryFn: () => {
+      if (scopeKey === "world" || scopeKey === "world-auto") {
+        return getLocalCarouselFn({
+          data: { limit: CAROUSEL_LIMIT, locale: lang, seed: rotation, worldwide: true },
+        });
+      }
+
+      if (preciseFix !== null) {
+        return getLocalCarouselFn({
+          data: {
+            country: effectiveCountry ?? undefined,
+            latitude: preciseFix.latitude,
+            limit: CAROUSEL_LIMIT,
+            locale: lang,
+            longitude: preciseFix.longitude,
+            seed: rotation,
+          },
+        });
+      }
+
+      if (effectiveCountry !== null) {
+        return getLocalCarouselFn({
+          data: { country: effectiveCountry, limit: CAROUSEL_LIMIT, locale: lang, seed: rotation },
+        });
+      }
+
+      throw new Error("location not ready");
+    },
+    retry: 1,
+    staleTime: 60_000,
+  });
+
+  const requestKey = scopeKey === null ? null : `${scopeKey}:${rotation.toString()}`;
+
+  if (
+    requestKey !== null &&
+    carouselQuery.data !== undefined &&
+    (served === null || served.key !== requestKey)
+  ) {
+    setServed({
+      key: requestKey,
+      scopeKey,
+      country: worldwide ? null : effectiveCountry,
+      precise: preciseFix !== null,
+      supplemented: carouselQuery.data.supplemented,
+    });
+  }
+
+  const items = carouselQuery.data?.items ?? [];
+  const total = items.length;
+  const visibleIds = items.map((dish) => dish.id);
+  const userId = session.status === "signed-in" ? session.user.id : null;
+  const favoriteStatus = useFavoriteStatus(visibleIds, userId);
+
+  // Explicit refresh: a new rotation seed renders another set from the same
+  // scope. keepPreviousData keeps the current cards visible while the new
+  // set loads, so there is no empty-state flash mid-refresh.
+  const showAnotherSet = (): void => {
+    setRotation((value) => value + 1);
+  };
+
+  // Scope line follows the scope actually served, not the scope asked for:
+  // a precise request that fell back to country dishes is labeled regional,
+  // and worldwide fallback is labeled worldwide — never local. A sparse
+  // nearby pool topped up with country dishes (supplemented) is regional
+  // with the country named. While a scope change is still loading, the
+  // heading already names the requested scope so the skeleton below it is
+  // never mislabeled.
+  const servedScopeName = carouselQuery.data?.scope ?? null;
+
+  const servedScope = discoveryServedScopeFor({
+    preciseActive: served?.precise ?? false,
+    servedScope: servedScopeName,
+    supplemented: served?.supplemented ?? false,
+  });
+
+  const servedRegionName = countryNameFor(countriesQuery.data, served?.country ?? null);
+
+  const requestedRegionName = countryNameFor(countriesQuery.data, effectiveCountry);
+
+  // A scope change (new country, precise fix, worldwide toggle) invalidates
+  // the served cards: the section shows the skeleton with the newly
+  // requested scope instead of stale cards under a stale label.
+  const scopeChanged = served !== null && served.scopeKey !== scopeKey;
+
+  // The subtitle always matches the heading's scope: country results get
+  // the country line, worldwide fallback owns the catalog-gap explanation.
+  // Heading + subtitle can never contradict ("around the world" above
+  // "local favorites" is the exact mismatch this prevents).
+  let heading = copy.discoverLocalTitle;
+  let subtitle = copy.discoveryWorldwideNote;
+
+  if (scopeChanged || servedScope === null) {
+    if (effectiveCountry !== null || worldwide) {
+      let requestedScope: DiscoveryServedScope = "regional";
+
+      if (worldwide) {
+        requestedScope = "worldwide";
+      } else if (preciseFix !== null) {
+        requestedScope = "nearby";
+      }
+
+      heading = discoveryHeadingFor({
+        lang,
+        regionName: requestedRegionName,
+        scope: requestedScope,
+      });
+      subtitle = discoverySubtitleFor({
+        lang,
+        regionName: requestedRegionName,
+        scope: requestedScope,
+        supplemented: false,
+      });
+    }
+  } else {
+    heading = discoveryHeadingFor({ lang, regionName: servedRegionName, scope: servedScope });
+    subtitle = discoverySubtitleFor({
+      lang,
+      regionName: servedRegionName,
+      scope: servedScope,
+      supplemented: served?.supplemented ?? false,
+    });
+  }
+
+  // A scope change (new country, precise fix, worldwide toggle) invalidates
+  // the served cards: show the skeleton with the newly requested scope
+  // instead of stale cards under a stale label. Plain refetches (rotation,
+  // "show another set") keep the cards with a small updating note.
+  const loading = scopeKey !== null && (carouselQuery.isPending || scopeChanged);
+  const failed = carouselQuery.isError || quizRegionQuery.isError;
+  const refetching = !carouselQuery.isPending && carouselQuery.isFetching && total > 0;
+
+  const preciseDenied =
+    precise.status === "denied" || precise.status === "timeout" || precise.status === "unavailable";
+
+  const preciseDisabled = precise.status === "unsupported" || precise.status === "insecure";
+
+  const servedCountryCode = served?.country ?? null;
+
+  const fallbackState = resolveDiscoveryFallbackState({
+    failed,
+    geoSettled,
+    isAutoWorldwide,
+    loading,
+    located: scopeKey !== null,
+    total,
+    worldwide: scopeKey === "world" || servedScopeName === "worldwide",
+  });
 
   return (
     <section
@@ -39,50 +286,88 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
           id="discover-heading"
           className="font-display mb-3 text-[clamp(2.25rem,6vw,3.5rem)] leading-[1.05] tracking-[0.015em] text-balance"
         >
-          {copy.discoverHeading}
+          {heading}
         </h2>
 
-        <p className="mb-6 max-w-[60ch] text-lg text-muted">{copy.discoverIntro}</p>
+        <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
 
-        <fieldset className="mb-8 flex flex-wrap gap-2 border-0 p-0">
-          <legend className="sr-only">{copy.discoverHeading}</legend>
+        <div className="mb-8">
+          <DiscoveryLocation
+            countries={(countriesQuery.data ?? []).flatMap((entry) =>
+              entry.iso3166 === null
+                ? []
+                : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
+            )}
+            countriesLoading={countriesQuery.isPending}
+            currentLabel={servedRegionName ?? requestedRegionName ?? copy.discoverAroundWorld}
+            disabled={false}
+            lang={lang}
+            locating={precise.status === "locating"}
+            preciseDenied={preciseDenied}
+            preciseDisabled={preciseDisabled}
+            selectedCountry={servedCountryCode ?? effectiveCountry}
+            selection={servedScope ?? (worldwide ? "worldwide" : "regional")}
+            showBackToRegion={(served?.precise === true || worldwide) && effectiveCountry !== null}
+            onBackToRegion={() => {
+              precise.reset();
+              setWorldwide(false);
+            }}
+            onChooseCountry={(code) => {
+              precise.reset();
+              setDestination(code);
+              setWorldwide(false);
+            }}
+            onExploreWorldwide={() => {
+              setWorldwide(true);
+            }}
+            onUsePrecise={precise.request}
+          />
+        </div>
 
-          {filters.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={filter === option.id}
-              onClick={() => {
-                setFilter(option.id);
-              }}
-              className="min-h-11 cursor-pointer rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink hover:border-food-orange aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-white"
-            >
-              {option.label}
-            </button>
-          ))}
-        </fieldset>
+        {fallbackState === "loading" ? <DiscoveryLoadingState copy={copy} /> : null}
 
-        <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
-          {dishes.map((dish) => (
-            <li key={dish.id}>
-              <article className="flex h-full flex-col gap-2 rounded-2xl border border-border-soft bg-white p-6 transition hover:-translate-y-0.5 hover:border-food-orange hover:shadow-[0_12px_28px_rgba(194,65,12,0.12)]">
-                <span aria-hidden="true" className="text-4xl leading-none">
-                  {dish.emoji}
-                </span>
+        {fallbackState === "ready" ? (
+          <div>
+            {refetching ? (
+              <output className="mb-2 block text-sm font-semibold text-muted">
+                {copy.discoverLocalLoading}
+              </output>
+            ) : null}
+            <DishCarousel
+              autoplay
+              copy={copy}
+              favoriteStatus={favoriteStatus}
+              items={items}
+              label={heading}
+              lang={lang}
+              resetKey={`${scopeKey ?? "pending"}:${rotation.toString()}`}
+              session={session}
+            />
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={showAnotherSet}
+                aria-label={lang === "vi" ? "Xem loạt món khác" : "Show another set"}
+                className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+              >
+                <RefreshCwIcon aria-hidden="true" className="size-4 flex-none" />
+                {lang === "vi" ? "Xem loạt món khác" : "Show another set"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
-                <h3 className="text-lg leading-tight font-extrabold">{dish.name}</h3>
-
-                <p className="text-sm font-semibold text-food-orange-strong">
-                  {localizedDishText(dish.country, lang)} · {localizedDishText(dish.region, lang)}
-                </p>
-
-                <p className="text-[0.95rem] text-muted">
-                  {localizedDishText(dish.description, lang)}
-                </p>
-              </article>
-            </li>
-          ))}
-        </ul>
+        <DiscoveryFallback
+          copy={copy}
+          emptyTagline={copy.discoveryCatalogTagline}
+          state={fallbackState}
+          onExploreWorldwide={() => {
+            setWorldwide(true);
+          }}
+          onRetry={() => {
+            void carouselQuery.refetch();
+          }}
+        />
       </div>
     </section>
   );

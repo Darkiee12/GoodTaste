@@ -1,0 +1,202 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  buildRecommendPayload,
+  buildSurprisePayload,
+  draftFromSavedPrefs,
+  EMPTY_DRAFT,
+  mealSchema,
+  moodSchema,
+  parseCommaList,
+  readSavedPrefs,
+  recCountrySchema,
+  removeSavedPrefs,
+  serializePrefs,
+  termLengthError,
+  tooLongTerms,
+  validateRegion,
+} from "@/components/home/recommend-section";
+import {
+  MEAL_OCCASIONS,
+  RECOMMENDATION_MOODS,
+} from "@/modules/food-discovery/recommendation.constants";
+import { messagesFor } from "@/shared/i18n";
+
+const copy = messagesFor("en");
+
+describe("recommend route client parsing", () => {
+  test("meal and mood schemas mirror the shared vocabularies", () => {
+    expect(mealSchema.safeParse("lunch").success).toBe(true);
+    expect(mealSchema.safeParse("brunch").success).toBe(false);
+    expect(moodSchema.safeParse("spicy").success).toBe(true);
+    expect(moodSchema.safeParse("hangry").success).toBe(false);
+    expect([...MEAL_OCCASIONS]).toHaveLength(6);
+    expect([...RECOMMENDATION_MOODS]).toHaveLength(7);
+  });
+
+  test("region resolves against the catalog country list, not free text", () => {
+    expect(validateRegion("country", "", copy)).toBe(copy.recCountryError);
+    expect(validateRegion("country", "x1!", copy)).toBe(copy.recCountryError);
+    expect(validateRegion("country", " vn ", copy)).toBeNull();
+    expect(validateRegion("anywhere", "", copy)).toBeNull();
+  });
+
+  test("country schema mirrors the server ISO pattern", () => {
+    expect(recCountrySchema.safeParse("VN").success).toBe(true);
+    expect(recCountrySchema.safeParse("VN-01").success).toBe(true);
+    expect(recCountrySchema.safeParse("vn").success).toBe(false);
+    expect(recCountrySchema.safeParse("USA!").success).toBe(false);
+  });
+
+  test("comma lists trim, drop empties, and dedupe", () => {
+    expect(parseCommaList("peanuts, shrimp ,peanuts,, ")).toEqual(["peanuts", "shrimp"]);
+    expect(parseCommaList("  ")).toEqual([]);
+  });
+
+  test("overlong exclusion terms are rejected before the server call", () => {
+    expect(tooLongTerms(["a".repeat(100)])).toBe(false);
+    expect(tooLongTerms(["a".repeat(101)])).toBe(true);
+    expect(termLengthError("cilantro", "peanuts", copy)).toBeNull();
+    expect(termLengthError("a".repeat(101), "", copy)).toBe(copy.recTermTooLong);
+  });
+
+  test("region validation requires a real choice per lane", () => {
+    expect(validateRegion("anywhere", "", copy)).toBeNull();
+    expect(validateRegion("country", "", copy)).toBe(copy.recCountryError);
+    expect(validateRegion("country", "x1!", copy)).toBe(copy.recCountryError);
+    expect(validateRegion("country", " vn ", copy)).toBeNull();
+  });
+
+  test("payload builder keeps undefined lanes undefined", () => {
+    const payload = buildRecommendPayload({
+      meal: "dinner",
+      avoid: ["cilantro"],
+      allergies: [],
+      country: "VN",
+      mood: "comforting",
+      locale: "en",
+    });
+
+    expect(payload.meal).toBe("dinner");
+    expect(payload.country).toBe("VN");
+    expect(payload.avoid).toEqual(["cilantro"]);
+  });
+
+  test("stored prefs parse only with the consent flag and a known shape", () => {
+    expect(readSavedPrefs(() => null)).toBeNull();
+    expect(readSavedPrefs(() => "not json")).toBeNull();
+    expect(readSavedPrefs(() => JSON.stringify({ remember: true, avoid: [1] }))).toBeNull();
+    expect(readSavedPrefs(() => JSON.stringify({ remember: false, avoid: [] }))).toBeNull();
+
+    const saved = readSavedPrefs(() =>
+      serializePrefs({ remember: true, avoid: ["x"], country: "VN" }),
+    );
+
+    expect(saved?.country).toBe("VN");
+    expect(saved?.avoid).toEqual(["x"]);
+  });
+
+  test("saved prefs never persist allergies, even with consent", () => {
+    const saved = readSavedPrefs(() =>
+      JSON.stringify({ remember: true, avoid: ["mushrooms"], allergies: ["shrimp"] }),
+    );
+
+    expect(saved?.avoid).toEqual(["mushrooms"]);
+    expect(draftFromSavedPrefs(saved).allergiesRaw).toBe("");
+  });
+
+  test("saved prefs restore into a draft without touching meal, mood, or allergies", () => {
+    expect(draftFromSavedPrefs(null)).toEqual(EMPTY_DRAFT);
+
+    const draft = draftFromSavedPrefs({
+      remember: true,
+      avoid: ["cilantro"],
+      country: "VN",
+    });
+
+    expect(draft.avoidRaw).toBe("cilantro");
+    expect(draft.allergiesRaw).toBe("");
+    expect(draft.regionMode).toBe("country");
+    expect(draft.country).toBe("VN");
+    expect(draft.remember).toBe(true);
+  });
+
+  test("surprise keeps the current meal, mood, region, and exclusions", () => {
+    const payload = buildSurprisePayload({
+      draft: {
+        ...EMPTY_DRAFT,
+        avoidRaw: "cilantro",
+        allergiesRaw: "peanuts",
+        regionMode: "country",
+        country: "vn",
+      },
+      meal: "dinner",
+      mood: "comforting",
+      locale: "en",
+      surpriseSeed: 0,
+    });
+
+    expect(payload.meal).toBe("dinner");
+    expect(payload.mood).toBe("comforting");
+    expect(payload.country).toBe("VN");
+    expect(payload.avoid).toEqual(["cilantro"]);
+    expect(payload.allergies).toEqual(["peanuts"]);
+  });
+
+  test("surprise carries saved dislikes and destination through the restored draft", () => {
+    const saved = readSavedPrefs(() =>
+      serializePrefs({ remember: true, avoid: ["mushrooms"], country: "JP" }),
+    );
+
+    const payload = buildSurprisePayload({
+      draft: draftFromSavedPrefs(saved),
+      meal: "anything",
+      mood: "any",
+      locale: "en",
+      surpriseSeed: 0,
+    });
+
+    expect(payload.avoid).toEqual(["mushrooms"]);
+    expect(payload.allergies).toEqual([]);
+    expect(payload.country).toBe("JP");
+  });
+
+  test("surprise with no preferences still builds a valid payload", () => {
+    const payload = buildSurprisePayload({
+      draft: EMPTY_DRAFT,
+      meal: "anything",
+      mood: "any",
+      locale: "en",
+      surpriseSeed: 2,
+    });
+
+    expect(payload.avoid).toEqual([]);
+    expect(payload.allergies).toEqual([]);
+    expect(payload.country).toBeUndefined();
+  });
+
+  test("surprise never mutates the draft it reads", () => {
+    const draft = {
+      ...EMPTY_DRAFT,
+      avoidRaw: "cilantro",
+      regionMode: "country" as const,
+      country: "vn",
+    };
+
+    const before = { ...draft };
+
+    buildSurprisePayload({ draft, meal: "lunch", mood: "light", locale: "en", surpriseSeed: 0 });
+
+    expect(draft).toEqual(before);
+  });
+
+  test("clear action removes storage through the injected remover", () => {
+    let removed = 0;
+
+    removeSavedPrefs(() => {
+      removed += 1;
+    });
+
+    expect(removed).toBe(1);
+  });
+});

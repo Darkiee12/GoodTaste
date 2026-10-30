@@ -25,6 +25,7 @@
 
   --animate-popup-enter: popup-enter 450ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
   --animate-popup-exit: popup-exit 380ms ease-in forwards;
+  --animate-rec-step-enter: rec-step-enter 240ms ease-out;
 
   @keyframes popup-enter {
     from {
@@ -45,6 +46,17 @@
     to {
       opacity: 0;
       transform: translateY(8px) scale(0.92);
+    }
+  }
+
+  @keyframes rec-step-enter {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 }
@@ -75,7 +87,14 @@
     max-width: 72rem;
     margin-inline: auto;
     padding: 3rem 1.5rem 4rem;
-    min-height: 70vh;
+    /* Flex-column page layout (see __root): main must fill the container
+       cross axis and grow vertically. margin-inline:auto alone would size
+       main to its content on narrow screens (auto cross margins cancel the
+       flex stretch and min-width:auto floors at min-content), overflowing
+       the viewport. width:100% + min-width:0 keeps it exactly the
+       container width; max-width + auto margins still center on desktop. */
+    width: 100%;
+    min-width: 0;
   }
 
   main:has(> .home) {
@@ -133,9 +152,10 @@
   }
 
   /* Static cropped-planet art for SSR, reduced motion, and WebGL failures.
-     Geometry mirrors computeGlobeLayout exactly via container units: the
-     diameter (104% mobile, min(180%, 320% of hero height) desktop) and the
-     visible cap (70%/32% of diameter, clamped to 50% of hero height). */
+     Geometry mirrors computeGlobeLayout: the diameter is the smaller of
+     125% of the hero height and the hero width minus side margins, centered
+     on narrow screens and right-anchored on desktop, with the bottom 20%
+     cropped below the frame. */
   .fallback-frame {
     container-type: size;
   }
@@ -144,58 +164,62 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    width: 104cqw;
+    width: min(125cqh, calc(100cqw - 32px));
     aspect-ratio: 1 / 1;
-    transform: translate(-50%, max(30%, calc(100% - 50cqh)));
+    transform: translate(-50%, 20%);
     border-radius: 50%;
-    background: radial-gradient(
-      circle at 50% 26%,
-      #4a9be8 0%,
-      #2f7fd8 34%,
-      #1e5fc4 62%,
-      #173f86 100%
-    );
+    /* Stage A ocean sphere: vertical gradient matching earth-texture.ts
+       OCEAN_TOP (#4A9BE8) -> OCEAN_BOTTOM (#1C56B8). Stage B paints the real
+       land mask onto .fallback-preview above this. */
+    background: linear-gradient(180deg, #4a9be8 0%, #1c56b8 100%);
+    /* Thin dashed orbit ring: the outline follows the circular
+       border-radius and sits just outside the planet. */
+    outline: 1px dashed rgb(125 211 252 / 0.55);
+    outline-offset: 2px;
     box-shadow:
-      0 0 72px rgb(125 211 252 / 0.35),
-      inset -18px -30px 80px rgb(3 10 30 / 0.45);
+      inset -18px -30px 80px rgb(3 10 30 / 0.45),
+      0 0 42px rgb(125 211 252 / 0.16);
     overflow: hidden;
   }
 
-  .fallback-land {
+  /* Stage B accurate preview: orthographic land-mask render of the opening
+     view. Transparent outside the disc so the ocean sphere shows through. */
+  .fallback-preview {
     position: absolute;
-    background: linear-gradient(160deg, #8fd45e, #5cab45);
-    filter: blur(1px);
-  }
-
-  .fallback-land-a {
-    left: 14%;
-    top: -3%;
-    width: 27%;
-    height: 17%;
-    border-radius: 48% 52% 55% 45% / 70% 65% 35% 30%;
-    transform: rotate(-8deg);
-  }
-
-  .fallback-land-b {
-    left: 51%;
-    top: 1%;
-    width: 31%;
-    height: 15%;
-    border-radius: 55% 45% 40% 60% / 60% 55% 45% 40%;
-  }
-
-  .fallback-land-c {
-    left: 76%;
-    top: 7%;
-    width: 15%;
-    height: 10%;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     border-radius: 50%;
   }
 
   @media (min-width: 48rem) {
     .fallback-planet {
-      width: min(180cqw, 320cqh);
-      transform: translate(-50%, max(68%, calc(100% - 50cqh)));
+      right: 48px;
+      left: auto;
+      width: min(125cqh, calc(100cqw - 96px));
+      transform: translateY(20%);
+    }
+  }
+
+  /* Local-discovery carousel: one featured slide at a time, sliding with
+     a restrained transform transition. Autoplay is driven by React state;
+     hover/focus pauses and reduced motion are handled alongside. */
+  .discover-carousel-viewport {
+    overflow: hidden;
+  }
+
+  .discover-carousel-track {
+    display: flex;
+    transition: transform 550ms ease;
+  }
+
+  .discover-carousel-track > article {
+    min-height: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .discover-carousel-track {
+      transition: none;
     }
   }
 }
@@ -219,4 +243,22 @@
   [data-slot="dropdown-menu-content"] {
     border-color: var(--color-border);
   }
+}
+
+/* Radix Select has no `modal` prop in this version: every open listbox
+   mounts a `remove-scroll` body lock (`overflow: hidden` + a `margin-right`
+   gap compensation). That lock breaks `position: sticky` (the site header
+   scrolls away while the menu is open) and moves centered content whenever
+   the compensation misfires, so opening a popover reads as a layout shift.
+   Genuine modals (AdminDialog, MemberDrawer) keep their lock; only
+   non-modal overlays — Select listboxes and DropdownMenu menus — with no
+   dialog open are restored to the document flow values above
+   (`overflow-x: clip`, `overflow-y: visible`, no gap margin), matching the
+   `modal={false}` account/language menus. Unlayered on purpose: the injected
+   lock stylesheet is unlayered `!important`, which beats any layered rule
+   regardless of specificity. */
+body[data-scroll-locked]:has([role="listbox"], [role="menu"]):not(:has([role="dialog"])) {
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+  margin-right: 0 !important;
 }

@@ -1,8 +1,18 @@
 import { ClientOnly } from "@tanstack/react-router";
-import { Component, lazy, Suspense, useRef, type ReactNode } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import type { GlobeOverlayBridge } from "@/components/home/globe/geo-utils";
 import { GlobeFallback } from "@/components/home/globe/globe-fallback";
+import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { Locale, Messages } from "@/shared/i18n";
 
 const LazyGlobeScene = lazy(() =>
@@ -29,9 +39,65 @@ class GlobeErrorBoundary extends Component<
 }
 
 /**
- * SSR-safe globe slot: an empty slot on the server and while three.js loads
- * (the hero sky shows through honestly), WebGL on the client. The static
- * planet only appears when WebGL fails; reduced motion is handled in-scene.
+ * Slow-chunk safety net: after this long without resolving the WebGL chunk,
+ * show the static planet instead of an empty slot. The scene below keeps
+ * loading and swaps in when ready (automatic retry/upgrade).
+ */
+const CHUNK_LOAD_TIMEOUT_MS = 8000;
+
+/**
+ * Client-only branch of the four-stage reveal:
+ * - Reduced motion: the static planet only, without ever downloading the
+ *   WebGL chunk (Stage D).
+ * - Otherwise: no duplicate static while the chunk loads (the single static
+ *   owner is GlobeScene, Stage C); the 8s timeout static above for slow
+ *   networks; the error-boundary static for chunk/WebGL failures (Stage D).
+ * Runs inside ClientOnly so the first client render matches the server HTML.
+ */
+function GlobeContent({
+  copy,
+  lang,
+  bridgeRef,
+}: {
+  copy: Messages;
+  lang: Locale;
+  bridgeRef: RefObject<GlobeOverlayBridge>;
+}) {
+  const reducedMotion = usePrefersReducedMotion();
+  const [chunkTimedOut, setChunkTimedOut] = useState(false);
+  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      return () => undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setChunkTimedOut(true);
+    }, CHUNK_LOAD_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [reducedMotion]);
+
+  if (reducedMotion) {
+    return fallback;
+  }
+
+  return (
+    <GlobeErrorBoundary fallback={fallback}>
+      <Suspense fallback={chunkTimedOut ? fallback : null}>
+        <LazyGlobeScene copy={copy} lang={lang} bridgeRef={bridgeRef} />
+      </Suspense>
+    </GlobeErrorBoundary>
+  );
+}
+
+/**
+ * SSR-safe globe slot: an empty slot on the server, the static planet while
+ * three.js loads, WebGL on the client. WebGL failures fall back to the same
+ * static planet.
  */
 export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
   const bridgeRef = useRef<GlobeOverlayBridge>({
@@ -43,16 +109,10 @@ export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
     node: null,
   });
 
-  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
-
   return (
     <div className="hero-globe pointer-events-none absolute inset-0">
       <ClientOnly fallback={null}>
-        <GlobeErrorBoundary fallback={fallback}>
-          <Suspense fallback={null}>
-            <LazyGlobeScene copy={copy} lang={lang} bridgeRef={bridgeRef} />
-          </Suspense>
-        </GlobeErrorBoundary>
+        <GlobeContent copy={copy} lang={lang} bridgeRef={bridgeRef} />
       </ClientOnly>
     </div>
   );

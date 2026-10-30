@@ -10,33 +10,644 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SavedRouteImport } from './routes/saved'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SignUpRouteImport } from './routes/sign-up'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminDishesRouteImport } from './routes/admin.dishes'
+import { Route as AdminImportsRouteImport } from './routes/admin.imports'
+import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
+import { Route as AdminRolesRouteImport } from './routes/admin.roles'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as DishesDishIdRouteImport } from './routes/dishes.$dishId'
+import { Route as HealthLiveRouteImport } from './routes/health.live'
+import { Route as HealthReadyRouteImport } from './routes/health.ready'
+import { Route as SettingsAccountRouteImport } from './routes/settings.account'
+import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
+import { Route as AdminDishesDishIdRouteImport } from './routes/admin.dishes.$dishId'
+import { Route as AdminImportsJobIdRouteImport } from './routes/admin.imports.$jobId'
+import { Route as AdminImportsNewRouteImport } from './routes/admin.imports.new'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiV1CategoriesRouteImport } from './routes/api/v1/categories'
+import { Route as ApiV1CuisinesRouteImport } from './routes/api/v1/cuisines'
+import { Route as ApiV1DishesRouteImport } from './routes/api/v1/dishes'
+import { Route as ApiV1IngredientsRouteImport } from './routes/api/v1/ingredients'
+import { Route as ApiV1OpenapiDotjsonRouteImport } from './routes/api/v1/openapi[.]json'
+import { Route as ApiV1PlacesRouteImport } from './routes/api/v1/places'
+import { Route as ApiV1AdminDishesRouteImport } from './routes/api/v1/admin.dishes'
+import { Route as ApiV1AdminReviewQueueRouteImport } from './routes/api/v1/admin.review-queue'
+import { Route as ApiV1DishesIdRouteImport } from './routes/api/v1/dishes.$id'
+import { Route as ApiV1IngredientsIdRouteImport } from './routes/api/v1/ingredients.$id'
+import { Route as ApiV1PlacesIdRouteImport } from './routes/api/v1/places.$id'
+import { Route as ApiV1AdminDishesIdRouteImport } from './routes/api/v1/admin.dishes.$id'
+import { Route as ApiV1AdminImportsApplyRouteImport } from './routes/api/v1/admin.imports.apply'
+import { Route as ApiV1AdminImportsValidateRouteImport } from './routes/api/v1/admin.imports.validate'
+import { Route as ApiV1DishesIdRelatedRouteImport } from './routes/api/v1/dishes.$id.related'
+import { Route as ApiV1PlacesIdDishesRouteImport } from './routes/api/v1/places.$id.dishes'
+import { Route as ApiV1AdminDishesIdCategoriesRouteImport } from './routes/api/v1/admin.dishes.$id.categories'
+import { Route as ApiV1AdminDishesIdCuisinesRouteImport } from './routes/api/v1/admin.dishes.$id.cuisines'
+import { Route as ApiV1AdminDishesIdDescriptionRouteImport } from './routes/api/v1/admin.dishes.$id.description'
+import { Route as ApiV1AdminDishesIdIngredientsRouteImport } from './routes/api/v1/admin.dishes.$id.ingredients'
+import { Route as ApiV1AdminDishesIdNamesRouteImport } from './routes/api/v1/admin.dishes.$id.names'
+import { Route as ApiV1AdminDishesIdNotesRouteImport } from './routes/api/v1/admin.dishes.$id.notes'
+import { Route as ApiV1AdminDishesIdPlacesRouteImport } from './routes/api/v1/admin.dishes.$id.places'
+import { Route as ApiV1AdminDishesIdRevisionsRouteImport } from './routes/api/v1/admin.dishes.$id.revisions'
+import { Route as ApiV1AdminDishesIdStatusRouteImport } from './routes/api/v1/admin.dishes.$id.status'
+import { Route as ApiV1DishImagesMediaIdVersionWidthRouteImport } from './routes/api/v1/dish-images.$mediaId.$version.$width'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SavedRoute = SavedRouteImport.update({
+  id: '/saved',
+  path: '/saved',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDishesRoute = AdminDishesRouteImport.update({
+  id: '/dishes',
+  path: '/dishes',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminImportsRoute = AdminImportsRouteImport.update({
+  id: '/imports',
+  path: '/imports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReviewsRoute = AdminReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRolesRoute = AdminRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const DishesDishIdRoute = DishesDishIdRouteImport.update({
+  id: '/dishes/$dishId',
+  path: '/dishes/$dishId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthLiveRoute = HealthLiveRouteImport.update({
+  id: '/health/live',
+  path: '/health/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthReadyRoute = HealthReadyRouteImport.update({
+  id: '/health/ready',
+  path: '/health/ready',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsAccountRoute = SettingsAccountRouteImport.update({
+  id: '/settings/account',
+  path: '/settings/account',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
+  id: '/settings/security',
+  path: '/settings/security',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminDishesDishIdRoute = AdminDishesDishIdRouteImport.update({
+  id: '/$dishId',
+  path: '/$dishId',
+  getParentRoute: () => AdminDishesRoute,
+} as any)
+const AdminImportsJobIdRoute = AdminImportsJobIdRouteImport.update({
+  id: '/$jobId',
+  path: '/$jobId',
+  getParentRoute: () => AdminImportsRoute,
+} as any)
+const AdminImportsNewRoute = AdminImportsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AdminImportsRoute,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1CategoriesRoute = ApiV1CategoriesRouteImport.update({
+  id: '/api/v1/categories',
+  path: '/api/v1/categories',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1CuisinesRoute = ApiV1CuisinesRouteImport.update({
+  id: '/api/v1/cuisines',
+  path: '/api/v1/cuisines',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1DishesRoute = ApiV1DishesRouteImport.update({
+  id: '/api/v1/dishes',
+  path: '/api/v1/dishes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1IngredientsRoute = ApiV1IngredientsRouteImport.update({
+  id: '/api/v1/ingredients',
+  path: '/api/v1/ingredients',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1OpenapiDotjsonRoute = ApiV1OpenapiDotjsonRouteImport.update({
+  id: '/api/v1/openapi.json',
+  path: '/api/v1/openapi.json',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1PlacesRoute = ApiV1PlacesRouteImport.update({
+  id: '/api/v1/places',
+  path: '/api/v1/places',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1AdminDishesRoute = ApiV1AdminDishesRouteImport.update({
+  id: '/api/v1/admin/dishes',
+  path: '/api/v1/admin/dishes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1AdminReviewQueueRoute = ApiV1AdminReviewQueueRouteImport.update({
+  id: '/api/v1/admin/review-queue',
+  path: '/api/v1/admin/review-queue',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1DishesIdRoute = ApiV1DishesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1DishesRoute,
+} as any)
+const ApiV1IngredientsIdRoute = ApiV1IngredientsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1IngredientsRoute,
+} as any)
+const ApiV1PlacesIdRoute = ApiV1PlacesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1PlacesRoute,
+} as any)
+const ApiV1AdminDishesIdRoute = ApiV1AdminDishesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1AdminDishesRoute,
+} as any)
+const ApiV1AdminImportsApplyRoute = ApiV1AdminImportsApplyRouteImport.update({
+  id: '/api/v1/admin/imports/apply',
+  path: '/api/v1/admin/imports/apply',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1AdminImportsValidateRoute =
+  ApiV1AdminImportsValidateRouteImport.update({
+    id: '/api/v1/admin/imports/validate',
+    path: '/api/v1/admin/imports/validate',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1DishesIdRelatedRoute = ApiV1DishesIdRelatedRouteImport.update({
+  id: '/related',
+  path: '/related',
+  getParentRoute: () => ApiV1DishesIdRoute,
+} as any)
+const ApiV1PlacesIdDishesRoute = ApiV1PlacesIdDishesRouteImport.update({
+  id: '/dishes',
+  path: '/dishes',
+  getParentRoute: () => ApiV1PlacesIdRoute,
+} as any)
+const ApiV1AdminDishesIdCategoriesRoute =
+  ApiV1AdminDishesIdCategoriesRouteImport.update({
+    id: '/categories',
+    path: '/categories',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdCuisinesRoute =
+  ApiV1AdminDishesIdCuisinesRouteImport.update({
+    id: '/cuisines',
+    path: '/cuisines',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdDescriptionRoute =
+  ApiV1AdminDishesIdDescriptionRouteImport.update({
+    id: '/description',
+    path: '/description',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdIngredientsRoute =
+  ApiV1AdminDishesIdIngredientsRouteImport.update({
+    id: '/ingredients',
+    path: '/ingredients',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdNamesRoute = ApiV1AdminDishesIdNamesRouteImport.update({
+  id: '/names',
+  path: '/names',
+  getParentRoute: () => ApiV1AdminDishesIdRoute,
+} as any)
+const ApiV1AdminDishesIdNotesRoute = ApiV1AdminDishesIdNotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => ApiV1AdminDishesIdRoute,
+} as any)
+const ApiV1AdminDishesIdPlacesRoute =
+  ApiV1AdminDishesIdPlacesRouteImport.update({
+    id: '/places',
+    path: '/places',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdRevisionsRoute =
+  ApiV1AdminDishesIdRevisionsRouteImport.update({
+    id: '/revisions',
+    path: '/revisions',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1AdminDishesIdStatusRoute =
+  ApiV1AdminDishesIdStatusRouteImport.update({
+    id: '/status',
+    path: '/status',
+    getParentRoute: () => ApiV1AdminDishesIdRoute,
+  } as any)
+const ApiV1DishImagesMediaIdVersionWidthRoute =
+  ApiV1DishImagesMediaIdVersionWidthRouteImport.update({
+    id: '/api/v1/dish-images/$mediaId/$version/$width',
+    path: '/api/v1/dish-images/$mediaId/$version/$width',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
+  '/health/live': typeof HealthLiveRoute
+  '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/categories': typeof ApiV1CategoriesRoute
+  '/api/v1/cuisines': typeof ApiV1CuisinesRoute
+  '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
+  '/api/v1/ingredients': typeof ApiV1IngredientsRouteWithChildren
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/v1/places': typeof ApiV1PlacesRouteWithChildren
+  '/api/v1/admin/dishes': typeof ApiV1AdminDishesRouteWithChildren
+  '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
+  '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
+  '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
+  '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
+  '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
+  '/api/v1/dishes/$id/related': typeof ApiV1DishesIdRelatedRoute
+  '/api/v1/places/$id/dishes': typeof ApiV1PlacesIdDishesRoute
+  '/api/v1/admin/dishes/$id/categories': typeof ApiV1AdminDishesIdCategoriesRoute
+  '/api/v1/admin/dishes/$id/cuisines': typeof ApiV1AdminDishesIdCuisinesRoute
+  '/api/v1/admin/dishes/$id/description': typeof ApiV1AdminDishesIdDescriptionRoute
+  '/api/v1/admin/dishes/$id/ingredients': typeof ApiV1AdminDishesIdIngredientsRoute
+  '/api/v1/admin/dishes/$id/names': typeof ApiV1AdminDishesIdNamesRoute
+  '/api/v1/admin/dishes/$id/notes': typeof ApiV1AdminDishesIdNotesRoute
+  '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
+  '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
+  '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
+  '/health/live': typeof HealthLiveRoute
+  '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/admin': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/categories': typeof ApiV1CategoriesRoute
+  '/api/v1/cuisines': typeof ApiV1CuisinesRoute
+  '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
+  '/api/v1/ingredients': typeof ApiV1IngredientsRouteWithChildren
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/v1/places': typeof ApiV1PlacesRouteWithChildren
+  '/api/v1/admin/dishes': typeof ApiV1AdminDishesRouteWithChildren
+  '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
+  '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
+  '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
+  '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
+  '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
+  '/api/v1/dishes/$id/related': typeof ApiV1DishesIdRelatedRoute
+  '/api/v1/places/$id/dishes': typeof ApiV1PlacesIdDishesRoute
+  '/api/v1/admin/dishes/$id/categories': typeof ApiV1AdminDishesIdCategoriesRoute
+  '/api/v1/admin/dishes/$id/cuisines': typeof ApiV1AdminDishesIdCuisinesRoute
+  '/api/v1/admin/dishes/$id/description': typeof ApiV1AdminDishesIdDescriptionRoute
+  '/api/v1/admin/dishes/$id/ingredients': typeof ApiV1AdminDishesIdIngredientsRoute
+  '/api/v1/admin/dishes/$id/names': typeof ApiV1AdminDishesIdNamesRoute
+  '/api/v1/admin/dishes/$id/notes': typeof ApiV1AdminDishesIdNotesRoute
+  '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
+  '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
+  '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/saved': typeof SavedRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/admin/dishes': typeof AdminDishesRouteWithChildren
+  '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/reviews': typeof AdminReviewsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/dishes/$dishId': typeof DishesDishIdRoute
+  '/health/live': typeof HealthLiveRoute
+  '/health/ready': typeof HealthReadyRoute
+  '/settings/account': typeof SettingsAccountRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/admin/': typeof AdminIndexRoute
+  '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
+  '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
+  '/admin/imports/new': typeof AdminImportsNewRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/categories': typeof ApiV1CategoriesRoute
+  '/api/v1/cuisines': typeof ApiV1CuisinesRoute
+  '/api/v1/dishes': typeof ApiV1DishesRouteWithChildren
+  '/api/v1/ingredients': typeof ApiV1IngredientsRouteWithChildren
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/v1/places': typeof ApiV1PlacesRouteWithChildren
+  '/api/v1/admin/dishes': typeof ApiV1AdminDishesRouteWithChildren
+  '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
+  '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
+  '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
+  '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
+  '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
+  '/api/v1/dishes/$id/related': typeof ApiV1DishesIdRelatedRoute
+  '/api/v1/places/$id/dishes': typeof ApiV1PlacesIdDishesRoute
+  '/api/v1/admin/dishes/$id/categories': typeof ApiV1AdminDishesIdCategoriesRoute
+  '/api/v1/admin/dishes/$id/cuisines': typeof ApiV1AdminDishesIdCuisinesRoute
+  '/api/v1/admin/dishes/$id/description': typeof ApiV1AdminDishesIdDescriptionRoute
+  '/api/v1/admin/dishes/$id/ingredients': typeof ApiV1AdminDishesIdIngredientsRoute
+  '/api/v1/admin/dishes/$id/names': typeof ApiV1AdminDishesIdNamesRoute
+  '/api/v1/admin/dishes/$id/notes': typeof ApiV1AdminDishesIdNotesRoute
+  '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
+  '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
+  '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/saved'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
+    | '/admin/roles'
+    | '/admin/users'
+    | '/dishes/$dishId'
+    | '/health/live'
+    | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/admin/'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
+    | '/api/auth/$'
+    | '/api/v1/categories'
+    | '/api/v1/cuisines'
+    | '/api/v1/dishes'
+    | '/api/v1/ingredients'
+    | '/api/v1/openapi.json'
+    | '/api/v1/places'
+    | '/api/v1/admin/dishes'
+    | '/api/v1/admin/review-queue'
+    | '/api/v1/dishes/$id'
+    | '/api/v1/ingredients/$id'
+    | '/api/v1/places/$id'
+    | '/api/v1/admin/dishes/$id'
+    | '/api/v1/admin/imports/apply'
+    | '/api/v1/admin/imports/validate'
+    | '/api/v1/dishes/$id/related'
+    | '/api/v1/places/$id/dishes'
+    | '/api/v1/admin/dishes/$id/categories'
+    | '/api/v1/admin/dishes/$id/cuisines'
+    | '/api/v1/admin/dishes/$id/description'
+    | '/api/v1/admin/dishes/$id/ingredients'
+    | '/api/v1/admin/dishes/$id/names'
+    | '/api/v1/admin/dishes/$id/notes'
+    | '/api/v1/admin/dishes/$id/places'
+    | '/api/v1/admin/dishes/$id/revisions'
+    | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/saved'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
+    | '/admin/roles'
+    | '/admin/users'
+    | '/dishes/$dishId'
+    | '/health/live'
+    | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/admin'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
+    | '/api/auth/$'
+    | '/api/v1/categories'
+    | '/api/v1/cuisines'
+    | '/api/v1/dishes'
+    | '/api/v1/ingredients'
+    | '/api/v1/openapi.json'
+    | '/api/v1/places'
+    | '/api/v1/admin/dishes'
+    | '/api/v1/admin/review-queue'
+    | '/api/v1/dishes/$id'
+    | '/api/v1/ingredients/$id'
+    | '/api/v1/places/$id'
+    | '/api/v1/admin/dishes/$id'
+    | '/api/v1/admin/imports/apply'
+    | '/api/v1/admin/imports/validate'
+    | '/api/v1/dishes/$id/related'
+    | '/api/v1/places/$id/dishes'
+    | '/api/v1/admin/dishes/$id/categories'
+    | '/api/v1/admin/dishes/$id/cuisines'
+    | '/api/v1/admin/dishes/$id/description'
+    | '/api/v1/admin/dishes/$id/ingredients'
+    | '/api/v1/admin/dishes/$id/names'
+    | '/api/v1/admin/dishes/$id/notes'
+    | '/api/v1/admin/dishes/$id/places'
+    | '/api/v1/admin/dishes/$id/revisions'
+    | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/saved'
+    | '/sign-in'
+    | '/sign-up'
+    | '/verify-email'
+    | '/admin/dishes'
+    | '/admin/imports'
+    | '/admin/reviews'
+    | '/admin/roles'
+    | '/admin/users'
+    | '/dishes/$dishId'
+    | '/health/live'
+    | '/health/ready'
+    | '/settings/account'
+    | '/settings/security'
+    | '/admin/'
+    | '/admin/dishes/$dishId'
+    | '/admin/imports/$jobId'
+    | '/admin/imports/new'
+    | '/api/auth/$'
+    | '/api/v1/categories'
+    | '/api/v1/cuisines'
+    | '/api/v1/dishes'
+    | '/api/v1/ingredients'
+    | '/api/v1/openapi.json'
+    | '/api/v1/places'
+    | '/api/v1/admin/dishes'
+    | '/api/v1/admin/review-queue'
+    | '/api/v1/dishes/$id'
+    | '/api/v1/ingredients/$id'
+    | '/api/v1/places/$id'
+    | '/api/v1/admin/dishes/$id'
+    | '/api/v1/admin/imports/apply'
+    | '/api/v1/admin/imports/validate'
+    | '/api/v1/dishes/$id/related'
+    | '/api/v1/places/$id/dishes'
+    | '/api/v1/admin/dishes/$id/categories'
+    | '/api/v1/admin/dishes/$id/cuisines'
+    | '/api/v1/admin/dishes/$id/description'
+    | '/api/v1/admin/dishes/$id/ingredients'
+    | '/api/v1/admin/dishes/$id/names'
+    | '/api/v1/admin/dishes/$id/notes'
+    | '/api/v1/admin/dishes/$id/places'
+    | '/api/v1/admin/dishes/$id/revisions'
+    | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  SavedRoute: typeof SavedRoute
+  SignInRoute: typeof SignInRoute
+  SignUpRoute: typeof SignUpRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
+  DishesDishIdRoute: typeof DishesDishIdRoute
+  HealthLiveRoute: typeof HealthLiveRoute
+  HealthReadyRoute: typeof HealthReadyRoute
+  SettingsAccountRoute: typeof SettingsAccountRoute
+  SettingsSecurityRoute: typeof SettingsSecurityRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiV1CategoriesRoute: typeof ApiV1CategoriesRoute
+  ApiV1CuisinesRoute: typeof ApiV1CuisinesRoute
+  ApiV1DishesRoute: typeof ApiV1DishesRouteWithChildren
+  ApiV1IngredientsRoute: typeof ApiV1IngredientsRouteWithChildren
+  ApiV1OpenapiDotjsonRoute: typeof ApiV1OpenapiDotjsonRoute
+  ApiV1PlacesRoute: typeof ApiV1PlacesRouteWithChildren
+  ApiV1AdminDishesRoute: typeof ApiV1AdminDishesRouteWithChildren
+  ApiV1AdminReviewQueueRoute: typeof ApiV1AdminReviewQueueRoute
+  ApiV1AdminImportsApplyRoute: typeof ApiV1AdminImportsApplyRoute
+  ApiV1AdminImportsValidateRoute: typeof ApiV1AdminImportsValidateRoute
+  ApiV1DishImagesMediaIdVersionWidthRoute: typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +659,515 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saved': {
+      id: '/saved'
+      path: '/saved'
+      fullPath: '/saved'
+      preLoaderRoute: typeof SavedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/dishes': {
+      id: '/admin/dishes'
+      path: '/dishes'
+      fullPath: '/admin/dishes'
+      preLoaderRoute: typeof AdminDishesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/imports': {
+      id: '/admin/imports'
+      path: '/imports'
+      fullPath: '/admin/imports'
+      preLoaderRoute: typeof AdminImportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reviews': {
+      id: '/admin/reviews'
+      path: '/reviews'
+      fullPath: '/admin/reviews'
+      preLoaderRoute: typeof AdminReviewsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/roles': {
+      id: '/admin/roles'
+      path: '/roles'
+      fullPath: '/admin/roles'
+      preLoaderRoute: typeof AdminRolesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/dishes/$dishId': {
+      id: '/dishes/$dishId'
+      path: '/dishes/$dishId'
+      fullPath: '/dishes/$dishId'
+      preLoaderRoute: typeof DishesDishIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health/live': {
+      id: '/health/live'
+      path: '/health/live'
+      fullPath: '/health/live'
+      preLoaderRoute: typeof HealthLiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health/ready': {
+      id: '/health/ready'
+      path: '/health/ready'
+      fullPath: '/health/ready'
+      preLoaderRoute: typeof HealthReadyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/account': {
+      id: '/settings/account'
+      path: '/settings/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof SettingsAccountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/security': {
+      id: '/settings/security'
+      path: '/settings/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/dishes/$dishId': {
+      id: '/admin/dishes/$dishId'
+      path: '/$dishId'
+      fullPath: '/admin/dishes/$dishId'
+      preLoaderRoute: typeof AdminDishesDishIdRouteImport
+      parentRoute: typeof AdminDishesRoute
+    }
+    '/admin/imports/$jobId': {
+      id: '/admin/imports/$jobId'
+      path: '/$jobId'
+      fullPath: '/admin/imports/$jobId'
+      preLoaderRoute: typeof AdminImportsJobIdRouteImport
+      parentRoute: typeof AdminImportsRoute
+    }
+    '/admin/imports/new': {
+      id: '/admin/imports/new'
+      path: '/new'
+      fullPath: '/admin/imports/new'
+      preLoaderRoute: typeof AdminImportsNewRouteImport
+      parentRoute: typeof AdminImportsRoute
+    }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/categories': {
+      id: '/api/v1/categories'
+      path: '/api/v1/categories'
+      fullPath: '/api/v1/categories'
+      preLoaderRoute: typeof ApiV1CategoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/cuisines': {
+      id: '/api/v1/cuisines'
+      path: '/api/v1/cuisines'
+      fullPath: '/api/v1/cuisines'
+      preLoaderRoute: typeof ApiV1CuisinesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/dishes': {
+      id: '/api/v1/dishes'
+      path: '/api/v1/dishes'
+      fullPath: '/api/v1/dishes'
+      preLoaderRoute: typeof ApiV1DishesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/ingredients': {
+      id: '/api/v1/ingredients'
+      path: '/api/v1/ingredients'
+      fullPath: '/api/v1/ingredients'
+      preLoaderRoute: typeof ApiV1IngredientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/openapi.json': {
+      id: '/api/v1/openapi.json'
+      path: '/api/v1/openapi.json'
+      fullPath: '/api/v1/openapi.json'
+      preLoaderRoute: typeof ApiV1OpenapiDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/places': {
+      id: '/api/v1/places'
+      path: '/api/v1/places'
+      fullPath: '/api/v1/places'
+      preLoaderRoute: typeof ApiV1PlacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/admin/dishes': {
+      id: '/api/v1/admin/dishes'
+      path: '/api/v1/admin/dishes'
+      fullPath: '/api/v1/admin/dishes'
+      preLoaderRoute: typeof ApiV1AdminDishesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/admin/review-queue': {
+      id: '/api/v1/admin/review-queue'
+      path: '/api/v1/admin/review-queue'
+      fullPath: '/api/v1/admin/review-queue'
+      preLoaderRoute: typeof ApiV1AdminReviewQueueRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/dishes/$id': {
+      id: '/api/v1/dishes/$id'
+      path: '/$id'
+      fullPath: '/api/v1/dishes/$id'
+      preLoaderRoute: typeof ApiV1DishesIdRouteImport
+      parentRoute: typeof ApiV1DishesRoute
+    }
+    '/api/v1/ingredients/$id': {
+      id: '/api/v1/ingredients/$id'
+      path: '/$id'
+      fullPath: '/api/v1/ingredients/$id'
+      preLoaderRoute: typeof ApiV1IngredientsIdRouteImport
+      parentRoute: typeof ApiV1IngredientsRoute
+    }
+    '/api/v1/places/$id': {
+      id: '/api/v1/places/$id'
+      path: '/$id'
+      fullPath: '/api/v1/places/$id'
+      preLoaderRoute: typeof ApiV1PlacesIdRouteImport
+      parentRoute: typeof ApiV1PlacesRoute
+    }
+    '/api/v1/admin/dishes/$id': {
+      id: '/api/v1/admin/dishes/$id'
+      path: '/$id'
+      fullPath: '/api/v1/admin/dishes/$id'
+      preLoaderRoute: typeof ApiV1AdminDishesIdRouteImport
+      parentRoute: typeof ApiV1AdminDishesRoute
+    }
+    '/api/v1/admin/imports/apply': {
+      id: '/api/v1/admin/imports/apply'
+      path: '/api/v1/admin/imports/apply'
+      fullPath: '/api/v1/admin/imports/apply'
+      preLoaderRoute: typeof ApiV1AdminImportsApplyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/admin/imports/validate': {
+      id: '/api/v1/admin/imports/validate'
+      path: '/api/v1/admin/imports/validate'
+      fullPath: '/api/v1/admin/imports/validate'
+      preLoaderRoute: typeof ApiV1AdminImportsValidateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/dishes/$id/related': {
+      id: '/api/v1/dishes/$id/related'
+      path: '/related'
+      fullPath: '/api/v1/dishes/$id/related'
+      preLoaderRoute: typeof ApiV1DishesIdRelatedRouteImport
+      parentRoute: typeof ApiV1DishesIdRoute
+    }
+    '/api/v1/places/$id/dishes': {
+      id: '/api/v1/places/$id/dishes'
+      path: '/dishes'
+      fullPath: '/api/v1/places/$id/dishes'
+      preLoaderRoute: typeof ApiV1PlacesIdDishesRouteImport
+      parentRoute: typeof ApiV1PlacesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/categories': {
+      id: '/api/v1/admin/dishes/$id/categories'
+      path: '/categories'
+      fullPath: '/api/v1/admin/dishes/$id/categories'
+      preLoaderRoute: typeof ApiV1AdminDishesIdCategoriesRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/cuisines': {
+      id: '/api/v1/admin/dishes/$id/cuisines'
+      path: '/cuisines'
+      fullPath: '/api/v1/admin/dishes/$id/cuisines'
+      preLoaderRoute: typeof ApiV1AdminDishesIdCuisinesRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/description': {
+      id: '/api/v1/admin/dishes/$id/description'
+      path: '/description'
+      fullPath: '/api/v1/admin/dishes/$id/description'
+      preLoaderRoute: typeof ApiV1AdminDishesIdDescriptionRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/ingredients': {
+      id: '/api/v1/admin/dishes/$id/ingredients'
+      path: '/ingredients'
+      fullPath: '/api/v1/admin/dishes/$id/ingredients'
+      preLoaderRoute: typeof ApiV1AdminDishesIdIngredientsRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/names': {
+      id: '/api/v1/admin/dishes/$id/names'
+      path: '/names'
+      fullPath: '/api/v1/admin/dishes/$id/names'
+      preLoaderRoute: typeof ApiV1AdminDishesIdNamesRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/notes': {
+      id: '/api/v1/admin/dishes/$id/notes'
+      path: '/notes'
+      fullPath: '/api/v1/admin/dishes/$id/notes'
+      preLoaderRoute: typeof ApiV1AdminDishesIdNotesRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/places': {
+      id: '/api/v1/admin/dishes/$id/places'
+      path: '/places'
+      fullPath: '/api/v1/admin/dishes/$id/places'
+      preLoaderRoute: typeof ApiV1AdminDishesIdPlacesRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/revisions': {
+      id: '/api/v1/admin/dishes/$id/revisions'
+      path: '/revisions'
+      fullPath: '/api/v1/admin/dishes/$id/revisions'
+      preLoaderRoute: typeof ApiV1AdminDishesIdRevisionsRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/admin/dishes/$id/status': {
+      id: '/api/v1/admin/dishes/$id/status'
+      path: '/status'
+      fullPath: '/api/v1/admin/dishes/$id/status'
+      preLoaderRoute: typeof ApiV1AdminDishesIdStatusRouteImport
+      parentRoute: typeof ApiV1AdminDishesIdRoute
+    }
+    '/api/v1/dish-images/$mediaId/$version/$width': {
+      id: '/api/v1/dish-images/$mediaId/$version/$width'
+      path: '/api/v1/dish-images/$mediaId/$version/$width'
+      fullPath: '/api/v1/dish-images/$mediaId/$version/$width'
+      preLoaderRoute: typeof ApiV1DishImagesMediaIdVersionWidthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
+interface AdminDishesRouteChildren {
+  AdminDishesDishIdRoute: typeof AdminDishesDishIdRoute
+}
+
+const AdminDishesRouteChildren: AdminDishesRouteChildren = {
+  AdminDishesDishIdRoute: AdminDishesDishIdRoute,
+}
+
+const AdminDishesRouteWithChildren = AdminDishesRoute._addFileChildren(
+  AdminDishesRouteChildren,
+)
+
+interface AdminImportsRouteChildren {
+  AdminImportsJobIdRoute: typeof AdminImportsJobIdRoute
+  AdminImportsNewRoute: typeof AdminImportsNewRoute
+}
+
+const AdminImportsRouteChildren: AdminImportsRouteChildren = {
+  AdminImportsJobIdRoute: AdminImportsJobIdRoute,
+  AdminImportsNewRoute: AdminImportsNewRoute,
+}
+
+const AdminImportsRouteWithChildren = AdminImportsRoute._addFileChildren(
+  AdminImportsRouteChildren,
+)
+
+interface AdminRouteChildren {
+  AdminDishesRoute: typeof AdminDishesRouteWithChildren
+  AdminImportsRoute: typeof AdminImportsRouteWithChildren
+  AdminReviewsRoute: typeof AdminReviewsRoute
+  AdminRolesRoute: typeof AdminRolesRoute
+  AdminUsersRoute: typeof AdminUsersRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminDishesRoute: AdminDishesRouteWithChildren,
+  AdminImportsRoute: AdminImportsRouteWithChildren,
+  AdminReviewsRoute: AdminReviewsRoute,
+  AdminRolesRoute: AdminRolesRoute,
+  AdminUsersRoute: AdminUsersRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface ApiV1DishesIdRouteChildren {
+  ApiV1DishesIdRelatedRoute: typeof ApiV1DishesIdRelatedRoute
+}
+
+const ApiV1DishesIdRouteChildren: ApiV1DishesIdRouteChildren = {
+  ApiV1DishesIdRelatedRoute: ApiV1DishesIdRelatedRoute,
+}
+
+const ApiV1DishesIdRouteWithChildren = ApiV1DishesIdRoute._addFileChildren(
+  ApiV1DishesIdRouteChildren,
+)
+
+interface ApiV1DishesRouteChildren {
+  ApiV1DishesIdRoute: typeof ApiV1DishesIdRouteWithChildren
+}
+
+const ApiV1DishesRouteChildren: ApiV1DishesRouteChildren = {
+  ApiV1DishesIdRoute: ApiV1DishesIdRouteWithChildren,
+}
+
+const ApiV1DishesRouteWithChildren = ApiV1DishesRoute._addFileChildren(
+  ApiV1DishesRouteChildren,
+)
+
+interface ApiV1IngredientsRouteChildren {
+  ApiV1IngredientsIdRoute: typeof ApiV1IngredientsIdRoute
+}
+
+const ApiV1IngredientsRouteChildren: ApiV1IngredientsRouteChildren = {
+  ApiV1IngredientsIdRoute: ApiV1IngredientsIdRoute,
+}
+
+const ApiV1IngredientsRouteWithChildren =
+  ApiV1IngredientsRoute._addFileChildren(ApiV1IngredientsRouteChildren)
+
+interface ApiV1PlacesIdRouteChildren {
+  ApiV1PlacesIdDishesRoute: typeof ApiV1PlacesIdDishesRoute
+}
+
+const ApiV1PlacesIdRouteChildren: ApiV1PlacesIdRouteChildren = {
+  ApiV1PlacesIdDishesRoute: ApiV1PlacesIdDishesRoute,
+}
+
+const ApiV1PlacesIdRouteWithChildren = ApiV1PlacesIdRoute._addFileChildren(
+  ApiV1PlacesIdRouteChildren,
+)
+
+interface ApiV1PlacesRouteChildren {
+  ApiV1PlacesIdRoute: typeof ApiV1PlacesIdRouteWithChildren
+}
+
+const ApiV1PlacesRouteChildren: ApiV1PlacesRouteChildren = {
+  ApiV1PlacesIdRoute: ApiV1PlacesIdRouteWithChildren,
+}
+
+const ApiV1PlacesRouteWithChildren = ApiV1PlacesRoute._addFileChildren(
+  ApiV1PlacesRouteChildren,
+)
+
+interface ApiV1AdminDishesIdRouteChildren {
+  ApiV1AdminDishesIdCategoriesRoute: typeof ApiV1AdminDishesIdCategoriesRoute
+  ApiV1AdminDishesIdCuisinesRoute: typeof ApiV1AdminDishesIdCuisinesRoute
+  ApiV1AdminDishesIdDescriptionRoute: typeof ApiV1AdminDishesIdDescriptionRoute
+  ApiV1AdminDishesIdIngredientsRoute: typeof ApiV1AdminDishesIdIngredientsRoute
+  ApiV1AdminDishesIdNamesRoute: typeof ApiV1AdminDishesIdNamesRoute
+  ApiV1AdminDishesIdNotesRoute: typeof ApiV1AdminDishesIdNotesRoute
+  ApiV1AdminDishesIdPlacesRoute: typeof ApiV1AdminDishesIdPlacesRoute
+  ApiV1AdminDishesIdRevisionsRoute: typeof ApiV1AdminDishesIdRevisionsRoute
+  ApiV1AdminDishesIdStatusRoute: typeof ApiV1AdminDishesIdStatusRoute
+}
+
+const ApiV1AdminDishesIdRouteChildren: ApiV1AdminDishesIdRouteChildren = {
+  ApiV1AdminDishesIdCategoriesRoute: ApiV1AdminDishesIdCategoriesRoute,
+  ApiV1AdminDishesIdCuisinesRoute: ApiV1AdminDishesIdCuisinesRoute,
+  ApiV1AdminDishesIdDescriptionRoute: ApiV1AdminDishesIdDescriptionRoute,
+  ApiV1AdminDishesIdIngredientsRoute: ApiV1AdminDishesIdIngredientsRoute,
+  ApiV1AdminDishesIdNamesRoute: ApiV1AdminDishesIdNamesRoute,
+  ApiV1AdminDishesIdNotesRoute: ApiV1AdminDishesIdNotesRoute,
+  ApiV1AdminDishesIdPlacesRoute: ApiV1AdminDishesIdPlacesRoute,
+  ApiV1AdminDishesIdRevisionsRoute: ApiV1AdminDishesIdRevisionsRoute,
+  ApiV1AdminDishesIdStatusRoute: ApiV1AdminDishesIdStatusRoute,
+}
+
+const ApiV1AdminDishesIdRouteWithChildren =
+  ApiV1AdminDishesIdRoute._addFileChildren(ApiV1AdminDishesIdRouteChildren)
+
+interface ApiV1AdminDishesRouteChildren {
+  ApiV1AdminDishesIdRoute: typeof ApiV1AdminDishesIdRouteWithChildren
+}
+
+const ApiV1AdminDishesRouteChildren: ApiV1AdminDishesRouteChildren = {
+  ApiV1AdminDishesIdRoute: ApiV1AdminDishesIdRouteWithChildren,
+}
+
+const ApiV1AdminDishesRouteWithChildren =
+  ApiV1AdminDishesRoute._addFileChildren(ApiV1AdminDishesRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SavedRoute: SavedRoute,
+  SignInRoute: SignInRoute,
+  SignUpRoute: SignUpRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
+  DishesDishIdRoute: DishesDishIdRoute,
+  HealthLiveRoute: HealthLiveRoute,
+  HealthReadyRoute: HealthReadyRoute,
+  SettingsAccountRoute: SettingsAccountRoute,
+  SettingsSecurityRoute: SettingsSecurityRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiV1CategoriesRoute: ApiV1CategoriesRoute,
+  ApiV1CuisinesRoute: ApiV1CuisinesRoute,
+  ApiV1DishesRoute: ApiV1DishesRouteWithChildren,
+  ApiV1IngredientsRoute: ApiV1IngredientsRouteWithChildren,
+  ApiV1OpenapiDotjsonRoute: ApiV1OpenapiDotjsonRoute,
+  ApiV1PlacesRoute: ApiV1PlacesRouteWithChildren,
+  ApiV1AdminDishesRoute: ApiV1AdminDishesRouteWithChildren,
+  ApiV1AdminReviewQueueRoute: ApiV1AdminReviewQueueRoute,
+  ApiV1AdminImportsApplyRoute: ApiV1AdminImportsApplyRoute,
+  ApiV1AdminImportsValidateRoute: ApiV1AdminImportsValidateRoute,
+  ApiV1DishImagesMediaIdVersionWidthRoute:
+    ApiV1DishImagesMediaIdVersionWidthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

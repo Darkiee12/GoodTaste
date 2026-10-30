@@ -1,7 +1,8 @@
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, ClientOnly } from "@tanstack/react-router";
 
 import { DiscoverySection } from "@/components/home/discovery-section";
 import { HomeHero } from "@/components/home/home-hero";
+import { RecommendSection } from "@/components/home/recommend-section";
 import { messagesFor } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -15,6 +16,11 @@ function Home() {
   return (
     <div className="home">
       <HomeHero copy={copy} lang={lang} />
+      <ClientOnly
+        fallback={<output className="block text-center text-muted">{copy.recLoading}</output>}
+      >
+        <RecommendSection />
+      </ClientOnly>
       <DiscoverySection copy={copy} lang={lang} />
     </div>
   );

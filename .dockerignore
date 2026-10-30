@@ -1,0 +1,21 @@
+# Keep the dev image free of secrets, caches, and host build output.
+# Runtime configuration comes from env_file, never from baked files.
+node_modules/
+.codegraph/
+.local/
+repos/
+.output/
+# Exception: infra/Dockerfile.prod packages ONLY the CI-verified .output/
+# artifact (plus prod node_modules). The negation below re-includes it for
+# `docker build -f infra/Dockerfile.prod .`; the dev image still ignores it
+# in practice because `bun run build` output is never part of the dev flow
+# (dev mounts source and runs Vite directly). Never add a second exception:
+# source, tests, db/, .env files, .git, and fixtures stay out of prod.
+!.output/
+.git/
+.env
+infra/.env
+coverage/
+.playwright-cli/
+*.log
+.DS_Store

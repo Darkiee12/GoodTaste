@@ -1,0 +1,16 @@
+# LOCAL DEVELOPMENT ONLY. Never deploy this file or open these ports publicly.
+# Loopback-only host access to the Compose PostgreSQL instance, so host-side
+# Bun/TypeScript tooling (Reylo analysis, integration tests, production build)
+# can reach the migrated database without exposing anything beyond localhost.
+#
+# Usage (repository root, after preparing infra/.env):
+#   docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+#   docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
+#   DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5433/feastjourney bun run check-types
+#
+# The application itself never depends on this file: containers keep using the
+# internal `postgres:5432` address on the Compose network.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5433:5432"

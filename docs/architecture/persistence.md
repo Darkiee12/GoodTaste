@@ -66,6 +66,8 @@ Here `db` is a Reylo-supported client or pool acquired from the server-only data
 
 - Parameterize **values**; never concatenate request-controlled SQL. Identifiers and dynamic ordering are not value parameters: use a reviewed allowlist / explicit query variants.
 - Select only needed columns; apply LIMIT and stable ordering for pagination; evaluate `EXPLAIN (ANALYZE, BUFFERS)` on representative non-sensitive development data when performance matters.
+- **Reylo is the authoritative source for query result shapes and cardinality.** Do not duplicate inferred rows as hand-written `Record`/`Summary`/DTO types or create mechanical `toX()` functions. Prefer separate purpose-specific SQL queries (including `::text` projections for JSON-facing `BIGINT` identifiers) to fetching broad records and removing fields later. SQL projection and authorization are the reviewed exposure controls; static TypeScript annotations do not strip properties at runtime.
+- A genuinely independent domain invariant or stable external response contract can justify its own type/codec, but not a redundant mirror of a Reylo result. Follow the concrete [code-style rules](../development/code-style.md#9-reylo-owns-query-result-types-reject-mirror-dtos-and-mechanical-mappers).
 - Indexes are part of Flyway DDL, not dynamically created by query code.
 - Database `NOT NULL`, `UNIQUE`, FKs and `CHECK` constraints enforce integrity. Typed SQL reduces manual type drift, but is **not** a runtime guarantee that an AI-derived food claim is accurate.
 - Distinguish “not found”/zero affected rows from connection errors. Use stable typed application errors, not driver-text matching.
@@ -84,10 +86,31 @@ This repository already has `reylo/vite`, `@reylosql/postgres`, a content-mapper
 
 ## Transactions and Effect
 
-A transaction must pin one physical database connection. `src/server/database/transaction.ts` owns acquisition/commit/rollback/release and supplies a transaction-bound Reylo-compatible client to participating SQL operations. With an Effect implementation, bracket the resource (acquire/use/release) with the **current** Effect v4 API in `repos/effect/LLMS.md` and current package source; do not handwrite an unverified v3 tutorial pattern.
+All driver execution goes through `runQuery` in `src/server/database/query.ts`,
+which resolves the ambient client (the transaction connection inside
+`withTransaction`, the pool otherwise), preserves Reylo's inferred result
+type, and maps rejections to typed failures by SQLSTATE/driver code. See the
+[code style guide](../development/code-style.md) for the boundary, the error
+taxonomy, and the retry policy; this section states the transaction rules.
 
+A transaction must pin one physical database connection. `withTransaction` in
+`src/server/database/client.ts` owns acquisition/commit/rollback/release and
+supplies the transaction-bound Reylo-compatible client to participating SQL
+operations (resolved via `currentSql`). With an Effect implementation, bracket
+the resource (acquire/use/release) with the **current** Effect v4 API in
+`repos/effect/LLMS.md` and current package source; do not handwrite an unverified v3 tutorial pattern.
+
+- A failed `BEGIN` releases the reservation before the attempt fails; a
+  failed `COMMIT` still releases; a failed `ROLLBACK` can never mask the
+  original failure and the release is still attempted; a failed release on
+  the success path surfaces instead of a silent success. Release runs as an
+  uninterruptible finalizer.
+- Owner-membership changes serialize on a guard row (`SELECT ... FOR UPDATE`
+  on the owner role) taken inside the transaction before counting; see
+  `access-control.md`. Every new account receives `member` through an
+  `AFTER INSERT` trigger in the user-insert transaction (migration `V009`).
 - A coordinator in `src/server/workflows/` owns cross-domain atomic changes; a participating repository must use the supplied transaction client, not borrow a new pool connection.
-- Do not automatically retry non-idempotent writes or repeat a failed transaction without understanding whether it committed.
+- Only serialization conflicts and deadlocks retry, and only at the transaction boundary with a bounded budget (see the [code style guide](../development/code-style.md)). Do not retry non-idempotent writes, constraint violations, or connection loss, and do not repeat a failed transaction without understanding whether it committed.
 - Do not run unrelated external AI/network effects while holding a DB transaction open. Obtain outside-DB inputs first, then perform short, well-bounded updates with conflict/idempotency checks.
 - Beware parallel requests using the same transaction connection concurrently. Serialize DB statements unless the chosen driver and transaction design explicitly support a concurrency pattern.
 - Log failures with request correlation but never raw credentials, SQL parameters that contain private data, or production URLs with embedded passwords.

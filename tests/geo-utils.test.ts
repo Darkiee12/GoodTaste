@@ -2,12 +2,19 @@ import { describe, expect, test } from "bun:test";
 
 import * as THREE from "three";
 
+import {
+  BORDER_DASH,
+  BORDER_LINE_WIDTH,
+  BORDER_STROKE,
+  traceBorderPaths,
+} from "@/components/home/globe/earth-texture";
 import { $match, FOOD_LOCATIONS, type FoodCategory } from "@/components/home/globe/food-locations";
 import {
   GLOBE_RADIUS,
   GLOBE_REVOLUTION_SECONDS,
   Latitude,
   Longitude,
+  VISIBLE_VERTICAL_FRACTION,
   computeGlobeLayout,
   decodeBorderGrid,
   decodeLandGrid,
@@ -136,8 +143,6 @@ describe("isFacingCamera", () => {
   });
 });
 
-const COASTAL_DISH_IDS = new Set(["pizza-napoletana", "ceviche", "paella"]);
-
 function isCoastal(grid: Uint8Array, longitude: number, latitude: number): boolean {
   for (let dLat = -1; dLat <= 1; dLat += 1) {
     for (let dLon = -1; dLon <= 1; dLon += 1) {
@@ -156,13 +161,32 @@ describe("land grid", () => {
 
     expect(grid.length).toBe(720 * 360);
 
+    // Spot-check inland mainland anchors at exact cells: the bundled mask
+    // is coarse and omits micro-islands, so exact-cell assertions cannot
+    // hold for all 980 curated dishes.
+    const mainland: Array<[number, number]> = [
+      [105.8542, 21.0285], // Hanoi
+      [77.209, 28.6139], // Delhi
+      [2.3522, 48.8566], // Paris
+      [37.6173, 55.7558], // Moscow
+      [-47.9292, -15.7801], // Brasilia
+    ];
+
+    for (const [longitude, latitude] of mainland) {
+      expect(isLandCell(grid, Longitude(longitude), Latitude(latitude))).toBe(true);
+    }
+
+    // Most curated dishes sit on or near land (radius-1 neighborhood);
+    // the remainder are micro-island anchors finer than the mask.
+    let nearLand = 0;
+
     for (const dish of FOOD_LOCATIONS) {
-      if (COASTAL_DISH_IDS.has(dish.id)) {
-        expect(isCoastal(grid, dish.longitude, dish.latitude)).toBe(true);
-      } else {
-        expect(isLandCell(grid, dish.longitude, dish.latitude)).toBe(true);
+      if (isCoastal(grid, dish.longitude, dish.latitude)) {
+        nearLand += 1;
       }
     }
+
+    expect(nearLand / FOOD_LOCATIONS.length).toBeGreaterThan(0.85);
 
     expect(isLandCell(grid, Longitude(-150), Latitude(0))).toBe(false);
     expect(isLandCell(grid, Longitude(-30), Latitude(0))).toBe(false);
@@ -228,59 +252,165 @@ describe("border grid", () => {
   });
 });
 
+/** Shared framing invariants: full circle in frame horizontally, ~80% visible vertically. */
+function expectPlanetFraming(width: number, height: number): void {
+  const layout = computeGlobeLayout({ width, height });
+  const centerXPx = layout.centerX * layout.pixelsPerUnit + width / 2;
+  const centerYPx = height / 2 - layout.centerY * layout.pixelsPerUnit;
+  const radiusPx = layout.diameterPx / 2;
+  const leftEdge = centerXPx - radiusPx;
+  const rightEdge = centerXPx + radiusPx;
+  const topEdge = centerYPx - radiusPx;
+  const bottomEdge = centerYPx + radiusPx;
+  const visibleVertical = height - topEdge;
+
+  expect(layout.diameterPx).toBeGreaterThan(0);
+  expect(leftEdge).toBeGreaterThanOrEqual(-0.5);
+  expect(rightEdge).toBeLessThanOrEqual(width + 0.5);
+  expect(topEdge).toBeGreaterThanOrEqual(-0.5);
+  expect(visibleVertical / layout.diameterPx).toBeCloseTo(0.8, 2);
+  expect(bottomEdge).toBeGreaterThan(height);
+  expect(layout.capPx).toBeCloseTo(layout.diameterPx * 0.8, 5);
+}
+
 describe("computeGlobeLayout", () => {
-  test("is full-bleed on a narrow phone at 104% width with a 70% cap", () => {
-    const layout = computeGlobeLayout({ width: 390, height: 784 });
+  test("frames the planet at the user screenshot size 1874x818", () => {
+    expectPlanetFraming(1874, 818);
 
-    expect(layout.diameterPx).toBeCloseTo(390 * 1.04, 5);
-    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.7, 3);
-    expect(layout.diameterPx).toBeGreaterThan(390);
-    expect(layout.centerY).toBeLessThan(0);
+    const layout = computeGlobeLayout({ width: 1874, height: 818 });
+
+    expect(layout.diameterPx).toBeCloseTo(818 / 0.8, 1);
   });
 
-  test("spans a 90%-of-width radius on a tall desktop hero with a 32% cap", () => {
-    const layout = computeGlobeLayout({ width: 1000, height: 1400 });
-
-    expect(layout.diameterPx).toBeCloseTo(1000 * 1.8, 5);
-    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.32, 3);
-    expect(layout.centerY).toBeLessThan(0);
+  test("frames the planet at 1920x1080", () => {
+    expectPlanetFraming(1920, 1080);
   });
 
-  test("gives a 90%-of-width radius on a 1920x1080 screen", () => {
-    const layout = computeGlobeLayout({ width: 1920, height: 1080 });
-
-    expect(layout.diameterPx / 2).toBeCloseTo(1920 * 0.9, 5);
-    expect(layout.capPx).toBeLessThanOrEqual(1080 * 0.5);
-    expect(layout.centerY).toBeLessThan(0);
+  test("frames the planet at 1440x900", () => {
+    expectPlanetFraming(1440, 900);
   });
 
-  test("clamps the cap to 50% of the hero on a typical 16:9 desktop", () => {
-    const layout = computeGlobeLayout({ width: 1440, height: 844 });
-
-    expect(layout.diameterPx).toBeCloseTo(1440 * 1.8, 5);
-    expect(layout.capPx).toBeCloseTo(844 * 0.5, 5);
-    expect(layout.centerY).toBeLessThan(0);
+  test("frames the planet at 1280x800", () => {
+    expectPlanetFraming(1280, 800);
   });
 
-  test("stays height-bounded on ultrawide desktop screens", () => {
-    const layout = computeGlobeLayout({ width: 3440, height: 1440 });
-
-    expect(layout.diameterPx).toBeCloseTo(1440 * 3.2, 5);
-    expect(layout.capPx).toBeLessThanOrEqual(1440 * 0.5);
-    expect(layout.centerY).toBeLessThan(0);
+  test("frames the planet at 1024x768", () => {
+    expectPlanetFraming(1024, 768);
   });
 
-  test("clamps the cap on short landscape screens while staying full-bleed", () => {
-    const layout = computeGlobeLayout({ width: 667, height: 311 });
+  test("frames the planet at tablet portrait 768x1024", () => {
+    expectPlanetFraming(768, 1024);
+  });
 
-    expect(layout.diameterPx).toBeCloseTo(667 * 1.04, 5);
-    expect(layout.diameterPx).toBeGreaterThanOrEqual(667);
-    expect(layout.capPx).toBeLessThanOrEqual(311 * 0.5);
-    expect(layout.centerY).toBeLessThan(0);
+  test("frames the planet at mobile portrait 390x844", () => {
+    expectPlanetFraming(390, 844);
+
+    const layout = computeGlobeLayout({ width: 390, height: 844 });
+    const centerXPx = layout.centerX * layout.pixelsPerUnit + 390 / 2;
+
+    // Narrow heroes converge back to a centered globe.
+    expect(centerXPx).toBeCloseTo(390 / 2, 5);
+  });
+
+  test("frames the planet at mobile portrait 375x667", () => {
+    expectPlanetFraming(375, 667);
+  });
+
+  test("frames the planet at short landscape 667x375", () => {
+    expectPlanetFraming(667, 375);
+  });
+
+  test("frames the planet at ultrawide 3440x1440", () => {
+    expectPlanetFraming(3440, 1440);
+  });
+
+  test("anchors desktop globes right with open universe left", () => {
+    const layout = computeGlobeLayout({ width: 1874, height: 818 });
+    const centerXPx = layout.centerX * layout.pixelsPerUnit + 1874 / 2;
+
+    expect(centerXPx).toBeGreaterThan(1874 / 2);
+    expect(centerXPx - layout.diameterPx / 2).toBeGreaterThanOrEqual(0);
   });
 
   test("keeps the globe radius consistent with the scene constant", () => {
     expect(GLOBE_RADIUS).toBe(1);
+  });
+
+  test("keeps the vertical framing fraction at 80%", () => {
+    expect(VISIBLE_VERTICAL_FRACTION).toBe(0.8);
+  });
+});
+
+describe("country border rendering", () => {
+  test("paints hairline dashed borders, never heavy black strokes", () => {
+    expect(BORDER_LINE_WIDTH).toBeLessThanOrEqual(1);
+    expect(BORDER_DASH.length).toBeGreaterThanOrEqual(2);
+
+    for (const dash of BORDER_DASH) {
+      expect(dash).toBeGreaterThan(0);
+    }
+
+    expect(BORDER_STROKE).toMatch(/rgba\(.+,\s*0\.\d+\)$/);
+  });
+
+  test("chains adjacent border cells into continuous paths", () => {
+    const width = 5;
+    const height = 5;
+    const borders = new Uint8Array(width * height);
+
+    borders[2 * width + 1] = 1;
+    borders[2 * width + 2] = 1;
+    borders[2 * width + 3] = 1;
+
+    const paths = traceBorderPaths(borders, width, height);
+
+    expect(paths).toHaveLength(1);
+
+    const cells = new Set(paths[0]?.map((cell) => cell.y * width + cell.x));
+
+    expect(cells).toEqual(new Set([2 * width + 1, 2 * width + 2, 2 * width + 3]));
+  });
+
+  test("never joins cells across the antimeridian seam", () => {
+    const width = 5;
+    const height = 3;
+    const borders = new Uint8Array(width * height);
+
+    borders[1 * width + 0] = 1;
+    borders[1 * width + 4] = 1;
+
+    const paths = traceBorderPaths(borders, width, height);
+
+    expect(paths).toHaveLength(2);
+  });
+
+  test("covers every real border cell exactly once", () => {
+    const borders = decodeBorderGrid();
+    const seen = new Set<number>();
+    let total = 0;
+
+    for (const path of traceBorderPaths(borders, 720, 360)) {
+      expect(path.length).toBeGreaterThan(0);
+
+      for (const cell of path) {
+        const index = cell.y * 720 + cell.x;
+
+        expect(seen.has(index)).toBe(false);
+        seen.add(index);
+        total += 1;
+      }
+    }
+
+    let borderCount = 0;
+
+    for (const cell of borders) {
+      if (cell === 1) {
+        borderCount += 1;
+      }
+    }
+
+    expect(total).toBe(borderCount);
+    expect(total).toBeGreaterThan(1000);
   });
 });
 
@@ -308,8 +438,24 @@ describe("west-to-east spin drift", () => {
 });
 
 describe("food locations", () => {
-  test("ships sixteen dishes", () => {
-    expect(FOOD_LOCATIONS).toHaveLength(16);
+  test("ships a curated anchor set with stable structural invariants", () => {
+    expect(FOOD_LOCATIONS.length).toBeGreaterThan(0);
+
+    for (const dish of FOOD_LOCATIONS) {
+      expect(dish.id.length).toBeGreaterThan(0);
+      expect(Number.isFinite(dish.latitude)).toBe(true);
+      expect(Number.isFinite(dish.longitude)).toBe(true);
+      expect(dish.latitude).toBeGreaterThanOrEqual(-90);
+      expect(dish.latitude).toBeLessThanOrEqual(90);
+      expect(dish.longitude).toBeGreaterThanOrEqual(-180);
+      expect(dish.longitude).toBeLessThanOrEqual(180);
+    }
+  });
+
+  test("keeps anchor ids distinct across all cities", () => {
+    const ids = new Set(FOOD_LOCATIONS.map((dish) => dish.id));
+
+    expect(ids.size).toBe(FOOD_LOCATIONS.length);
   });
 
   test("fills country, region, and description in every locale for every dish", () => {
@@ -326,12 +472,9 @@ describe("food locations", () => {
     }
   });
 
-  test("gives every dish a distinct emoji and at least one category", () => {
-    const emojis = new Set(FOOD_LOCATIONS.map((dish) => dish.emoji));
-
-    expect(emojis.size).toBe(FOOD_LOCATIONS.length);
-
+  test("gives every anchor an emoji and at least one category", () => {
     for (const dish of FOOD_LOCATIONS) {
+      expect(dish.emoji.length).toBeGreaterThan(0);
       expect(dish.categories.length).toBeGreaterThan(0);
 
       for (const category of dish.categories) {

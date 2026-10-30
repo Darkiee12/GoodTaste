@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   static:
-    name: Format, lint and types
+    name: Format and lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -24,13 +24,31 @@ jobs:
         run: bun run format
       - name: Type-aware lint
         run: bun run lint
-      - name: TypeScript
-        run: bun run check-types
 
-  test:
-    name: Unit tests and build
+  backend:
+    name: PostgreSQL-backed typecheck, tests and build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      # Disposable CI-only values (fresh Postgres per run, test-only admin key).
+      DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
+      BETTER_AUTH_URL: http://localhost:3000
+      TRUSTED_PROXIES: ""
+      # Fill real values under Settings → Secrets and variables → Actions.
+      # Unset secrets arrive as empty strings and the test setup substitutes
+      # documented non-secret stubs (tests use an in-memory mail sender and
+      # never call real providers). `||=` in tests/integration/cleanup.ts
+      # means provided secrets always take precedence.
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      FACEBOOK_CLIENT_ID: ${{ secrets.FACEBOOK_CLIENT_ID }}
+      FACEBOOK_CLIENT_SECRET: ${{ secrets.FACEBOOK_CLIENT_SECRET }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -38,10 +56,23 @@ jobs:
           bun-version: 1.4.4
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Unit tests
-        run: bun run test
+      - name: Start disposable PostgreSQL with loopback access
+        run: |
+          cp infra/.env.example infra/.env
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+      - name: Run Flyway migrations
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
+      - name: Validate Flyway migration history
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+      - name: Reylo-aware TypeScript
+        run: bun run check-types
+      - name: Unit and integration tests
+        run: bun test tests/
       - name: Production build
         run: bun run build
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml down --remove-orphans
 
   audit:
     name: Dependency and code audits

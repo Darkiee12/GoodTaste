@@ -14,5 +14,12 @@ coverage/
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
 
+# Browser verification artifacts (screenshots, evidence notes).
+# cli.config.json stays tracked; everything else under .playwright/ is local-only.
+.playwright/*
+!.playwright/cli.config.json
+
 # Aislop local scan history (config.yml is tracked)
 .aislop/history.jsonl
+
+.local

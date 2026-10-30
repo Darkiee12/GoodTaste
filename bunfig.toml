@@ -1,0 +1,7 @@
+preload = ["reylo/register"]
+
+# Test runner only: deterministic test bootstrap runs before any test module
+# evaluates, so static application imports can never observe an unconfigured
+# environment. Production (build/start/dev) never reads this section.
+[test]
+preload = ["./tests/bootstrap.ts", "reylo/register"]
