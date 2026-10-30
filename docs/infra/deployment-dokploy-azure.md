@@ -120,8 +120,14 @@ Either way the contract is identical:
 Single template: `infra/.env.production.example` (placeholders only).
 Staging and production share variable NAMES; every value (especially
 `BETTER_AUTH_URL` and all secrets) differs per environment. Real values
-live only in Dokploy service/job secrets and the GitHub `staging`
+live only in the Dokploy stack environment and the GitHub `staging`
 environment — never in git, logs, or chat.
+#
+# The staging rollout is fully automated: push to `main` -> quality gate ->
+# GHCR images (`:sha-<SHA>`) -> CI renders `docker-compose.swarm.yml` with
+# pinned tags -> `compose.update` (raw stack) -> `compose.deploy` -> wait
+# loop. Roll back with a manual dispatch (`deploy_staging=true` plus an
+# existing `image_tag`); production is never automated.
 
 Operator checklist per variable group:
 
@@ -155,6 +161,12 @@ Operator checklist per variable group:
   `muse-wonder-*` id + https base; misconfiguration fails loudly (HTTP
   500). Server-side key only — browser keys forbidden; no Contributor-tier
   key for staging experiments.
+- CI deploy secrets (GitHub `staging` environment only, never the app):
+  `DOKPLOY_URL`, `DOKPLOY_API_KEY` (deploy-scoped `x-api-key`),
+  `DOKPLOY_COMPOSE_ID` (the Dokploy **Compose** service id — not the
+  project id; find it in the service URL or via `GET /api/project.all`),
+  `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` (Cloudflare Access
+  service token allowed ONLY on the Dokploy dashboard path).
 
 ## 6. Tunnel and routing
 
@@ -184,16 +196,21 @@ double-TLS only hides client IPs and breaks health checks).
 
 Dokploy dashboard is Access-protected; GitHub cannot receive webhooks
 through Access (no interactive login, no token-in-URL schemes survive).
-So the flow is **GHCR-first**: CI pushes the image; Dokploy pulls it.
+So the flow is **GHCR-first**: CI pushes the images; Dokploy pulls them.
 Nothing phones home from the VM to GitHub.
 
-The only CI→Dokploy call is the approved staging deploy: `deploy-staging`
-job → Dokploy API through a Cloudflare **service token**
-(`CF-Access-Client-Id` / `CF-Access-Client-Secret`) + deploy-scoped
-Dokploy token (`x-api-key`), both from the GitHub `staging` environment
-(narrow scope, read-only to the workflow). Migration gate runs before the
-rollout; readiness wait after. Never weaken dashboard Access, never put
-tokens in the image or logs, never let this job run on PRs.
+The staging deploy is a Dokploy **Compose stack** (`docker-compose.swarm.yml`,
+compose type `stack`): CI renders it with pinned `:sha-` tags, pushes the
+definition with `POST /api/compose.update` (`sourceType: raw`), rolls it out
+with `POST /api/compose.deploy`, and polls `GET /api/deployment.allByCompose`
+until the rollout reports done/error (10-minute bound, then fail loud).
+Both calls authenticate with the Cloudflare service token
+(`CF-Access-Client-Id` / `CF-Access-Client-Secret`) plus the deploy-scoped
+Dokploy token (`x-api-key`), all from the GitHub `staging` environment
+(narrow scope, read-only to the workflow). The one-shot migrator runs
+inside the stack on every rollout, so schema and code always move together.
+Never weaken dashboard Access, never put tokens in the image or logs,
+never let this job run on PRs.
 
 ## 8. Health and lifecycle
 

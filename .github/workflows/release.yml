@@ -1,37 +1,44 @@
-# Release: quality gate -> verified artifact -> GHCR image -> (manual) staging.
+# Release: quality gate -> verified artifact -> GHCR images -> Dokploy stack.
 #
 # What this workflow is and is NOT:
 # - It DUPLICATES the quality.yml backend flow on purpose (same disposable
 #   PG18+PostGIS, same migrate -> validate -> check-types -> tests -> build)
-#   so the published image always embeds the .output artifact that the gate
+#   so the published images always embed the .output artifact that the gate
 #   verified, from the same commit. It never edits quality.yml.
-# - Triggers: version tags (v*.*.*) and workflow_dispatch ONLY. There is no
-#   pull_request trigger, so fork PRs can neither run this workflow nor reach
-#   its secrets. Staging deploys ONLY via explicit workflow_dispatch with
-#   deploy_staging=true. Production deploys are NEVER automated: after staging
-#   verification a human promotes the SHA tag in Dokploy.
+# - Triggers: push to `main` (auto-deploys staging after the gate), version
+#   tags (v*.*.*), and workflow_dispatch. There is no pull_request trigger,
+#   so fork PRs can neither run this workflow nor reach its secrets.
+#   Production deploys are NEVER automated: after staging verification a
+#   human promotes the SHA tag in Dokploy.
 # - The builder never touches the production database (disposable CI Postgres
 #   only). No privileged secret is available to untrusted code paths.
+# - Staging rolls out as an immutable Dokploy stack: CI renders
+#   docker-compose.swarm.yml with pinned GHCR tags
+#   (compose.update, sourceType raw), then queues the rollout
+#   (compose.deploy) and waits for it. No mutable tags, no SSH.
 #
 # Required repository setup (operator, once):
 # - GitHub environment `staging` with secrets: DOKPLOY_URL,
-#   DOKPLOY_API_TOKEN (deploy-scoped x-api-key), DOKPLOY_STAGING_APP_ID,
-#   CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET (Cloudflare Access service
-#   token allowed ONLY on the Dokploy dashboard path), STAGING_HEALTH_URL
-#   (default https://staging.feastjourney.world/health/ready).
+#   DOKPLOY_API_KEY (deploy-scoped x-api-key), DOKPLOY_COMPOSE_ID (the
+#   Dokploy Compose service id, NOT the project id — find it in the service
+#   URL or via GET /api/project.all), CF_ACCESS_CLIENT_ID,
+#   CF_ACCESS_CLIENT_SECRET (Cloudflare Access service token allowed ONLY
+#   on the Dokploy dashboard path).
 # - GHCR: nothing to configure; GITHUB_TOKEN with job-level packages:write
-#   publishes ghcr.io/<owner-lowercase>/feastjourney. Consumers pull anonymously
-#   or with a read-only token — never the publish token.
+#   publishes ghcr.io/<owner-lowercase>/feastjourney{,-migrator}. Dokploy
+#   pulls with its own registry credential — never the publish token.
 
 name: Release
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
   workflow_dispatch:
     inputs:
       deploy_staging:
-        description: "After publishing, trigger the Dokploy staging rollout (human-gated)."
+        description: "After publishing, trigger the Dokploy staging rollout. Pushes to main deploy automatically; use this for rollbacks (with image_tag) or tag rebuilds."
         required: false
         default: "false"
       image_tag:
@@ -115,32 +122,48 @@ jobs:
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml down --remove-orphans
 
   publish:
-    name: Build and push production image
+    name: Build and push production images
     needs: quality
-    # Tags publish automatically; manual runs publish the dispatched ref for
-    # staging verification. PRs cannot reach this job (no PR trigger above).
+    # Pushes to main, tags, and manual runs publish the verified result.
+    # PRs cannot reach this job (no PR trigger above).
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # App: packages ONLY the CI-verified .output artifact plus
+          # production-only dependencies (see infra/Dockerfile.prod).
+          - service: feastjourney
+            dockerfile: infra/Dockerfile.prod
+            needs_output: "true"
+          # Migrator: Flyway plus the versioned migrations baked in — no
+          # volume mounts, so the raw Dokploy stack is self-contained.
+          - service: feastjourney-migrator
+            dockerfile: infra/Dockerfile.migrator
+            needs_output: "false"
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       - name: Download verified build artifact
+        if: matrix.needs_output == 'true'
         uses: actions/download-artifact@v4
         with:
           name: verified-output-${{ github.sha }}
           path: .output
       - name: Prove artifact integrity before packaging
+        if: matrix.needs_output == 'true'
         run: test -f .output/server/index.mjs
       - name: Resolve image name (lowercase, SHA tags only — never latest)
         id: meta
         run: |
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          image="${{ env.GHCR_REGISTRY }}/${owner}/feastjourney"
+          image="${{ env.GHCR_REGISTRY }}/${owner}/${{ matrix.service }}"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${image}:sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
           if [ "${{ github.ref_type }}" = "tag" ]; then
@@ -157,7 +180,7 @@ jobs:
             tags="$tags -t ${{ steps.meta.outputs.ref_tag }}"
           fi
           # shellcheck disable=SC2086
-          docker build -f infra/Dockerfile.prod $tags .
+          docker build -f ${{ matrix.dockerfile }} $tags .
       - name: Push image
         run: |
           docker push ${{ steps.meta.outputs.sha_tag }}
@@ -170,20 +193,21 @@ jobs:
           docker images "${{ steps.meta.outputs.image }}" || true
           ls .output/server 2>/dev/null || echo "no .output/server"
 
-  deploy-staging:
-    name: Staging rollout (human-gated)
+  deploy:
+    name: Deploy immutable stack to staging
     needs: publish
-    # workflow_dispatch ONLY, and only with the explicit opt-in flag. Tag
-    # pushes, branch pushes, and PRs never reach this job.
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy_staging == 'true'
+    # Pushes to main auto-deploy staging after the gate passes. Manual
+    # dispatch with deploy_staging=true deploys main too, or
+    # inputs.image_tag for rollbacks (the gate for that tag ran when it
+    # was published). PRs never reach this job.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     environment: staging
     permissions:
       contents: read
-    env:
-      STAGING_HEALTH_URL: https://staging.feastjourney.world/health/ready
     steps:
+      - uses: actions/checkout@v4
       - name: Resolve image tag (fresh SHA or operator rollback tag)
         id: tag
         run: |
@@ -191,39 +215,229 @@ jobs:
             echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
             echo "Rollback redeploy requested: ${{ inputs.image_tag }} (quality gate for that tag ran when it was published)"
           else
-            echo "value=${{ needs.publish.outputs.image }}:sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "value=sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
-      - name: Trigger Dokploy staging deploy through Cloudflare Access
-        # Dokploy dashboard sits behind Cloudflare Access; CI authenticates
-        # with a service token (NOT a user login, NOT a weakened policy) plus
-        # a deploy-scoped Dokploy API token. Endpoint path verified against
-        # YOUR Dokploy version before first use — see the runbook.
+      - name: Render pinned stack
         run: |
-          response="$(mktemp)"
-          code="$(curl -sS -o "$response" -w '%{http_code}' --max-time 60 \
-            -H "CF-Access-Client-Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}" \
-            -H "CF-Access-Client-Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
-            -H "x-api-key: ${{ secrets.DOKPLOY_API_TOKEN }}" \
-            -H 'Content-Type: application/json' \
-            -d "{\"applicationId\":\"${{ secrets.DOKPLOY_STAGING_APP_ID }}\",\"imageTag\":\"${{ steps.tag.outputs.value }}\"}" \
-            "${{ secrets.DOKPLOY_URL }}/api/application.deploy")"
-          echo "Dokploy deploy HTTP status: ${code}"
-          if [ "${code}" -lt 200 ] || [ "${code}" -ge 300 ]; then
-            echo "Deploy trigger failed; response body (secrets never printed):"
-            cat "$response"
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          node .github/workflows/scripts/render-release-stack.mjs \
+            --version "${{ steps.tag.outputs.value }}" \
+            --prefix "${{ env.GHCR_REGISTRY }}/${owner}" \
+            --in docker-compose.swarm.yml \
+            --out /tmp/docker-compose.release.yml
+      - name: Update Dokploy stack definition
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${DOKPLOY_URL:?DOKPLOY_URL is not set}"
+          : "${DOKPLOY_API_KEY:?DOKPLOY_API_KEY is not set}"
+          : "${DOKPLOY_COMPOSE_ID:?DOKPLOY_COMPOSE_ID is not set}"
+          : "${CF_ACCESS_CLIENT_ID:?CF_ACCESS_CLIENT_ID is not set}"
+          : "${CF_ACCESS_CLIENT_SECRET:?CF_ACCESS_CLIENT_SECRET is not set}"
+          base_url="${DOKPLOY_URL%/}"
+
+          jq -n \
+            --arg composeId "${DOKPLOY_COMPOSE_ID}" \
+            --rawfile composeFile /tmp/docker-compose.release.yml \
+            '{composeId: $composeId, sourceType: "raw", composeType: "stack", composeFile: $composeFile}' \
+            > /tmp/dokploy-update.json
+
+          # shellcheck disable=SC2086
+          if ! http_code="$(
+            curl \
+              --silent \
+              --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --request POST \
+              --header "x-api-key: ${DOKPLOY_API_KEY}" \
+              --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+              --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+              --header "Content-Type: application/json" \
+              --data-binary @/tmp/dokploy-update.json \
+              "${base_url}/api/compose.update"
+          )"; then
+            echo "::error::Could not reach Dokploy while updating the stack definition"
             exit 1
           fi
-      - name: Wait for staging readiness (bounded DB check, no leaks)
+
+          if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Dokploy compose.update failed with HTTP ${http_code}"
+            exit 1
+          fi
+
+          echo "Dokploy stack definition updated."
+      - name: Queue Dokploy deployment
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
+          set -euo pipefail
+          : "${DOKPLOY_URL:?DOKPLOY_URL is not set}"
+          : "${DOKPLOY_API_KEY:?DOKPLOY_API_KEY is not set}"
+          : "${DOKPLOY_COMPOSE_ID:?DOKPLOY_COMPOSE_ID is not set}"
+          : "${CF_ACCESS_CLIENT_ID:?CF_ACCESS_CLIENT_ID is not set}"
+          : "${CF_ACCESS_CLIENT_SECRET:?CF_ACCESS_CLIENT_SECRET is not set}"
+
+          base_url="${DOKPLOY_URL%/}"
+          short_sha="${GITHUB_SHA::12}"
+          deploy_marker="github-actions:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${GITHUB_SHA}"
+
+          jq -n \
+            --arg composeId "${DOKPLOY_COMPOSE_ID}" \
+            --arg title "Deploy ${short_sha} (${{ steps.tag.outputs.value }})" \
+            --arg description "${deploy_marker}" \
+            '{composeId: $composeId, title: $title, description: $description}' \
+            > /tmp/dokploy-deploy.json
+
+          if ! http_code="$(
+            curl \
+              --silent \
+              --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --request POST \
+              --header "x-api-key: ${DOKPLOY_API_KEY}" \
+              --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+              --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+              --header "Content-Type: application/json" \
+              --data-binary @/tmp/dokploy-deploy.json \
+              "${base_url}/api/compose.deploy"
+          )"; then
+            echo "::error::Could not reach Dokploy while queueing deployment"
+            exit 1
+          fi
+
+          if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Dokploy compose.deploy failed with HTTP ${http_code}"
+            exit 1
+          fi
+
+          echo "DEPLOY_MARKER=${deploy_marker}" >> "${GITHUB_ENV}"
+          echo "Dokploy deployment queued."
+      - name: Wait for Dokploy deployment
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          base_url="${DOKPLOY_URL%/}"
+          response_file="$(mktemp)"
+          trap 'rm -f "${response_file}"' EXIT
+
+          deployment_id=""
           deadline=$((SECONDS + 600))
-          until [ $SECONDS -ge $deadline ]; do
-            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 '${{ env.STAGING_HEALTH_URL }}' || true)"
-            echo "ready check HTTP ${code}"
-            if [ "${code}" = "200" ]; then
-              echo "Staging is ready on ${{ steps.tag.outputs.value }}"
-              exit 0
+
+          while (( SECONDS < deadline )); do
+            if ! http_code="$(
+              curl \
+                --silent \
+                --show-error \
+                --output "${response_file}" \
+                --write-out '%{http_code}' \
+                --connect-timeout 10 \
+                --max-time 30 \
+                --get \
+                --header "x-api-key: ${DOKPLOY_API_KEY}" \
+                --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+                --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+                --data-urlencode "composeId=${DOKPLOY_COMPOSE_ID}" \
+                "${base_url}/api/deployment.allByCompose"
+            )"; then
+              echo "::warning::Could not query Dokploy deployment status; retrying"
+              sleep 5
+              continue
             fi
-            sleep 15
+
+            if [[ "${http_code}" =~ ^4[0-9][0-9]$ ]]; then
+              echo "::error::Dokploy deployment status request failed with HTTP ${http_code}"
+              exit 1
+            fi
+
+            if [[ "${http_code}" != "200" ]]; then
+              echo "::warning::Dokploy deployment status returned HTTP ${http_code}; retrying"
+              sleep 5
+              continue
+            fi
+
+            if ! jq -e 'type == "array"' "${response_file}" > /dev/null; then
+              echo "::error::Dokploy returned an unexpected deployment status response"
+              exit 1
+            fi
+
+            if [[ -z "${deployment_id}" ]]; then
+              deployment_id="$(
+                jq -r \
+                  --arg marker "${DEPLOY_MARKER}" \
+                  '([.[] | select(.description == $marker)][0].deploymentId // "")' \
+                  "${response_file}"
+              )"
+
+              if [[ -z "${deployment_id}" ]]; then
+                echo "Waiting for Dokploy to start the queued deployment..."
+                sleep 5
+                continue
+              fi
+
+              echo "Tracking Dokploy deployment ${deployment_id}"
+            fi
+
+            status="$(
+              jq -r \
+                --arg id "${deployment_id}" \
+                '([.[] | select(.deploymentId == $id)][0].status // "")' \
+                "${response_file}"
+            )"
+
+            case "${status}" in
+              running)
+                echo "Dokploy deployment ${deployment_id} is still running..."
+                ;;
+              done)
+                echo "Dokploy deployment ${deployment_id} succeeded."
+                {
+                  echo "### Staging deployment"
+                  echo
+                  echo "- Status: ✅ successful"
+                  echo "- Commit: \`${GITHUB_SHA}\`"
+                  echo "- Dokploy deployment: \`${deployment_id}\`"
+                } >> "${GITHUB_STEP_SUMMARY}"
+                exit 0
+                ;;
+              error)
+                echo "::error::Dokploy deployment ${deployment_id} failed"
+                exit 1
+                ;;
+              cancelled)
+                echo "::error::Dokploy deployment ${deployment_id} was cancelled"
+                exit 1
+                ;;
+              "")
+                echo "::warning::Deployment ${deployment_id} was not present in the latest response"
+                ;;
+              *)
+                echo "::warning::Deployment ${deployment_id} has unknown status '${status}'"
+                ;;
+            esac
+
+            sleep 5
           done
-          echo "Staging did not become ready within 10 minutes — investigate Dokploy + Flyway job logs, then roll back to the previous SHA tag."
+
+          echo "::error::Timed out waiting for Dokploy deployment to finish"
           exit 1
