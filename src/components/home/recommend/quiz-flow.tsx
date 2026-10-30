@@ -3,6 +3,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import { SparklesIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
@@ -12,19 +13,24 @@ import {
   formatTemplate,
   isExplicitRegionChoice,
   persistPrefs,
+  PREFS_STORAGE_KEY,
   readInitialDraft,
   readJourneySnapshot,
   readSavedPrefs,
+  regionOriginFor,
   removeSavedPrefs,
   sanitizeCountryCode,
   termLengthError,
+  textOriginFor,
   toCoarseSnapshot,
   toTransportPayload,
   validateRegion,
   writeJourneySnapshot,
+  type AnswerOrigin,
   type JourneySnapshot,
   type QuizDraft,
   type RecommendPayload,
+  type SavedRecommendPrefs,
 } from "@/components/home/recommend/quiz-model";
 import {
   AvoidStep,
@@ -33,13 +39,17 @@ import {
   type CountryOption,
 } from "@/components/home/recommend/quiz-stages";
 import {
+  AiExplanationCard,
   AllergyNotice,
   QuizError,
-  RankingNote,
   ResultWarnings,
 } from "@/components/home/recommend/quiz-status";
-import { QuizSummary, RememberPrefs } from "@/components/home/recommend/quiz-summary";
-import { ResultCard, ResultCardSkeleton } from "@/components/home/recommend/result-card";
+import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
+import {
+  ResultsExplanationSkeleton,
+  ResultsLoadingSkeleton,
+} from "@/components/home/recommend/results-loading";
+import { SidebarPrefsCard, YourPicksCard } from "@/components/home/recommend/results-sidebar";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
@@ -68,18 +78,6 @@ const stepQuestion = (step: number, copy: Messages): string => {
   return copy.recAvoidTitle;
 };
 
-const modeNoteFor = (mode: string, copy: Messages): string | null => {
-  if (mode === "ai") {
-    return copy.recAiNote;
-  }
-
-  if (mode === "deterministic") {
-    return copy.recPopularNote;
-  }
-
-  return null;
-};
-
 /**
  * Homepage recommendation quiz: a 3-step journey (where, what craving,
  * anything to avoid) replacing the old 5-step wizard. One persistent outer
@@ -96,27 +94,76 @@ export function RecommendSection() {
 
   const [journey] = useState<JourneySnapshot | null>(readJourneySnapshot);
 
+  const [savedInitial] = useState<SavedRecommendPrefs | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return readSavedPrefs(() => window.localStorage.getItem(PREFS_STORAGE_KEY));
+  });
+
   const [initial] = useState(() => {
     if (journey?.draft === undefined) {
       const fresh = readInitialDraft();
 
-      return { draft: fresh, explicit: isExplicitRegionChoice(fresh) };
+      // Fresh mounts are never "explicit": a draft matching the opt-in saved
+      // prefs renders with restored provenance until the visitor confirms or
+      // changes it; async detection keeps its suggested provenance.
+      return {
+        avoidTouched: false,
+        draft: fresh,
+        mealTouched: false,
+        moodTouched: false,
+        regionTouched: false,
+      };
     }
 
+    // Tab-back journey restores are in-progress answers from this visit, so
+    // anything already chosen counts as touched; detection-sourced regions
+    // keep suggested provenance through regionOriginFor.
     const restored: QuizDraft = { ...EMPTY_DRAFT, ...journey.draft, precise: null };
 
-    return { draft: restored, explicit: isExplicitRegionChoice(restored) };
+    return {
+      avoidTouched: restored.avoidRaw !== "",
+      draft: restored,
+      mealTouched: journey.meal !== "anything",
+      moodTouched: journey.mood !== "any",
+      regionTouched: isExplicitRegionChoice(restored),
+    };
   });
 
   const [stepIndex, setStepIndex] = useState<number>(journey?.stepIndex ?? 0);
   const [showResults, setShowResults] = useState<boolean>(journey?.showResults ?? false);
   const [draft, setDraft] = useState<QuizDraft>(initial.draft);
-  const explicitRegionRef = useRef(initial.explicit);
+  const [regionTouched, setRegionTouched] = useState<boolean>(initial.regionTouched);
+  const [mealTouched, setMealTouched] = useState<boolean>(initial.mealTouched);
+  const [moodTouched, setMoodTouched] = useState<boolean>(initial.moodTouched);
+  const [avoidTouched, setAvoidTouched] = useState<boolean>(initial.avoidTouched);
+  const explicitRegionRef = useRef(initial.regionTouched);
   const precise = usePreciseLocation();
 
   /** Region edits are always explicit and must never be clobbered by async detection. */
   const updateRegionDraft = (next: QuizDraft): void => {
     explicitRegionRef.current = true;
+    setRegionTouched(true);
+    setDraft(next);
+  };
+
+  /** Meal quick-picks are explicit answers; advancement is decided by the stage. */
+  const pickMeal = (next: MealOccasion): void => {
+    setMealTouched(true);
+    setMeal(next);
+  };
+
+  /** Mood is optional refinement; it never advances on its own. */
+  const pickMood = (next: RecommendationMood): void => {
+    setMoodTouched(true);
+    setMood(next);
+  };
+
+  /** Exclusion edits are explicit; provenance flips from restored to normal style. */
+  const updateExclusionsDraft = (next: QuizDraft): void => {
+    setAvoidTouched(true);
     setDraft(next);
   };
 
@@ -127,15 +174,7 @@ export function RecommendSection() {
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
 
-  const [hasSaved, setHasSaved] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return (
-      readSavedPrefs(() => window.localStorage.getItem("feastjourney.recommend.prefs.v1")) !== null
-    );
-  });
+  const [hasSaved, setHasSaved] = useState<boolean>(() => savedInitial !== null);
 
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const skipInitialFocusRef = useRef(true);
@@ -440,7 +479,7 @@ export function RecommendSection() {
   /** Wipe saved preferences and reset the whole form; storage first. */
   const clearSaved = (): void => {
     if (typeof window !== "undefined") {
-      removeSavedPrefs(() => window.localStorage.removeItem("feastjourney.recommend.prefs.v1"));
+      removeSavedPrefs(() => window.localStorage.removeItem(PREFS_STORAGE_KEY));
     }
 
     clearJourneySnapshot();
@@ -456,6 +495,11 @@ export function RecommendSection() {
     setConfirmClear(false);
     setHasSaved(false);
     setSurpriseSeed(0);
+    setRegionTouched(false);
+    setMealTouched(false);
+    setMoodTouched(false);
+    setAvoidTouched(false);
+    explicitRegionRef.current = false;
   };
 
   const retry = (): void => {
@@ -491,7 +535,24 @@ export function RecommendSection() {
     setShowResults(false);
     setConfirmClear(false);
     setSurpriseSeed(0);
+    setRegionTouched(false);
+    setMealTouched(false);
+    setMoodTouched(false);
+    setAvoidTouched(false);
+    explicitRegionRef.current = false;
   };
+
+  const regionOrigin: AnswerOrigin = regionOriginFor({
+    draft,
+    savedCountry: savedInitial?.country ?? null,
+    touched: regionTouched,
+  });
+
+  const avoidOrigin: AnswerOrigin = textOriginFor({
+    savedValue: savedInitial === null ? null : savedInitial.avoid.join(", "),
+    touched: avoidTouched,
+    value: draft.avoidRaw,
+  });
 
   const outcome: RecommendResult | null = recommend.data ?? null;
   const hasAllergies = submitted !== null && submitted.allergies.length > 0;
@@ -508,88 +569,180 @@ export function RecommendSection() {
 
   const resultFavorites = useFavoriteStatus(resultIds, resultUserId);
 
+  const outcomeKey =
+    submitted === null
+      ? "none"
+      : [
+          submitted.surpriseSeed,
+          submitted.meal,
+          submitted.mood,
+          submitted.locale,
+          submitted.country ?? "",
+          submitted.location?.kind ?? "",
+          submitted.avoid.join("|"),
+          submitted.allergies.join("|"),
+        ].join(":");
+
+  const carouselItems = useMemo(
+    () =>
+      outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic")
+        ? outcome.dishes.slice(0, 10)
+        : [],
+    [outcome],
+  );
+
+  // Shared carousel + rail index. Reset on a new result set via the
+  // render-adjust pattern (no set-state-in-effect): the carousel also
+  // receives resetKey, but the parent owns the index so it resets here.
+  const [railIndex, setRailIndex] = useState(0);
+  const [railKey, setRailKey] = useState(outcomeKey);
+
+  if (railKey !== outcomeKey) {
+    setRailKey(outcomeKey);
+    setRailIndex(0);
+  }
+
+  const provenanceLabels = useMemo(
+    () => ({ approximate: copy.recApproximate, saved: copy.recSavedFromVisit }),
+    [copy],
+  );
+
   return (
     <section
       id="recommend"
       aria-labelledby="recommend-heading"
-      className="mx-auto w-full max-w-6xl scroll-mt-20 px-5 pt-10"
+      className={
+        showResults
+          ? "mx-auto w-full max-w-[90rem] scroll-mt-20 px-5 pt-10 sm:px-8"
+          : "mx-auto w-full max-w-6xl scroll-mt-20 px-5 pt-10"
+      }
       style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div className="lg:sticky lg:top-24">
-          <h1
-            id="recommend-heading"
-            className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance"
-          >
-            {copy.recTitle}
-          </h1>
-          <p className="mt-3 max-w-[60ch] text-lg text-muted">{copy.recIntro}</p>
-          {detectedName !== null ? (
-            <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
-              {formatTemplate(copy.recWhereExploring, detectedName)}
+      <div
+        className={
+          showResults
+            ? "grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,11fr)]"
+            : "grid items-start gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]"
+        }
+      >
+        <div className={showResults ? "contents lg:flex lg:min-w-0 lg:flex-col" : "min-w-0"}>
+          <div className={showResults ? "order-1 min-w-0 lg:order-none" : undefined}>
+            <h1
+              id="recommend-heading"
+              className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance"
+            >
+              {copy.recTitle}
+            </h1>
+            <p className="mt-3 max-w-[60ch] text-lg text-muted">
+              {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
             </p>
-          ) : null}
+            {showResults &&
+            outcome !== null &&
+            (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+              <p className="mt-2 max-w-[60ch] text-base font-bold text-ink">
+                {copy.recResultsCount.replace("{count}", String(outcome.dishes.length))}
+              </p>
+            ) : null}
+            {detectedName !== null ? (
+              <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
+                {formatTemplate(copy.recWhereExploring, detectedName)}
+              </p>
+            ) : null}
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={surprise}
-              disabled={recommend.isPending}
-              className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full bg-ink px-4 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-70"
-            >
-              <SparklesIcon aria-hidden="true" className="size-4" /> {copy.recSurprise}
-            </button>
-            <button
-              type="button"
-              onClick={findDishes}
-              disabled={recommend.isPending}
-              className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
-            >
-              {copy.recQuick}
-            </button>
-          </div>
-        </div>
-        <div>
-          <p
-            aria-live="polite"
-            className={
-              showResults ? "sr-only" : "text-sm font-bold tracking-wide text-muted uppercase"
-            }
-          >
-            {showResults ? copy.recResultsHeading : stepLabel}
-          </p>
-
-          {showResults ? (
-            <section
-              aria-labelledby="rec-results-heading"
-              className="mt-3 min-h-[28rem] motion-safe:animate-rec-step-enter sm:min-h-[24rem]"
-            >
-              <h2
-                id="rec-results-heading"
-                ref={stepHeadingRef}
-                tabIndex={-1}
-                className="font-display text-3xl tracking-wide outline-none"
-              >
-                {copy.recResultsHeading}
-              </h2>
-              <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4">
-                {renderOutcome(copy)}
-              </div>
-              <div className="mt-6 flex flex-wrap gap-3">
+            {showResults ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={backToQuiz}
-                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
                 >
                   {copy.recAdjust}
                 </button>
                 <button
                   type="button"
                   onClick={startOver}
-                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-4 text-sm font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink"
                 >
                   {copy.recStartOver}
                 </button>
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={surprise}
+                  disabled={recommend.isPending}
+                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full bg-ink px-4 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-70"
+                >
+                  <SparklesIcon aria-hidden="true" className="size-4" /> {copy.recSurprise}
+                </button>
+                <button
+                  type="button"
+                  onClick={findDishes}
+                  disabled={recommend.isPending}
+                  className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+                >
+                  {copy.recQuick}
+                </button>
+              </div>
+            )}
+          </div>
+          {showResults && submitted !== null ? (
+            <div className="order-2 mt-6 min-w-0 lg:order-none">
+              <YourPicksCard
+                copy={copy}
+                countryOptions={countryOptions}
+                onEditStep={editStep}
+                submitted={submitted}
+              />
+            </div>
+          ) : null}
+          {showResults &&
+          outcome !== null &&
+          (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+            <div className="order-5 mt-4 min-w-0 lg:order-none">
+              <AiExplanationCard copy={copy} mode={outcome.mode} ranking={outcome.ranking} />
+            </div>
+          ) : null}
+          {showResults && submitted !== null && recommend.isPending && outcome === null ? (
+            <div className="order-5 mt-4 min-w-0 lg:order-none">
+              <ResultsExplanationSkeleton />
+            </div>
+          ) : null}
+          {showResults && submitted !== null ? (
+            <div className="order-6 mt-4 min-w-0 lg:order-none">
+              <SidebarPrefsCard
+                copy={copy}
+                prefs={{
+                  checked: draft.remember,
+                  hasSaved,
+                  onChange: (next) => {
+                    setDraft({ ...draft, remember: next });
+                  },
+                  onClear: () => {
+                    setConfirmClear(true);
+                  },
+                  onConfirmClear: clearSaved,
+                  onDismissClear: () => {
+                    setConfirmClear(false);
+                  },
+                  showConfirmClear: confirmClear,
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+        <div className={showResults ? "contents lg:block lg:min-w-0" : "min-w-0"}>
+          {showResults ? (
+            <section
+              aria-labelledby="rec-results-heading"
+              className="order-3 min-w-0 motion-safe:animate-rec-step-enter lg:order-none"
+            >
+              <h2 id="rec-results-heading" ref={stepHeadingRef} tabIndex={-1} className="sr-only">
+                {copy.recResultsHeading}
+              </h2>
+              <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4 lg:mt-0">
+                {renderOutcome(copy)}
               </div>
             </section>
           ) : (
@@ -599,7 +752,10 @@ export function RecommendSection() {
                   {`${stepLabel}: ${stepQuestion(stepIndex, copy)}`}
                 </h2>
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <p className="text-sm font-bold tracking-wide text-muted uppercase">
+                  <p
+                    aria-live="polite"
+                    className="text-sm font-bold tracking-wide text-muted uppercase"
+                  >
                     {stepLabel}
                   </p>
                   <div aria-hidden="true" className="flex gap-1.5">
@@ -625,11 +781,13 @@ export function RecommendSection() {
                       onRetryCountries={() => {
                         void countries.refetch();
                       }}
+                      origin={regionOrigin}
                       precise={{
                         fix: precise.fix,
                         request: precise.request,
                         status: precise.status,
                       }}
+                      provenanceLabels={provenanceLabels}
                     />
                   ) : null}
 
@@ -637,15 +795,23 @@ export function RecommendSection() {
                     <CravingStep
                       copy={copy}
                       meal={meal}
-                      mood={mood}
                       onAdvance={tryAdvance}
-                      onMeal={setMeal}
-                      onMood={setMood}
+                      onMeal={pickMeal}
+                      touched={mealTouched}
                     />
                   ) : null}
 
                   {stepIndex === 2 ? (
-                    <AvoidStep copy={copy} draft={draft} onDraft={setDraft} />
+                    <AvoidStep
+                      avoidOrigin={avoidOrigin}
+                      copy={copy}
+                      draft={draft}
+                      mood={mood}
+                      moodTouched={moodTouched}
+                      onDraft={updateExclusionsDraft}
+                      onMood={pickMood}
+                      provenanceLabels={provenanceLabels}
+                    />
                   ) : null}
                 </div>
 
@@ -667,9 +833,7 @@ export function RecommendSection() {
                     >
                       {copy.recBack}
                     </button>
-                  ) : (
-                    <span aria-hidden="true" className="invisible inline-flex min-h-11 px-5" />
-                  )}
+                  ) : null}
                   {stepIndex < QUIZ_STEPS - 1 ? (
                     <button
                       type="button"
@@ -709,18 +873,7 @@ export function RecommendSection() {
 
   function renderOutcome(copyMessages: Messages) {
     if (recommend.isPending) {
-      return (
-        <div>
-          <p className="text-base font-semibold text-ink">{copyMessages.recLoading}</p>
-          <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-            {[0, 1, 2, 3].map((skeleton) => (
-              <li key={skeleton}>
-                <ResultCardSkeleton />
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
+      return <ResultsLoadingSkeleton copy={copyMessages} />;
     }
 
     if (recommend.isError) {
@@ -734,15 +887,12 @@ export function RecommendSection() {
     if (outcome.mode === "uncertain" || outcome.mode === "empty") {
       return (
         <div>
-          <h3 className="text-lg font-extrabold text-ink">{copyMessages.recReasonsHeading}</h3>
-          <ul className="mt-3 flex list-disc flex-col gap-2 pl-6 text-[0.95rem] text-ink">
-            {outcome.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          {outcome.mode === "empty" ? (
-            <p className="mt-3 text-sm font-semibold text-muted">{copyMessages.recEmptySuggest}</p>
-          ) : null}
+          <AiExplanationCard
+            copy={copyMessages}
+            mode={outcome.mode}
+            ranking={outcome.ranking}
+            reasons={outcome.reasons}
+          />
           {outcome.mode === "empty" && submitted?.location?.kind === "precise" ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -773,61 +923,39 @@ export function RecommendSection() {
 
     return (
       <div>
-        {submitted !== null ? (
-          <QuizSummary
-            allergies={submitted.allergies}
-            avoid={submitted.avoid}
-            copy={copyMessages}
-            countryOptions={countryOptions}
-            meal={submitted.meal}
-            mood={submitted.mood}
-            onEditStep={editStep}
-            submittedCountry={submitted.country}
-            submittedLocation={submitted.location}
-          />
-        ) : null}
-        <div className="mt-4">
-          <RankingNote note={modeNoteFor(outcome.mode, copyMessages)} />
-        </div>
         {outcome.warnings.length > 0 ? (
-          <div className="mt-3">
+          <div className="mb-3">
             <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
           </div>
         ) : null}
         {hasAllergies ? (
-          <div className="mt-3">
+          <div className="mb-3">
             <AllergyNotice copy={copyMessages} />
           </div>
         ) : null}
-        <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-          {outcome.dishes.slice(0, 10).map((dish) => (
-            <li key={dish.id}>
-              <ResultCard
-                copy={copyMessages}
-                dish={dish}
-                favoriteStatus={resultFavorites}
-                lang={lang}
-                session={session}
-              />
-            </li>
-          ))}
-        </ul>
-        <RememberPrefs
-          checked={draft.remember}
+        <DishCarousel
+          activeIndex={railIndex}
+          autoplay
+          autoplayMs={5000}
           copy={copyMessages}
-          hasSaved={hasSaved}
-          onChange={(next) => {
-            setDraft({ ...draft, remember: next });
-          }}
-          onClear={() => {
-            setConfirmClear(true);
-          }}
-          onConfirmClear={clearSaved}
-          onDismissClear={() => {
-            setConfirmClear(false);
-          }}
-          showConfirmClear={confirmClear}
+          favoriteStatus={resultFavorites}
+          items={carouselItems}
+          label={copyMessages.recResultsHeading}
+          lang={lang}
+          onIndexChange={setRailIndex}
+          resetKey={outcomeKey}
+          session={session}
         />
+        <div className="mt-6">
+          <RecommendationRail
+            activeIndex={railIndex}
+            copy={copyMessages}
+            items={carouselItems}
+            label={copyMessages.recRailHeading}
+            lang={lang}
+            onSelect={setRailIndex}
+          />
+        </div>
       </div>
     );
   }

@@ -7,6 +7,7 @@ import { CatalogServicesLive, RepositoriesLive } from "@/modules/food-discovery/
 import { CatalogImportServiceLive } from "@/modules/food-discovery/server/operations/catalog-import-service";
 import { CurationServiceLive } from "@/modules/food-discovery/server/operations/curation-service";
 import {
+  RankingProvenance,
   type RecommendDishesInput,
   RecommendationMisconfigured,
   RecommendationOutcome,
@@ -15,6 +16,8 @@ import {
   toWireOutcome,
 } from "@/modules/food-discovery/server/operations/recommendation-service";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
+import { Actor } from "@/server/auth/actor";
+import { withActor } from "@/server/auth/current-actor";
 import { DatabaseLive, type Database } from "@/server/database/client";
 import { resetServerEnvCache } from "@/server/env";
 import {
@@ -165,12 +168,25 @@ const recommendOn = (runtime: TestRuntime, input: RecommendDishesInput) =>
     Effect.flatMap(RecommendationService, (service) => service.recommend(input)),
   );
 
+/**
+ * Member-scoped recommendations: Muse-eligible path. Guest callers always
+ * take the deterministic branch even when a provider is configured.
+ */
+const recommendAsMember = (runtime: TestRuntime, input: RecommendDishesInput) =>
+  runOn(
+    runtime,
+    withActor(
+      Actor.Member({ userId: "test-member" }),
+      Effect.flatMap(RecommendationService, (service) => service.recommend(input)),
+    ),
+  );
+
 const recommendOrFailure = async (
   runtime: TestRuntime,
   input: RecommendDishesInput,
 ): Promise<{ readonly outcome: RecommendationOutcome | null; readonly failure: unknown }> => {
   try {
-    return { outcome: await recommendOn(runtime, input), failure: null };
+    return { outcome: await recommendAsMember(runtime, input), failure: null };
   } catch (failure) {
     return { outcome: null, failure };
   }
@@ -340,7 +356,7 @@ describe("dish recommendations", () => {
       }),
     );
 
-    const outcome = await recommendOn(runtime, {
+    const outcome = await recommendAsMember(runtime, {
       ...baseInput,
       meal: "dinner",
       mood: "comforting",
@@ -371,7 +387,7 @@ describe("dish recommendations", () => {
       makeRuntime((candidates) => Effect.succeed(candidates.slice(0, 3).map((c) => c.id))),
     );
 
-    const outcome = await recommendOn(overLimit, baseInput);
+    const outcome = await recommendAsMember(overLimit, baseInput);
 
     expect(modeOf(outcome)).toBe("deterministic");
     expect(dishesOf(outcome).map((dish) => dish.id)).toEqual(baseline.slice(0, 2));
@@ -387,7 +403,7 @@ describe("dish recommendations", () => {
       makeRuntime((candidates) => Effect.succeed(candidates.slice(0, 2).map((c) => c.id))),
     );
 
-    const outcome = await recommendOn(runtime, baseInput);
+    const outcome = await recommendAsMember(runtime, baseInput);
 
     expect(modeOf(outcome)).toBe("ai");
     expect(dishesOf(outcome)).toHaveLength(2);
@@ -429,7 +445,7 @@ describe("dish recommendations", () => {
 
     const checkFallback = async (entry: { name: string; rank: RankImpl }) => {
       const runtime = track(makeRuntime(entry.rank));
-      const outcome = await recommendOn(runtime, baseInput);
+      const outcome = await recommendAsMember(runtime, baseInput);
 
       expect(modeOf(outcome), entry.name).toBe("deterministic");
       expect(dishesOf(outcome).map((dish) => dish.id)).toEqual(baseline);
@@ -455,7 +471,7 @@ describe("dish recommendations", () => {
       ),
     );
 
-    const outcome = await recommendOn(runtime, baseInput);
+    const outcome = await recommendAsMember(runtime, baseInput);
 
     expect(modeOf(outcome)).toBe("deterministic");
     expect(dishesOf(outcome).map((dish) => dish.id)).toEqual(baseline);
@@ -652,24 +668,47 @@ const dish = (id: string): DishSummary => ({
 describe("recommendation wire mapping", () => {
   test("maps ReadyMuse to the ai envelope", () => {
     expect(
-      toWireOutcome(RecommendationOutcome.ReadyMuse({ dishes: [dish("1")], warnings: ["w"] })),
-    ).toEqual({ mode: "ai", dishes: [dish("1")], warnings: ["w"], reasons: [] });
+      toWireOutcome(
+        RecommendationOutcome.ReadyMuse({
+          dishes: [dish("1")],
+          ranking: RankingProvenance.LiveMuse(),
+          warnings: ["w"],
+        }),
+      ),
+    ).toEqual({
+      mode: "ai",
+      dishes: [dish("1")],
+      ranking: RankingProvenance.LiveMuse(),
+      reasons: [],
+      warnings: ["w"],
+    });
   });
 
   test("maps ReadyDeterministic to the deterministic envelope", () => {
     expect(
       toWireOutcome(
-        RecommendationOutcome.ReadyDeterministic({ dishes: [dish("1")], warnings: ["w"] }),
+        RecommendationOutcome.ReadyDeterministic({
+          dishes: [dish("1")],
+          ranking: RankingProvenance.DeterministicCatalog(),
+          warnings: ["w"],
+        }),
       ),
-    ).toEqual({ mode: "deterministic", dishes: [dish("1")], warnings: ["w"], reasons: [] });
+    ).toEqual({
+      mode: "deterministic",
+      dishes: [dish("1")],
+      ranking: RankingProvenance.DeterministicCatalog(),
+      reasons: [],
+      warnings: ["w"],
+    });
   });
 
   test("maps Uncertain to the uncertain envelope", () => {
     expect(toWireOutcome(RecommendationOutcome.Uncertain({ reasons: ["r"] }))).toEqual({
       mode: "uncertain",
       dishes: [],
-      warnings: [],
+      ranking: RankingProvenance.DeterministicCatalog(),
       reasons: ["r"],
+      warnings: [],
     });
   });
 
@@ -677,14 +716,22 @@ describe("recommendation wire mapping", () => {
     expect(toWireOutcome(RecommendationOutcome.Empty({ reasons: ["r"] }))).toEqual({
       mode: "empty",
       dishes: [],
-      warnings: [],
+      ranking: RankingProvenance.DeterministicCatalog(),
       reasons: ["r"],
+      warnings: [],
     });
   });
 });
 
+let savedPoolMax: string | undefined;
+
 beforeAll(() => {
   expect(process.env.DATABASE_URL).toBeDefined();
+  // Each test builds its own ManagedRuntime with a Database pool. Capped at
+  // 2 connections per runtime so the ~25 runtimes in this file stay far
+  // below the disposable Postgres max_connections=100 budget.
+  savedPoolMax = process.env["DATABASE_POOL_MAX"];
+  process.env["DATABASE_POOL_MAX"] = "2";
   withRankingEnv({});
 });
 
@@ -695,5 +742,21 @@ afterEach(async () => {
 afterAll(async () => {
   withRankingEnv({});
 
-  await Promise.all(runtimes.map((runtime) => runtime.dispose()));
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+
+  if (savedPoolMax === undefined) {
+    delete process.env["DATABASE_POOL_MAX"];
+  } else {
+    process.env["DATABASE_POOL_MAX"] = savedPoolMax;
+  }
+});
+
+// Each test builds its own ManagedRuntimes (tracked above) and must not
+// hold their database pools past the test: ~25 runtimes kept alive until
+// afterAll would stack ~50+ connections on top of the shared appRuntime
+// pools and breach the disposable Postgres max_connections=100 budget,
+// surfacing as DatabaseUnavailable in later tests. Disposing here bounds
+// live runtimes to those of the running test.
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
 });

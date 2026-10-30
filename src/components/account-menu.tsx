@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
+import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   BookmarkIcon,
   ChevronDownIcon,
   CircleUserRound,
+  FlaskConicalIcon,
   LogOutIcon,
   ShieldCheckIcon,
   UserRoundIcon,
@@ -26,28 +27,43 @@ const rootRoute = getRouteApi("__root__");
 
 /**
  * Single account entry point in the site header. Guests find sign-in and
- * account creation here. Members get a small menu with exactly three tabs —
- * saved dishes, account, security — and nothing else: no personal details,
- * no admin links (Feast Lab lives in the navbar for those who hold it), no
- * sign-out (it lives on the account page next to the danger it guards).
+ * account creation here. Members get personal links — saved dishes, account,
+ * security — plus a discreet administration entry only when server-verified
+ * capabilities grant an admin surface. Public navigation never shows Feast
+ * Lab; every admin route and server function still enforces its own checks.
  * Language lives in the standalone globe menu beside this button.
  */
 export function AccountMenu() {
   const { lang } = rootRoute.useSearch();
-  const { session } = rootRoute.useRouteContext();
+  const { session, capabilities } = rootRoute.useRouteContext();
   const copy = messagesFor(lang);
   const navigate = useNavigate();
+  const router = useRouter();
   const queryClient = useQueryClient();
-
   const signedIn = session.status === "signed-in";
+
+  const hasAdminSurface =
+    signedIn &&
+    (capabilities.admin ||
+      capabilities.overview ||
+      capabilities.dishes ||
+      capabilities.imports ||
+      capabilities.reviews ||
+      capabilities.members ||
+      capabilities.roles);
 
   const signOut = (): void => {
     void signOutFn().then(
       () => {
         clearFavoriteCaches(queryClient);
+
+        void router.invalidate();
+
         void navigate({ to: "/", search: { lang } });
       },
       () => {
+        void router.invalidate();
+
         void navigate({ to: "/", search: { lang } });
       },
     );
@@ -89,6 +105,19 @@ export function AccountMenu() {
               </Link>
             </DropdownMenuItem>
           </DropdownMenuGroup>
+          {hasAdminSurface ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <Link to="/admin" search={{ lang }}>
+                    <FlaskConicalIcon aria-hidden="true" className="size-4" />
+                    {copy.adminWorkspace}
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem

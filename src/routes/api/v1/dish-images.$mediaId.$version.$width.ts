@@ -37,10 +37,19 @@ const IMAGE_VERSION_PATTERN = /^[0-9]{1,19}$/;
  * public responses and carries `private, no-store`.
  *
  * Public responses are immutable per (mediaId, version, width) and carry
- * year-long cache headers for Cloudflare edge caching. No per-request
- * re-encoding, no per-pixel database work: one indexed primary-key lookup,
- * then a single object fetch on cache miss. ETags are deterministic, so a
- * matching If-None-Match short-circuits before any storage call.
+ * year-long cache headers for Cloudflare edge caching: versioned bytes
+ * never mutate, so a matching ETag is stable. Eligibility (DB status /
+ * version check) always runs BEFORE the If-None-Match short-circuit — a
+ * withdrawn or rotated image must 404 at origin even when the client
+ * presents a previously valid ETag. Edge copies of a withdrawn URL can
+ * linger until max-age expiry; the origin is authoritative and re-publish
+ * reuses the same versioned URL (no rotation on withdraw), so treat edge
+ * purge as a separate ops concern.
+ *
+ * No per-request re-encoding, no per-pixel database work: one indexed
+ * primary-key lookup, then a single object fetch on cache miss. Stale
+ * versions 404 via the variant_version mismatch instead of serving
+ * rotated bytes.
  */
 const handleDishImage = async (
   request: Request,
@@ -74,19 +83,25 @@ const handleDishImage = async (
     }
   }
 
-  const expectedEtag = `"dm-${mediaId}-v${version}-${width}"`;
+  const ifNoneMatch = preview ? null : request.headers.get("if-none-match");
 
-  if (!preview && request.headers.get("if-none-match") === expectedEtag) {
-    return new Response(null, {
-      status: 304,
-      headers: imageHeaders(expectedEtag, 0, requestId, false),
-    });
-  }
-
+  // Eligibility first: serveDerivative 404s withdrawn, draft, or
+  // stale-version rows even when the client presents a previously valid
+  // ETag, so revocation is coherent at origin. The 304 short-circuit below
+  // compares against the authoritative served ETag, not a reconstructed one.
   const program = Effect.flatMap(DishMediaService, (service) =>
     service.serveDerivative({ mediaId, version, width, preview }),
   ).pipe(
-    Effect.map((derivative) => imageResponse(derivative, requestId, headOnly, preview)),
+    Effect.map((derivative) => {
+      if (ifNoneMatch !== null && ifNoneMatch === derivative.etag) {
+        return new Response(null, {
+          status: 304,
+          headers: imageHeaders(derivative.etag, 0, requestId, preview),
+        });
+      }
+
+      return imageResponse(derivative, requestId, headOnly, preview);
+    }),
     Effect.provide(DishMediaFullLive),
     (effect) => withActor(actor, effect),
     Effect.catchTags({

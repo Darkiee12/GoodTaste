@@ -1,10 +1,18 @@
 import { Globe2Icon, LocateFixedIcon, MapPinIcon, PlaneIcon } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import {
+  DEFAULT_PROVENANCE_LABELS,
+  didPreciseFixArrive,
   formatTemplate,
+  pickDestinationCountry,
+  pickRegionChoice,
   regionChoiceFor,
+  sameRegion,
+  shouldAutoAdvanceRegion,
+  type AnswerOrigin,
   type PreciseFix,
+  type ProvenanceLabels,
   type QuizDraft,
   type RegionChoice,
 } from "@/components/home/recommend/quiz-model";
@@ -30,24 +38,43 @@ export interface DetectedRegion {
   readonly locating: boolean;
 }
 
-const optionClass = (checked: boolean): string =>
-  `flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition ${
-    checked
-      ? "border-ink bg-ink text-white"
-      : "border-border-soft bg-white text-ink hover:border-food-orange"
-  }`;
+/**
+ * Step-1 option row. The checked row renders by answer provenance: explicit
+ * taps get the dark navy answer style; opt-in restored values get a softer
+ * navy-on-cream with a border plus a "saved" label (never a disabled or
+ * low-contrast look); app-suggested regions stay neutral with an
+ * "approximate" indicator; untouched defaults render exactly like
+ * unselected rows so a default never poses as an answer.
+ */
+const optionClass = (checked: boolean, origin: AnswerOrigin): string => {
+  if (checked && origin === "explicit") {
+    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-ink text-white";
+  }
+
+  if (checked && origin === "restored") {
+    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-cream text-ink";
+  }
+
+  if (checked && origin === "suggested") {
+    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-white text-ink";
+  }
+
+  return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-border-soft bg-white text-ink hover:border-food-orange";
+};
 
 export interface PointerAdvance {
   readonly markPointer: () => void;
+  readonly clearPointer: () => void;
   readonly consumePointer: () => boolean;
 }
 
 /**
  * Pointer-modality gate for auto-advance. Mouse and touch clicks are
  * preceded by pointerdown; keyboard and most assistive-tech activation are
- * not. Auto-advance only consumes a pointer-marked click, so arrow-key and
- * Space/Enter exploration never yanks the visitor forward — the Continue
- * button remains the explicit path.
+ * not. Auto-advance only consumes a pointer-marked change, so arrow-key
+ * and Space/Enter exploration never yanks the visitor forward — the
+ * Continue button remains the explicit path. Keyboards clear a stale mark
+ * (e.g. a dismissed native picker) before it can misfire.
  */
 export function usePointerAdvance(): PointerAdvance {
   const pointerRef = useRef(false);
@@ -55,6 +82,9 @@ export function usePointerAdvance(): PointerAdvance {
   return {
     markPointer: () => {
       pointerRef.current = true;
+    },
+    clearPointer: () => {
+      pointerRef.current = false;
     },
     consumePointer: () => {
       const wasPointer = pointerRef.current;
@@ -123,12 +153,17 @@ const choiceLabelFor = (
 
 /**
  * Step 1 — "Where should we explore?" Four ordered choices: the trusted home
- * region (default when network-region detection knows it), an explicit
+ * region (when network-region detection knows it), an explicit
  * precise-location lane, another destination from the country catalog, or
- * worldwide. Only the complete approximate region auto-advances on pointer;
- * precise fixes, destination picks, and worldwide wait for Continue, and
- * nothing advances while geolocation is pending. Coordinates are never
- * displayed raw — success shows an accuracy label at most.
+ * worldwide. Pointer taps advance only on explicitly complete answers:
+ * Anywhere and the detected country advance at once; the destination lane
+ * reveals its selector and advances once a valid country is chosen;
+ * Near-you geolocates only on an explicit tap and advances when the fix
+ * lands (never while pending); denied/unavailable stay put with inline
+ * alternatives. Untouched defaults, saved prefs, and async detection never
+ * flow through the commit site, so they never advance. Keyboard and
+ * assistive-tech users advance explicitly via Continue. Coordinates are
+ * never displayed raw — success shows an accuracy label at most.
  */
 export function WhereStep({
   copy,
@@ -139,7 +174,9 @@ export function WhereStep({
   onAdvance,
   onDraft,
   onRetryCountries,
+  origin,
   precise,
+  provenanceLabels = DEFAULT_PROVENANCE_LABELS,
 }: {
   readonly copy: Messages;
   readonly countriesError: boolean;
@@ -149,9 +186,11 @@ export function WhereStep({
   readonly onAdvance: () => void;
   readonly onDraft: (next: QuizDraft) => void;
   readonly onRetryCountries: () => void;
+  readonly origin: AnswerOrigin;
   readonly precise: PreciseControl;
+  readonly provenanceLabels?: ProvenanceLabels;
 }) {
-  const { consumePointer, markPointer } = usePointerAdvance();
+  const { clearPointer, consumePointer, markPointer } = usePointerAdvance();
 
   const choice = regionChoiceFor(draft, detected.country);
 
@@ -160,49 +199,83 @@ export function WhereStep({
       ? null
       : (countryNameFor(detected.country, countryOptions) ?? detected.country);
 
-  const pickDestination = (country: string): void => {
-    onDraft({
-      ...draft,
-      country,
-      countrySource: country === "" ? null : "chosen",
-      precise: null,
-      regionMode: "country",
-    });
-  };
+  /**
+   * Single auto-advance commit site: the NEWLY picked candidate is derived
+   * and validated explicitly, never the pre-update batched state. Pointer
+   * taps on a changed, complete answer advance exactly once; keyboard
+   * changes (no pointer mark) only update the draft.
+   */
+  const commit = (next: QuizDraft): void => {
+    const pointer = consumePointer();
+    const changed = !sameRegion(draft, next);
 
-  const pickChoice = (next: RegionChoice): void => {
-    if (next === "home" && detected.country !== null) {
-      onDraft({
-        ...draft,
-        country: detected.country,
-        countrySource: "detected",
-        precise: null,
-        regionMode: "country",
-      });
+    onDraft(next);
 
-      return;
-    }
-
-    if (next === "precise") {
-      onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "precise" });
-
-      return;
-    }
-
-    if (next === "destination") {
-      onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "country" });
-
-      return;
-    }
-
-    onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "anywhere" });
-  };
-
-  const maybeAdvanceHome = (): void => {
-    if (consumePointer()) {
+    if (pointer && changed && shouldAutoAdvanceRegion(next)) {
       onAdvance();
     }
   };
+
+  const pickChoice = (next: RegionChoice): void => {
+    commit(pickRegionChoice(draft, next, detected.country));
+  };
+
+  /**
+   * Near-you lane: selecting the row opens the lane but never requests or
+   * advances on its own. Only an explicit pointer tap on the row fires the
+   * one-shot geolocation; keyboard selection leaves the explicit locate
+   * button as the path. The lane without a fix is incomplete by
+   * construction, so this path can never advance.
+   */
+  const pickPreciseLane = (): void => {
+    const next = pickRegionChoice(draft, "precise", detected.country);
+    const pointer = consumePointer();
+    const changed = !sameRegion(draft, next);
+
+    onDraft(next);
+
+    if (pointer && changed) {
+      precise.request();
+    }
+  };
+
+  const pickDestination = (country: string): void => {
+    commit(pickDestinationCountry(draft, country));
+  };
+
+  /**
+   * Near-you advances exactly once, when a live fix lands while the lane
+   * is still selected. tryAdvance re-validates the written draft, so
+   * locating/denied/unavailable outcomes (no fix, no draft write) stay put
+   * with their inline alternatives. Leaving the lane or unmounting via
+   * Continue disarms it; returning Back to a settled fix never re-fires.
+   */
+  const fixAdvancedRef = useRef(false);
+  const previousDraftRef = useRef(draft);
+  const preciseFix = precise.fix;
+  useEffect(() => {
+    const previous = previousDraftRef.current;
+    previousDraftRef.current = draft;
+
+    if (choice !== "precise") {
+      fixAdvancedRef.current = false;
+
+      return;
+    }
+
+    if (fixAdvancedRef.current) {
+      return;
+    }
+
+    if (
+      precise.status === "success" &&
+      preciseFix !== null &&
+      didPreciseFixArrive(previous, draft)
+    ) {
+      fixAdvancedRef.current = true;
+      onAdvance();
+    }
+  });
 
   const failed = fallbackOptionsFor(precise.status, detected.country);
 
@@ -223,7 +296,7 @@ export function WhereStep({
       ) : null}
       <div className="flex flex-col gap-3">
         {detected.country !== null && detectedName !== null ? (
-          <label className={optionClass(choice === "home")} onPointerDown={markPointer}>
+          <label className={optionClass(choice === "home", origin)} onPointerDown={markPointer}>
             <input
               type="radio"
               name="rec-where"
@@ -232,33 +305,28 @@ export function WhereStep({
               onChange={() => {
                 pickChoice("home");
               }}
-              onClick={maybeAdvanceHome}
               className="size-5 flex-none accent-food-orange-strong"
             />
             <MapPinIcon aria-hidden="true" className="size-5 flex-none" />
             {choiceLabelFor("home", copy, detectedName)}
           </label>
         ) : null}
-        <label className={optionClass(choice === "precise")} onPointerDown={markPointer}>
+        <label className={optionClass(choice === "precise", origin)} onPointerDown={markPointer}>
           <input
             type="radio"
             name="rec-where"
             value="precise"
             checked={choice === "precise"}
-            onChange={() => {
-              pickChoice("precise");
-            }}
-            onClick={() => {
-              if (consumePointer()) {
-                precise.request();
-              }
-            }}
+            onChange={pickPreciseLane}
             className="size-5 flex-none accent-food-orange-strong"
           />
           <LocateFixedIcon aria-hidden="true" className="size-5 flex-none" />
           {choiceLabelFor("precise", copy, null)}
         </label>
-        <label className={optionClass(choice === "destination")} onPointerDown={markPointer}>
+        <label
+          className={optionClass(choice === "destination", origin)}
+          onPointerDown={markPointer}
+        >
           <input
             type="radio"
             name="rec-where"
@@ -272,7 +340,7 @@ export function WhereStep({
           <PlaneIcon aria-hidden="true" className="size-5 flex-none" />
           {choiceLabelFor("destination", copy, null)}
         </label>
-        <label className={optionClass(choice === "worldwide")} onPointerDown={markPointer}>
+        <label className={optionClass(choice === "worldwide", origin)} onPointerDown={markPointer}>
           <input
             type="radio"
             name="rec-where"
@@ -287,6 +355,16 @@ export function WhereStep({
           {choiceLabelFor("worldwide", copy, null)}
         </label>
       </div>
+      {origin === "restored" ? (
+        <p className="mt-3 inline-flex items-center rounded-full border-2 border-ink bg-cream px-3 py-1 text-xs font-bold text-ink">
+          {provenanceLabels.saved}
+        </p>
+      ) : null}
+      {origin === "suggested" ? (
+        <p className="mt-3 inline-flex items-center rounded-full border-2 border-border-soft bg-white px-3 py-1 text-xs font-bold text-ink">
+          {provenanceLabels.approximate}
+        </p>
+      ) : null}
 
       {choice === "precise" ? (
         <div aria-live="polite" className="mt-5 min-h-6">
@@ -380,6 +458,8 @@ export function WhereStep({
             <select
               id="rec-country"
               value={draft.country}
+              onPointerDown={markPointer}
+              onKeyDown={clearPointer}
               onChange={(event) => {
                 pickDestination(event.target.value);
               }}
@@ -403,24 +483,25 @@ export function WhereStep({
 }
 
 /**
- * Step 2 — "What sounds good right now?" Single-choice meal with optional
- * inline mood refinement. Only the meal auto-advances; mood is never a
- * separate mandatory page and never advances on its own.
+ * Step 2 — "What sounds good right now?" Single-choice meal quick-picks.
+ * Every meal value (including "anything") is a complete answer, so pointer
+ * taps advance at once; keyboard and assistive-tech users advance via
+ * Continue. Mood is deliberately NOT here: meal taps used to advance before
+ * visitors ever saw it, so mood now lives as an optional refinement on the
+ * next step alongside the exclusions.
  */
 export function CravingStep({
   copy,
   meal,
-  mood,
   onAdvance,
   onMeal,
-  onMood,
+  touched,
 }: {
   readonly copy: Messages;
   readonly meal: MealOccasion;
-  readonly mood: RecommendationMood;
   readonly onAdvance: () => void;
   readonly onMeal: (next: MealOccasion) => void;
-  readonly onMood: (next: RecommendationMood) => void;
+  readonly touched: boolean;
 }) {
   const { consumePointer, markPointer } = usePointerAdvance();
 
@@ -432,7 +513,7 @@ export function CravingStep({
         {mealOptions(copy).map((option) => (
           <label
             key={option.value}
-            className={optionClass(meal === option.value)}
+            className={optionClass(meal === option.value, touched ? "explicit" : "untouched")}
             onPointerDown={markPointer}
           >
             <input
@@ -441,10 +522,11 @@ export function CravingStep({
               value={option.value}
               checked={meal === option.value}
               onChange={() => {
+                const pointer = consumePointer();
+
                 onMeal(option.value);
-              }}
-              onClick={() => {
-                if (consumePointer()) {
+
+                if (pointer) {
                   onAdvance();
                 }
               }}
@@ -454,48 +536,66 @@ export function CravingStep({
           </label>
         ))}
       </div>
-      <p className="mt-6 mb-3 text-sm font-bold text-ink">{copy.recMoodRefine}</p>
-      <div className="flex flex-wrap gap-2">
-        {moodOptions(copy).map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={mood === option.value}
-            onClick={() => {
-              onMood(option.value);
-            }}
-            className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 px-4 text-sm font-bold transition ${
-              mood === option.value
-                ? "border-ink bg-ink text-white"
-                : "border-border-soft bg-white text-ink hover:border-food-orange"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
     </fieldset>
   );
 }
 
 /**
- * Step 3 — "Anything to avoid?" Free-text dislikes plus allergies with an
- * explicit find action. Typing never advances; validation runs only on the
- * explicit Find or Skip actions.
+ * Step 3 — fine-tune and exclusions. Mood refinement moved here from Step 2
+ * because meal quick-picks auto-advance before visitors ever saw it; mood
+ * stays optional, reachable, and never advances on its own. Free-text
+ * dislikes plus allergies follow with an explicit find action. Typing never
+ * advances; validation runs only on the explicit Find or Skip actions. A
+ * restored dislikes value renders softer navy-on-cream with a saved label;
+ * confirming or editing it restores the normal style.
  */
 export function AvoidStep({
+  avoidOrigin,
   copy,
   draft,
+  mood,
+  moodTouched,
   onDraft,
+  onMood,
+  provenanceLabels = DEFAULT_PROVENANCE_LABELS,
 }: {
+  readonly avoidOrigin: AnswerOrigin;
   readonly copy: Messages;
   readonly draft: QuizDraft;
+  readonly mood: RecommendationMood;
+  readonly moodTouched: boolean;
   readonly onDraft: (next: QuizDraft) => void;
+  readonly onMood: (next: RecommendationMood) => void;
+  readonly provenanceLabels?: ProvenanceLabels;
 }) {
   return (
     <fieldset className="min-w-0">
       <legend className="font-display px-2 text-2xl tracking-wide">{copy.recAvoidTitle}</legend>
       <p className="mb-4 text-sm text-muted">{copy.recAvoidHint}</p>
+      <p className="mb-3 text-sm font-bold text-ink">{copy.recMoodRefine}</p>
+      <div className="mb-6 flex flex-wrap gap-2">
+        {moodOptions(copy).map((option) => {
+          const selected = mood === option.value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => {
+                onMood(option.value);
+              }}
+              className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 px-4 text-sm font-bold transition ${
+                selected && moodTouched
+                  ? "border-ink bg-ink text-white"
+                  : "border-border-soft bg-white text-ink hover:border-food-orange"
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-col gap-5">
         <div>
           <label htmlFor="rec-avoid" className="mb-2 block text-sm font-bold text-ink">
@@ -510,8 +610,15 @@ export function AvoidStep({
             onChange={(event) => {
               onDraft({ ...draft, avoidRaw: event.target.value });
             }}
-            className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
+            className={`min-h-11 w-full rounded-xl border-2 px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue ${
+              avoidOrigin === "restored" ? "border-ink bg-cream" : "border-border-soft bg-cream"
+            }`}
           />
+          {avoidOrigin === "restored" ? (
+            <p className="mt-2 inline-flex items-center rounded-full border-2 border-ink bg-cream px-3 py-1 text-xs font-bold text-ink">
+              {provenanceLabels.saved}
+            </p>
+          ) : null}
         </div>
         <div>
           <label htmlFor="rec-allergies" className="mb-2 block text-sm font-bold text-ink">

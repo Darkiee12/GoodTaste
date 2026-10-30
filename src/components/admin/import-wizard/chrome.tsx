@@ -24,10 +24,7 @@ export function StepProgress({ copy, stage }: StepProgressProps): ReactNode {
   const stageIndex = STAGES.indexOf(stage);
 
   return (
-    <ol
-      aria-label={copy.adminImportStagesLabel}
-      className="mx-auto flex w-full max-w-3xl flex-wrap gap-2"
-    >
+    <ol aria-label={copy.adminImportStagesLabel} className="flex w-full min-w-0 flex-wrap gap-2">
       {stageLabels(copy).map((entry, index) => {
         const done = index < stageIndex;
         const current = entry.stage === stage;
@@ -71,7 +68,7 @@ export function StageCard({ children, label, live, title }: StageCardProps): Rea
     <section
       aria-label={label}
       aria-live={live === true ? "polite" : undefined}
-      className="mx-auto mt-4 w-full max-w-3xl rounded-2xl border border-border-soft bg-white p-6"
+      className="w-full min-w-0 rounded-2xl border border-border-soft bg-white p-6 sm:p-8"
     >
       <h2
         ref={headingRef}
@@ -87,8 +84,62 @@ export function StageCard({ children, label, live, title }: StageCardProps): Rea
 
 export function ActionFooter({ children }: { readonly children: ReactNode }): ReactNode {
   return (
-    <div className="mt-6 flex min-h-11 flex-wrap items-center gap-3 border-t border-border-soft pt-4">
+    <div className="mt-6 flex min-w-0 flex-wrap items-center gap-3 border-t border-border-soft pt-4">
       {children}
     </div>
+  );
+}
+
+/**
+ * Consistent two-column stage composition: the working surface fills the
+ * wizard width while guidance/schema notes sit in a capped aside on
+ * desktop and stack below on mobile. Single column when no aside is given.
+ */
+export function StageColumns({
+  aside,
+  main,
+}: {
+  readonly aside?: ReactNode;
+  readonly main: ReactNode;
+}): ReactNode {
+  if (aside === undefined) {
+    return <div className="min-w-0">{main}</div>;
+  }
+
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
+      <div className="min-w-0">{main}</div>
+      <div className="min-w-0">
+        <div className="rounded-xl border border-border-soft bg-cream/60 p-4 lg:sticky lg:top-4">
+          {aside}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Determinate progress with a natively reduced-motion-safe rendering: the
+ * `progress` element jumps between values with no author animation.
+ */
+export function ProgressBar({
+  label,
+  max,
+  value,
+}: {
+  readonly label: string;
+  readonly max: number;
+  readonly value: number;
+}): ReactNode {
+  const safeMax = max > 0 ? max : 0;
+  const safeValue = Math.min(Math.max(value, 0), safeMax);
+
+  return (
+    <progress
+      aria-label={label}
+      max={safeMax}
+      value={safeValue}
+      className="h-3 w-full min-w-0 appearance-none overflow-hidden rounded-full bg-cream [&::-webkit-progress-bar]:bg-cream [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-brand-blue [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-brand-blue"
+    />
   );
 }

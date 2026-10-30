@@ -1,5 +1,5 @@
 import { OrthographicCamera } from "@react-three/drei";
-import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type RootState, type ThreeEvent } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 
@@ -128,7 +128,11 @@ function FrameloopGate() {
   return null;
 }
 
-/** Reports the first rendered frame once so the canvas wrapper can fade in. */
+/**
+ * Reports the first rendered frame once so the canvas wrapper can fade in.
+ * The earth texture is created synchronously in useGlobeAssets before this
+ * first frame, so first-frame-ready implies the texture is already uploaded.
+ */
 function FirstFrameReady({ onReady }: { onReady: () => void }) {
   const done = useRef(false);
 
@@ -333,7 +337,11 @@ function GlobeWorld({
   );
 }
 
-/** Lazy, client-only globe experience: WebGL scene plus the DOM food overlay. */
+/**
+ * Lazy, client-only globe experience: WebGL scene plus the DOM food overlay.
+ * Owns the single static layer (Stage C): GlobeFallback stays mounted over
+ * WebGL and crossfades out 700ms after the first frame, then unmounts.
+ */
 export function GlobeScene({
   copy,
   lang,
@@ -360,9 +368,25 @@ export function GlobeScene({
   const popupsRef = useRef<GlobePopupNodes>(new Map());
   const [ready, setReady] = useState(false);
   const [showStatic, setShowStatic] = useState(true);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   const handleReady = useCallback(() => {
     setReady(true);
+  }, []);
+
+  // Stage D: a lost GL context (blocked GPU, exhausted contexts) never yields
+  // frames, so FirstFrameReady would never fire and leave an empty slot.
+  // Listen for the canvas context-loss event and fall back to the static
+  // planet permanently instead.
+  const handleCreated = useCallback((state: RootState) => {
+    state.gl.domElement.addEventListener(
+      "webglcontextlost",
+      (event) => {
+        event.preventDefault();
+        setWebglFailed(true);
+      },
+      { once: true },
+    );
   }, []);
 
   useEffect(() => {
@@ -385,11 +409,14 @@ export function GlobeScene({
     return <GlobeFallback label={copy.globeStaticLabel} />;
   }
 
+  if (webglFailed) {
+    return <GlobeFallback label={copy.globeStaticLabel} />;
+  }
+
   return (
     <>
       {showStatic ? (
         <div
-          aria-hidden="true"
           className={`absolute inset-0 transition-opacity duration-700 ease-out ${ready ? "opacity-0" : "opacity-100"}`}
         >
           <GlobeFallback label={copy.globeStaticLabel} />
@@ -405,6 +432,7 @@ export function GlobeScene({
           frameloop="always"
           gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
           camera={{ position: [0, 0, 10], near: 0.1, far: 60 }}
+          onCreated={handleCreated}
         >
           <GlobeWorld
             bridgeRef={bridgeRef}

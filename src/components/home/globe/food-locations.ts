@@ -102,9 +102,9 @@ function toFoodLocation(raw: RawDish): FoodLocation {
 const rawDishes: { dishes: Array<RawDish> } = dishData;
 
 /**
- * Every curated dish, loaded from the co-located JSON so the list can be
- * bulk-edited without touching code. Five cities per country: native name
- * first, English name second on the globe.
+ * Every curated dish-city anchor, loaded from the co-located JSON so the
+ * list can be bulk-edited without touching code. Each entry carries a
+ * native name and an English name for the globe.
  */
 export const FOOD_LOCATIONS: Array<FoodLocation> = rawDishes.dishes.map(toFoodLocation);
 

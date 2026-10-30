@@ -55,10 +55,23 @@ for curation; public `getDish` still resolves published dishes only.
   apply claim; re-entrant resume skips already-processed rows) and seeds
   first-party `source_providers` rows (`manual`, `partner`, `community`,
   `other`) so normal registry imports always resolve provenance.
+- `V20261030_003` adds batching progress without new lifecycle states:
+  `catalog_import_jobs` gains `staged_count` (doubles as the stage cursor),
+  `applied_count`, `skipped_count`, `apply_failed_count`;
+  `catalog_import_records` gains `record_index` (global 0-based position,
+  partial UNIQUE `(job_id, record_index)` — the idempotency key) and
+  `record_slug` (indexed, for the global duplicate scan). Status CHECK
+  unchanged: `staged` doubles as "open for appends while
+  staged_count < total_records".
 - New purpose-specific Reylo queries: `admin-dishes-by-status`,
   `admin-dishes-recent`, `admin-dishes-missing-ingredients-count`,
   `admin-import-jobs-by-status`, `admin-import-jobs-recent`,
-  `admin-import-job-find`, `admin-import-records-by-job` (string IDs for JSON).
+  `admin-import-job-find`, `admin-import-records-by-job` (string IDs for JSON),
+  plus batching queries `import-job-lock`, `import-job-update-stage`,
+  `import-job-update-apply`, `import-record-slugs-by-job`,
+  `import-records-pending-by-job` (apply window, `valid` only),
+  `import-records-page-by-job` (keyset issues page),
+  `import-records-count-by-job`, `import-record-insert-staged`.
 
 ## Import lifecycle (current scope)
 
@@ -73,17 +86,95 @@ a crashed apply is resumable by re-entry), verifies the stored license
 need plus review/duplicate acknowledgments server-side (persisted with
 the approver identity), writes `source_records` + `dish_sources` links
 per record, and lands dishes in `review`. Job/record rows make progress
-reload-safe; detail polls every 5 s while the job is open.
+reload-safe; detail polls every 5 s while the job is open. Large datasets
+follow the same lifecycle through the batched protocol below — the only
+differences are cursor-driven staging/applying and paginated issues.
 
 CSV places use `ISO[:association]` (`origin` | `associated` |
 `popular`); a bare code means `associated`, never `origin`. CSV parsing
 rejects duplicate headers, ragged rows, and misplaced quotes with
 row numbers. Server-side UTF-8 byte length (not client metadata)
-enforces the 2 MiB upload cap.
+enforces the 16 MiB upload cap; every user-facing size message uses the
+shared `formatFileSize` binary formatter (`src/shared/format-file-size.ts`),
+never raw bytes as the primary label. Blocking upload failures render in
+the reusable `GlobalNotification` portal banner
+(`src/components/ui/global-notification.tsx`, `role="alert"`, `z-[70]`
+above dialogs and the skip link) plus a concise field-level hint with no
+second live region.
+
+- `V20261030_003` adds batching progress without new lifecycle states:
+  `catalog_import_jobs` gains `staged_count` (doubles as the stage cursor),
+  `applied_count`, `skipped_count`, `apply_failed_count`;
+  `catalog_import_records` gains `record_index` (global 0-based position,
+  partial UNIQUE `(job_id, record_index)` — the idempotency key) and
+  `record_slug` (indexed, for the global duplicate scan). Status CHECK
+  unchanged: `staged` doubles as "open for appends while
+  staged_count < total_records".
+
+## Import batching (implemented)
+
+- **Decision: one logical job, bounded batches, no dataset-level record
+  guard.** Datasets up to `MAX_BATCHED_IMPORT_RECORDS` (20,000 — headroom
+  past the 10,000-record target and the verified 4,474-record real dataset)
+  import under ONE job id, ONE provenance row, ONE review/apply flow. The
+  old 100-records/job rejection is gone; 100 survives only as
+  `MAX_IMPORT_RECORDS`, the per-call transport bound (transaction size, 60 s
+  server-function budget), not a dataset cap.
+- **Protocol (client drives the cursor, server never holds the file):**
+  `adminImportBeginFn` reserves the job with the declared total (same
+  `<sourceId>:<license>` provenance convention as single-shot);
+  `adminImportStageBatchFn` appends one window (`baseIndex` must equal the
+  server's `staged_count` cursor) and validates it in a single short
+  transaction; the final batch flips the job to `validated` (≥1 valid) or
+  `failed`. `adminImportApplyBatchFn` applies one window of `valid` rows per
+  call until the report says `done`. `adminImportJobIssuesFn` pages staged
+  records keyset-style (`limit` + `cursor`, optional status filter) with
+  per-status totals — the Issues review never loads the whole set.
+- **Global duplicate detection without full materialization:** each stage
+  batch is checked three ways — in-batch map (≤100 rows), one indexed
+  `record_slug` scan over already-staged rows for the job (persisted
+  findings, no payload parsing in memory), and the live catalog slug lookup
+  — so the same slug in batch 1 and batch 3 is caught. Collisions mark the
+  later row `invalid` with the earlier ref named; the later row keeps the
+  slug in `record_slug` for the global finding but takes a suffixed
+  `external_ref` (`<slug>#record-<index>`, `#` being impossible in real
+  slugs) because `(job_id, external_ref)` is UNIQUE. Staging continues
+  past collisions.
+- **Idempotent retry / resume:** `record_index` uniqueness makes a retried
+  batch conflict instead of duplicating; a batch fully below the cursor
+  replays as current progress without writing; a partially overlapping
+  batch is a typed conflict naming the exact cursor. Each batch commits
+  atomically, so a crash leaves no half-written window. Apply selects only
+  `valid` rows in original order, so resume never replays applied rows. A
+  concurrent apply colliding with a live batch fails fast with a typed
+  conflict (non-blocking try-lock on the job row — exactly one winner),
+  while sequential batches, crash resumes, and post-completion repeats
+  never contend and proceed. Counters (`staged/applied/skipped/failed`)
+  persist per batch; `valid_records`/`invalid_records` stay frozen at
+  validation values.
+- **Honest partial failure:** apply is no longer all-or-nothing — the batch
+  report carries per-call `applied`/`skippedDuplicate`/`failed` plus
+  `done`/`pending`, and the job row accumulates the same. Acknowledgement
+  pre-scan runs BEFORE any write in a batch, so a batch never leaves a
+  half-applied window behind an ack failure. Review/apply gates are
+  unchanged: apply requires `validated`, license + review acks are
+  re-verified server-side on every batch call, and per-duplicate
+  acknowledgement is still explicit. Past `done`, re-entry is a typed
+  conflict (exactly-once holds: no row can apply twice, and the caller
+  learns the terminal state from the conflict reason).
+- **Compatibility:** `importJobStatusSchema` keeps its five states and
+  `MAX_IMPORT_RECORDS` keeps its value (now documented as the per-call
+  bound), so routes, wizard, and existing tests are unaffected. The
+  single-shot `validateImport`/`applyImport` paths still work; `applyImport`
+  is now one bounded batch reporting `done`/`pending` (small jobs finish in
+  one call exactly as before).
 
 ## Known limitations (follow-up)
 
-- Apply is synchronous and bounded (100 records/job); no background worker yet.
+- Apply is synchronous and cursor-driven (100 rows/batch/client loop); no
+  background worker yet. Very large applies need the wizard loop to run to
+  `done` — a closed tab mid-apply leaves the job resumable in `applying`,
+  never half-claimed.
 - No per-record skip or merge/update actions (disabled in UI with reasons).
 - Provenance needs a matching `source_providers` row; unknown sources skip
   writes rather than inventing providers.

@@ -1229,6 +1229,16 @@ export const DishMediaServiceLive = Layer.effect(
             return view;
           }
 
+          // Review is mandatory: drafts carry unvetted metadata and must
+          // pass submitForReview before they can go public. reviewed_at
+          // records submission-for-review time; approval time is
+          // published_at, set below.
+          if (row.status !== "review") {
+            return yield* new DishMediaConflict({
+              reason: `photo is ${row.status}; submit it for review before publishing`,
+            });
+          }
+
           if (reasons.length > 0) {
             return yield* new DishMediaPublishBlocked({ mediaId, reasons });
           }
@@ -1280,6 +1290,12 @@ export const DishMediaServiceLive = Layer.effect(
 
           const row = yield* loadPhoto(mediaId);
 
+          // Withdrawing a published photo revokes a public delivery URL:
+          // same bar as publishing, not plain import.
+          if (row.status === "published") {
+            yield* authorization.require(actor, { resource: "food", actions: ["publish"] });
+          }
+
           if (row.status === "draft") {
             const views = yield* listViews(BigInt(row.dish_id));
             const view = views.find((entry) => entry.id === row.id);
@@ -1317,6 +1333,15 @@ export const DishMediaServiceLive = Layer.effect(
           const authorization = yield* Authorization;
 
           yield* authorization.require(actor, { resource: "food", actions: ["import"] });
+
+          // loadPhoto first: deleting a published photo revokes a public
+          // delivery URL, so it needs the publish bar, not plain import.
+          // The row must exist to decide; missing rows still 404 below.
+          const existing = yield* loadPhoto(mediaId);
+
+          if (existing.status === "published") {
+            yield* authorization.require(actor, { resource: "food", actions: ["publish"] });
+          }
 
           const id = parseDishId(mediaId);
 
@@ -1376,9 +1401,10 @@ export const DishMediaServiceLive = Layer.effect(
           } else {
             const actor = yield* CurrentActor;
             const authorization = yield* Authorization;
-            const userId = yield* memberUserId(actor);
 
-            void userId;
+            // Member-only preview: Guest fails here, so only signed-in
+            // members holding food:read reach stored bytes.
+            yield* memberUserId(actor);
             yield* authorization.require(actor, { resource: "food", actions: ["read"] });
 
             if (row.processing !== "ready") {
