@@ -56,27 +56,44 @@ export const contributionViewSchema = z.object({
     promoted_menu_id: z.uuid().nullable(),
     scan_status: z.string(),
     expires_at: z.string(),
-    consent_terms: z.string().optional(),
-    consented_at: z.string().optional(),
+    consent_terms: z.string(),
+    consented_at: z.string(),
     reviewed_by: z.string().nullable().optional(),
     reviewed_at: z.string().nullable().optional(),
     review_notes: z.string().nullable().optional(),
   }),
   document: menuScanDocumentSchema,
+  duplicates: z.array(
+    z.object({ asset_id: z.uuid(), contribution_count: z.number().int().min(0) }),
+  ),
   assets: scanAssetsSchema,
+  menus: z.array(
+    z.object({
+      menu_id: z.uuid(),
+      asset_id: z.uuid(),
+      is_primary: z.boolean(),
+    }),
+  ),
 });
 
 export type ContributionView = z.infer<typeof contributionViewSchema>;
 
 export class MenuScanClientError extends Error {
+  readonly failure: z.infer<typeof clientFailureSchema> | undefined;
   readonly retryable: boolean;
   readonly retryAfterSeconds: number | null;
 
-  constructor(message: string, retryable: boolean, retryAfterSeconds: number | null = null) {
+  constructor(
+    message: string,
+    retryable: boolean,
+    retryAfterSeconds: number | null = null,
+    failure?: z.infer<typeof clientFailureSchema>,
+  ) {
     super(message);
     this.name = "MenuScanClientError";
     this.retryable = retryable;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.failure = failure;
   }
 }
 
@@ -104,6 +121,7 @@ async function decodeResponse<A>(response: Response, schema: z.ZodType<A>): Prom
         failure.data.message,
         failure.data.retryable,
         failure.data.retryAfterSeconds,
+        failure.data,
       );
     throw new MenuScanClientError(
       "This request could not be completed. Please retry.",

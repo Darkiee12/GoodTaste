@@ -26,6 +26,7 @@ import menuStatusQuery from "@/modules/restaurant-discovery/server/repository/sq
 import menuQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-menu.sql";
 import priceQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-price.sql";
 import publishReviewedItem from "@/modules/restaurant-discovery/server/repository/sql/admin-publish-reviewed-item.sql";
+import publishReviewedVariant from "@/modules/restaurant-discovery/server/repository/sql/admin-publish-reviewed-variant.sql";
 import receiptQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-receipt.sql";
 import reviewEvidence from "@/modules/restaurant-discovery/server/repository/sql/admin-review-evidence.sql";
 import reviewPrice from "@/modules/restaurant-discovery/server/repository/sql/admin-review-price.sql";
@@ -246,6 +247,7 @@ export const importMenu = Effect.fn("restaurants.importMenu")(function* (request
           id: input.menuId ?? crypto.randomUUID(),
           venue: input.venueId,
           name: input.menuName,
+          source_language: input.sourceLanguage ?? null,
         }),
       );
 
@@ -263,6 +265,11 @@ export const importMenu = Effect.fn("restaurants.importMenu")(function* (request
             menu: menu.id,
             name: item.name,
             description: item.description,
+            source: source.id,
+            translation_language: item.translation?.language ?? null,
+            translated_name: item.translation?.name ?? null,
+            translated_description: item.translation?.description ?? null,
+            explanation: item.translation?.explanation ?? null,
           }),
         );
 
@@ -296,6 +303,8 @@ export const importMenu = Effect.fn("restaurants.importMenu")(function* (request
               item: createdItem.id,
               name: variant.name,
               comparison: variant.comparisonKey ?? null,
+              translation_language: variant.translation?.language ?? null,
+              translated_label: variant.translation?.label ?? null,
             }),
           );
 
@@ -316,6 +325,7 @@ export const importMenu = Effect.fn("restaurants.importMenu")(function* (request
               line: price.sourceLineKey,
               kind: price.kind,
               amount: price.amount,
+              raw_text: price.rawText ?? null,
               currency: price.currency,
               channel: price.channel,
               tax: price.taxTreatment,
@@ -381,6 +391,9 @@ export const reviewObservation = Effect.fn("restaurants.reviewObservation")(func
         });
 
       if (input.status === "approved") {
+        yield* runQuery("restaurants/publish-reviewed-variant", (sql) =>
+          publishReviewedVariant.run(sql, { id: input.id, kind: input.kind }),
+        );
         yield* runQuery("restaurants/publish-reviewed-item", (sql) =>
           publishReviewedItem.run(sql, { id: input.id, kind: input.kind }),
         );
@@ -432,7 +445,7 @@ export const setOfferingStatus = Effect.fn("restaurants.setOfferingStatus")(func
 ) {
   const actorId = yield* authorize("manage");
 
-  if (input.kind === "item" && input.status === "published") yield* authorize("review");
+  if (input.status === "published") yield* authorize("review");
 
   return yield* withTransaction(
     "restaurants/offering-status",

@@ -4,6 +4,10 @@ import { Data, Effect, Exit } from "effect";
 import { type z } from "zod";
 
 import {
+  menuDocumentFitsStorage,
+  validateMenuRevision,
+} from "@/modules/restaurant-discovery/menu-scan-revision";
+import {
   contributeScanSchema,
   createScanSchema,
   menuScanDocumentSchema,
@@ -34,7 +38,7 @@ import insertRevision from "@/modules/restaurant-discovery/server/repository/sql
 import revisionQuery from "@/modules/restaurant-discovery/server/repository/sql/scan-revision.sql";
 import { withTransaction } from "@/server/database/client";
 import { runQuery } from "@/server/database/query";
-import { MenuExtractor } from "@/server/integrations/muse-menu";
+import { InvalidModelOutput, MenuExtractor } from "@/server/integrations/muse-menu";
 import { PrivateMenuStorage, validateMenuImage } from "@/server/integrations/private-menu-storage";
 
 /** Constructed only by the verified session/capability transport boundary. */
@@ -198,6 +202,7 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
           session_id: scanId,
           key,
           page_number: pageNumber,
+          bytes: image.byteLength,
         }),
       );
     }),
@@ -395,6 +400,13 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
           ),
         };
 
+        if (!menuDocumentFitsStorage(document)) {
+          return yield* new InvalidModelOutput({
+            reason: "The extracted menu is too large. Retry with fewer pages.",
+            retryable: false,
+          });
+        }
+
         yield* withTransaction(
           "menu/complete-extraction",
           Effect.gen(function* () {
@@ -432,50 +444,11 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
   );
 });
 
-/** Corrections retain server-owned identities and page provenance. */
-export function validateMenuRevision(previous: MenuScanDocument, next: MenuScanDocument): boolean {
-  if (
-    next.targetLanguage !== previous.targetLanguage ||
-    JSON.stringify(next.pages) !== JSON.stringify(previous.pages) ||
-    next.items.length !== previous.items.length
-  )
-    return false;
-
-  const pages = new Set(previous.pages.map((page) => page.assetId));
-  const items = new Map(previous.items.map((item) => [item.id, item]));
-  const seen = new Set<string>();
-
-  for (const item of next.items) {
-    const original = items.get(item.id);
-
-    if (
-      original === undefined ||
-      seen.has(item.id) ||
-      item.variants.length !== original.variants.length
-    )
-      return false;
-
-    seen.add(item.id);
-    const variants = new Set(original.variants.map((variant) => variant.id));
-    const variantIds = new Set<string>();
-
-    for (const variant of item.variants) {
-      if (!variants.has(variant.id) || variantIds.has(variant.id)) return false;
-
-      variantIds.add(variant.id);
-    }
-
-    const references = new Set<string>();
-
-    for (const reference of item.sourceReferences) {
-      if (!pages.has(reference.assetId) || references.has(reference.assetId)) return false;
-
-      references.add(reference.assetId);
-    }
-  }
-
-  return true;
-}
+/**
+ * Corrections retain server-owned identities and page provenance, but may
+ * repair AI omissions: items and variants can be added (flagged
+ * customerAdded) or removed. Counts are no longer frozen.
+ */
 
 export const reviseMenuScan = Effect.fn("menu.revise")(function* (
   principal: ScanPrincipal,
@@ -506,12 +479,35 @@ export const reviseMenuScan = Effect.fn("menu.revise")(function* (
         });
       }
 
+      const previousItems = new Map(previous.items.map((item) => [item.id, item]));
+
+      const document = {
+        ...input.document,
+        items: input.document.items.map((item) => {
+          const existing = previousItems.get(item.id);
+          const existingVariants = new Set(existing?.variants.map((variant) => variant.id) ?? []);
+
+          return {
+            ...item,
+            id: existing === undefined ? randomUUID() : item.id,
+            variants: item.variants.map((variant) => ({
+              ...variant,
+              id: existingVariants.has(variant.id) ? variant.id : randomUUID(),
+            })),
+          };
+        }),
+      };
+
+      if (!menuDocumentFitsStorage(document)) {
+        yield* new ScanInputError({ reason: "The corrected menu is too large to save." });
+      }
+
       const revision = input.expectedRevision + 1;
       yield* runQuery("menu/customer-revision", (sql) =>
         insertRevision.run(sql, {
           session_id: input.scanId,
           revision,
-          document: input.document,
+          document,
           origin: "customer",
           model: null,
           user_id: principal.userId,
@@ -567,6 +563,7 @@ export const submitMenuContribution = Effect.fn("menu.contribute")(function* (
         contribute.run(sql, {
           session_id: input.scanId,
           revision: input.revision,
+          submitted_revision: input.revision,
           venue_id: input.venueId,
         }),
       );
@@ -617,3 +614,5 @@ export const deleteMenuScan = Effect.fn("menu.delete")(function* (
 
   return { deleted: true as const };
 });
+
+export { validateMenuRevision } from "@/modules/restaurant-discovery/menu-scan-revision";

@@ -135,7 +135,8 @@ function AppLayout() {
     capabilities.imports ||
     capabilities.reviews ||
     capabilities.members ||
-    capabilities.roles;
+    capabilities.roles ||
+    capabilities.restaurants;
 
   // First visit only: default to the browser's language when it is a fully
   // translated UI locale. Manual picks are remembered and never overridden;
@@ -271,6 +272,20 @@ function AppLayout() {
                     className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
                   >
                     {copy.ctaRecommend}
+                  </Link>
+                  <Link
+                    to="/restaurants"
+                    search={{ lang }}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.navRestaurants}
+                  </Link>
+                  <Link
+                    to="/scan"
+                    search={{ lang }}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.navScanMenu}
                   </Link>
                   {hasAdminSurface ? (
                     <Link

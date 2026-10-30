@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   exchangeRatesFn,
@@ -14,9 +14,12 @@ const rootRoute = getRouteApi("__root__");
 
 export const currencyPreferenceKey = (userId: string) => ["currency-preference", userId];
 
-const localCurrency = () => {
+const currencyStorageKey = (userId: string | null) =>
+  userId === null ? "feastjourney.currency" : `feastjourney.currency:${userId}`;
+
+const localCurrency = (userId: string | null) => {
   try {
-    const saved = localStorage.getItem("feastjourney.currency");
+    const saved = localStorage.getItem(currencyStorageKey(userId));
 
     return saved !== null && isCurrency(saved) ? saved : "";
   } catch {
@@ -38,9 +41,19 @@ export function usePreferredCurrency() {
   const client = useQueryClient();
   const { session } = rootRoute.useRouteContext();
   const userId = session.status === "signed-in" ? session.user.id : null;
-  const local = useSyncExternalStore(subscribeToCurrency, localCurrency, () => "");
+
+  const local = useSyncExternalStore(
+    subscribeToCurrency,
+    () => localCurrency(userId),
+    () => "",
+  );
+
   const [choice, setChoice] = useState<{ owner: string | null; currency: string }>();
   const [storageError, setStorageError] = useState(false);
+  // A currency change made before the account-preference query resolved must
+  // still reach the server once ownership is confirmed. Never flush across
+  // accounts: the pending entry is dropped when it names another owner.
+  const pendingSave = useRef<{ owner: string; code: string } | null>(null);
 
   const account = useQuery({
     queryKey: currencyPreferenceKey(userId ?? "signed-out"),
@@ -66,10 +79,28 @@ export function usePreferredCurrency() {
       client.invalidateQueries({ queryKey: currencyPreferenceKey(saved.userId) }),
   });
 
-  const confirmedCurrency =
-    account.status === "success" && account.data.userId === userId ? account.data.currency : null;
+  let currency = local;
 
-  const currency = choice?.owner === userId ? choice.currency : (confirmedCurrency ?? local);
+  if (userId !== null && account.status === "success" && account.data.userId === userId) {
+    currency = account.data.currency ?? "";
+  }
+
+  if (choice?.owner === userId) currency = choice.currency;
+
+  useEffect(() => {
+    const pending = pendingSave.current;
+
+    if (pending === null || userId === null || pending.owner !== userId) {
+      pendingSave.current = null;
+
+      return;
+    }
+
+    if (account.status === "success" && account.data.userId === userId && !save.isPending) {
+      pendingSave.current = null;
+      save.mutate({ currency: pending.code === "" ? null : pending.code, userId });
+    }
+  });
 
   return {
     currency,
@@ -83,14 +114,15 @@ export function usePreferredCurrency() {
       setChoice({ owner: userId, currency: code });
 
       try {
-        localStorage.setItem("feastjourney.currency", code);
+        localStorage.setItem(currencyStorageKey(userId), code);
         window.dispatchEvent(new Event("feastjourney-currency"));
       } catch {
         setStorageError(true);
       }
 
-      if (userId !== null && account.data?.userId === userId)
+      if (userId !== null && account.status === "success" && account.data.userId === userId)
         save.mutate({ currency: code === "" ? null : code, userId });
+      else if (userId !== null) pendingSave.current = { owner: userId, code };
     },
   };
 }

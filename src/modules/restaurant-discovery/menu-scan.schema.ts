@@ -1,21 +1,30 @@
 import { z } from "zod";
 
-import { amountSchema, currencySchema } from "@/modules/restaurant-discovery/restaurant.schema";
+import {
+  amountSchema,
+  currencySchema,
+  channelSchema,
+} from "@/modules/restaurant-discovery/restaurant.schema";
 
 export const menuLanguages = ["en", "vi", "ja", "zh", "ko", "fr", "es"] as const;
 export const menuLanguageSchema = z.enum(menuLanguages);
-const text = z.string().trim().min(1).max(300);
-const description = z.string().trim().min(1).max(3000).nullable();
+
+const menuText = z.string().refine((value) => !value.includes("\u0000") && value.isWellFormed(), {
+  message: "Menu text must contain valid Unicode without null characters.",
+});
+
+const text = menuText.trim().min(1).max(300);
+const description = menuText.trim().min(1).max(3000).nullable();
 
 export const scanPriceSchema = z.strictObject({
-  rawText: z.string().max(200),
+  rawText: menuText.max(200),
   amount: amountSchema.nullable(),
   currency: currencySchema.nullable(),
   taxTreatment: z.enum(["included", "excluded", "unknown"]),
 });
 
 const extractedVariant = z.strictObject({
-  originalLabel: z.string().max(200),
+  originalLabel: menuText.max(200),
   translatedLabel: text.nullable(),
   price: scanPriceSchema.nullable(),
 });
@@ -47,7 +56,7 @@ const extractedItem = z.strictObject({
     )
     .min(1)
     .max(6),
-  uncertainties: z.array(z.string().min(1).max(500)).max(20),
+  uncertainties: z.array(menuText.min(1).max(500)).max(20),
 });
 
 /** AI trust boundary; the provider never supplies application identities. */
@@ -76,8 +85,11 @@ export const menuScanDocumentSchema = menuExtractionSchema.extend({
     .array(
       extractedItem.extend({
         id: z.uuid(),
+        // Customer repair marker: model output never carries this flag, so any
+        // item or variant bearing it was added by the customer, not extracted.
+        customerAdded: z.boolean().optional(),
         variants: z
-          .array(extractedVariant.extend({ id: z.uuid() }))
+          .array(extractedVariant.extend({ id: z.uuid(), customerAdded: z.boolean().optional() }))
           .min(1)
           .max(20),
       }),
@@ -109,10 +121,12 @@ export const contributeScanSchema = scanIdSchema.extend({
 export const scanReviewSchema = z.strictObject({
   contributionId: z.uuid(),
   decision: z.enum(["approved", "rejected"]),
+  channel: channelSchema.nullable(),
+  rightsReviewed: z.boolean(),
   venueId: z.uuid().nullable(),
   observedAt: z.iso.datetime({ offset: true }),
   validUntil: z.iso.datetime({ offset: true }),
-  notes: z.string().trim().min(1).max(2000),
+  notes: menuText.trim().min(1).max(2000),
   // Review is selective: accepting a submission never approves every extracted price.
   itemIds: z.array(z.uuid()).max(100),
   pricedVariantIds: z.array(z.uuid()).max(200),

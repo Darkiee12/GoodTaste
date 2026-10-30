@@ -228,17 +228,27 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
             reason: "Menu analysis is not enabled for this deployment.",
           });
 
-        return Response.json(yield* createMenuScan(principal, input), { headers });
+        const { action: _action, ...command } = input;
+
+        return Response.json(yield* createMenuScan(principal, command), { headers });
       }
 
       case "get":
         return Response.json(yield* getMenuScan(principal, input.scanId), { headers });
       case "extract":
         return Response.json(yield* extractMenu(principal, input.scanId, requestId), { headers });
-      case "revise":
-        return Response.json(yield* reviseMenuScan(principal, input), { headers });
-      case "contribute":
-        return Response.json(yield* submitMenuContribution(principal, input), { headers });
+      case "revise": {
+        const { action: _action, ...command } = input;
+
+        return Response.json(yield* reviseMenuScan(principal, command), { headers });
+      }
+
+      case "contribute": {
+        const { action: _action, ...command } = input;
+
+        return Response.json(yield* submitMenuContribution(principal, command), { headers });
+      }
+
       case "claim":
         return Response.json(yield* claimGuestMenuScan(principal, input.scanId), { headers });
       case "delete":
@@ -249,8 +259,12 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
         return Response.json(yield* withActor(actor, getMenuContribution(input.contributionId)), {
           headers,
         });
-      case "review":
-        return Response.json(yield* withActor(actor, reviewMenuContribution(input)), { headers });
+      case "review": {
+        const { action: _action, ...command } = input;
+
+        return Response.json(yield* withActor(actor, reviewMenuContribution(command)), { headers });
+      }
+
       default:
         return yield* new ScanInputError({ reason: "Unsupported menu action." });
     }

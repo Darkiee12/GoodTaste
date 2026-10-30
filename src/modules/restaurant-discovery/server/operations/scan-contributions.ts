@@ -18,7 +18,10 @@ import {
   ScanNotFound,
 } from "@/modules/restaurant-discovery/server/operations/menu-scans";
 import assetsQuery from "@/modules/restaurant-discovery/server/repository/sql/scan-assets.sql";
+import contributionDuplicates from "@/modules/restaurant-discovery/server/repository/sql/scan-contribution-duplicates.sql";
 import contributionLock from "@/modules/restaurant-discovery/server/repository/sql/scan-contribution-lock.sql";
+import promotionMenu from "@/modules/restaurant-discovery/server/repository/sql/scan-contribution-menu-insert.sql";
+import contributionMenus from "@/modules/restaurant-discovery/server/repository/sql/scan-contribution-menus.sql";
 import contributionsQuery from "@/modules/restaurant-discovery/server/repository/sql/scan-contributions.sql";
 import privateAssets from "@/modules/restaurant-discovery/server/repository/sql/scan-private-assets.sql";
 import priorPromotion from "@/modules/restaurant-discovery/server/repository/sql/scan-promoted.sql";
@@ -74,7 +77,15 @@ export const getMenuContribution = Effect.fn("menu.getContribution")(function* (
 
       const document = yield* loadMenuScanDocument(contribution.session_id, contribution.revision);
 
-      return { contribution, assets, document };
+      const menus = yield* runQuery("menu/contribution-menus", (sql) =>
+        contributionMenus.run(sql, { id: contribution.id }),
+      );
+
+      const duplicates = yield* runQuery("menu/contribution-duplicates", (sql) =>
+        contributionDuplicates.run(sql, { session_id: contribution.session_id }),
+      );
+
+      return { contribution, assets, document, menus, duplicates };
     }),
   );
 });
@@ -141,10 +152,15 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
       let menuId: string | null = null;
 
       if (input.decision === "approved") {
-        if (input.venueId === null || input.itemIds.length === 0)
+        if (
+          input.venueId === null ||
+          input.itemIds.length === 0 ||
+          input.channel === null ||
+          !input.rightsReviewed
+        )
           return yield* new ScanInputError({
             reason:
-              "Approval requires a confirmed restaurant branch and at least one reviewed item.",
+              "Approval requires a confirmed branch, sales channel, private-evidence rights review and at least one reviewed item.",
           });
 
         const venueId = input.venueId;
@@ -174,11 +190,12 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
         if (
           observedAt > Date.now() ||
           validUntil <= observedAt ||
-          validUntil > observedAt + 365 * 86400000
+          validUntil > observedAt + 365 * 86400000 ||
+          validUntil > Date.parse(contribution.retention_until)
         )
           return yield* new ScanInputError({
             reason:
-              "Observation dates must be in the past with a review horizon of at most one year.",
+              "Observation dates must be in the past and the review horizon must end before private evidence expires.",
           });
 
         const document = yield* loadMenuScanDocument(
@@ -190,9 +207,7 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
           privateAssets.run(sql, { session_id: contribution.session_id }),
         );
 
-        const source = assets[0];
-
-        if (source === undefined)
+        if (assets.length === 0)
           return yield* new ScanInputError({
             reason: "Original private photographs are required for review.",
           });
@@ -208,15 +223,29 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
             reason: "Each reviewed item or price may be selected only once.",
           });
 
-        const items: MenuImport["items"] = [];
+        const byAssetId = new Map(assets.map((asset) => [asset.id, asset]));
+
+        // Group approved items by the first page that supports them, so each
+        // promoted menu's source photograph is the page its items came from.
+        const groups = new Map<string, MenuImport["items"]>();
+        const supportingAssets = new Map<string, Set<string>>();
         const foundItems = new Set<string>();
         const foundPrices = new Set<string>();
-        const assetIds = new Set(assets.map((asset) => asset.id));
 
         for (const item of document.items) {
           if (!selectedItems.has(item.id)) continue;
 
-          if (item.sourceReferences.some((reference) => !assetIds.has(reference.assetId)))
+          if (item.sourceReferences.length === 0)
+            return yield* new ScanInputError({
+              reason: "A selected item has missing private source evidence.",
+            });
+
+          const primary = item.sourceReferences[0];
+
+          if (
+            primary === undefined ||
+            item.sourceReferences.some((reference) => !byAssetId.has(reference.assetId))
+          )
             return yield* new ScanInputError({
               reason: "A selected item has missing private source evidence.",
             });
@@ -236,9 +265,10 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
 
               reviewedPrice = {
                 amount: price.amount,
+                rawText: price.rawText,
                 currency: price.currency,
                 kind: "listed",
-                channel: "dine_in",
+                channel: input.channel,
                 taxTreatment: price.taxTreatment,
                 sourceLineKey: variant.id,
               };
@@ -247,16 +277,29 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
 
             variants.push({
               name: variant.originalLabel === "" ? "As listed" : variant.originalLabel,
+              translation: { language: document.targetLanguage, label: variant.translatedLabel },
               price: reviewedPrice,
             });
           }
 
-          items.push({
+          const group = groups.get(primary.assetId) ?? [];
+          group.push({
             name: item.originalName,
             description: item.originalDescription ?? "",
+            translation: {
+              language: document.targetLanguage,
+              name: item.translatedName,
+              description: item.translatedDescription,
+              explanation: item.explanatorySummary,
+            },
             matchKind: "suggestion",
             variants,
           });
+          groups.set(primary.assetId, group);
+          const supports = supportingAssets.get(primary.assetId) ?? new Set<string>();
+
+          for (const reference of item.sourceReferences) supports.add(reference.assetId);
+          supportingAssets.set(primary.assetId, supports);
         }
 
         if (foundItems.size !== selectedItems.size || foundPrices.size !== selectedPrices.size)
@@ -265,36 +308,72 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
               "Review selections must belong to this exact submitted revision and its selected items.",
           });
 
-        const imported = yield* importMenu({
-          venueId,
-          menuName: document.menuTitle ?? "Reviewed menu",
-          source: {
-            category: "menu_photo",
-            privateObjectKey: source.object_key,
-            deduplicationKey: `menu-contribution:${contribution.id}`,
-            restaurantVerified: false,
-            observedAt: input.observedAt,
-            validUntil: input.validUntil,
-          },
-          items,
-        });
-
-        for (const priceId of imported.priceIds)
-          yield* reviewObservation({ kind: "price", id: priceId, status: "approved" });
-
-        // Explicitly reviewed items can be published without prices. All variants
-        // remain the reviewed source labels; no canonical dish match is inferred.
-        for (const offering of imported.offeringIds) {
-          yield* setOfferingStatus({ kind: "item", id: offering.itemId, status: "published" });
-          yield* setOfferingStatus({
-            kind: "variant",
-            id: offering.variantId,
-            status: "published",
+        if (groups.size === 0)
+          return yield* new ScanInputError({
+            reason: "Approval requires at least one reviewed item.",
           });
+
+        const menuTitle = document.menuTitle ?? "Reviewed menu";
+        const orderedGroups = [...groups.entries()];
+        let primaryMenuId: string | null = null;
+
+        for (const [index, [assetId, groupItems]] of orderedGroups.entries()) {
+          const asset = byAssetId.get(assetId);
+
+          if (asset === undefined || asset.object_key === null)
+            return yield* new ScanInputError({
+              reason: "A selected item has missing private source evidence.",
+            });
+
+          // Reuse registered private bytes. They retain the original consented
+          // expiry and cleanup lifecycle; no untracked copy or network work in this transaction.
+          const evidenceKey = asset.object_key;
+
+          const imported = yield* importMenu({
+            venueId,
+            menuName: orderedGroups.length === 1 ? menuTitle : `${menuTitle} (p. ${index + 1})`,
+            sourceLanguage: document.sourceLanguage,
+            source: {
+              category: "menu_photo",
+              privateObjectKey: evidenceKey,
+              deduplicationKey: `menu-contribution:${contribution.id}:${assetId}`,
+              restaurantVerified: false,
+              observedAt: input.observedAt,
+              validUntil: input.validUntil,
+            },
+            items: groupItems,
+          });
+
+          for (const priceId of imported.priceIds)
+            yield* reviewObservation({ kind: "price", id: priceId, status: "approved" });
+
+          // Explicitly reviewed items can be published without prices. All variants
+          // remain the reviewed source labels; no canonical dish match is inferred.
+          for (const offering of imported.offeringIds) {
+            yield* setOfferingStatus({ kind: "item", id: offering.itemId, status: "published" });
+            yield* setOfferingStatus({
+              kind: "variant",
+              id: offering.variantId,
+              status: "published",
+            });
+          }
+
+          yield* setMenuStatus({ menuId: imported.menuId, status: "published" });
+          yield* runQuery("menu/promotion-menu", (sql) =>
+            promotionMenu.run(sql, {
+              contribution_id: contribution.id,
+              menu_id: imported.menuId,
+              asset_id: assetId,
+              evidence_key: evidenceKey,
+              is_primary: index === 0,
+              supporting_asset_ids: [...(supportingAssets.get(assetId) ?? new Set<string>())],
+            }),
+          );
+
+          if (index === 0) primaryMenuId = imported.menuId;
         }
 
-        yield* setMenuStatus({ menuId: imported.menuId, status: "published" });
-        menuId = imported.menuId;
+        menuId = primaryMenuId;
       }
 
       const reviewed = yield* runQuery("menu/review-contribution", (sql) =>
@@ -317,6 +396,11 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
         sessionId: null,
         requestId: randomUUID(),
         event: `restaurant.contribution.${input.decision}`,
+        metadata: {
+          channel: input.channel ?? "not_applicable",
+          rightsReviewed: String(input.rightsReviewed),
+          consentTerms: contribution.consent_terms,
+        },
         outcome: "succeeded",
         resource: contribution.id,
       });
