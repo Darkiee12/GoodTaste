@@ -14,6 +14,7 @@ import {
   pickDisplayName,
 } from "@/modules/food-discovery/server/domain/search";
 import { windowForSurprise } from "@/modules/food-discovery/server/domain/surprise-window";
+import { toPublishedImage } from "@/modules/food-discovery/server/operations/dish-media-service";
 import {
   findNearbyDishCandidates,
   NEARBY_MAX_M,
@@ -22,16 +23,16 @@ import {
 import type {
   DishDescriptionRow,
   DishIngredientRow,
-  DishMediaRow,
   DishNameRow,
   DishPlaceRow,
+  DishPublishedMediaRow,
 } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import type { IngredientNameRow } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import type { PlaceNameRow } from "@/modules/food-discovery/server/repository/place-repository";
 import dishDescriptionsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-descriptions-by-dish-ids.sql";
 import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-ingredients-by-dish-ids.sql";
-import dishMediaByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-by-dish-ids.sql";
+import dishMediaPublishedByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-published-by-dish-ids.sql";
 import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
 import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-places-by-dish-ids.sql";
 import dishRecommendationCandidates from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates.sql";
@@ -312,22 +313,33 @@ const groupRowsByDish = <Row>(
 
 const MAX_CARD_INGREDIENTS = 6;
 
+/**
+ * Primary published image for a recommendation card: first by sort_order
+ * from the published + ready projection, with generated delivery URL +
+ * responsive srcSet and alt/attribution/focal preserved. Legacy license is
+ * carried for older card readers; anything without projectable bytes
+ * resolves to null so the card renders its placeholder.
+ */
 const imageFor = (
-  media: ReadonlyArray<DishMediaRow> | undefined,
+  media: ReadonlyArray<DishPublishedMediaRow> | undefined,
   fallbackName: string,
 ): DishCardImage | null => {
   const first = media?.[0];
-  const url = first?.public_url ?? null;
 
-  if (url === null || !url.startsWith("https://")) {
+  if (first === undefined) {
+    return null;
+  }
+
+  const published = toPublishedImage(first);
+
+  if (published === null) {
     return null;
   }
 
   return {
-    alt: first?.alt_text ?? fallbackName,
-    attribution: first?.attribution ?? null,
-    license: first?.license ?? null,
-    url,
+    ...published,
+    alt: published.alt ?? fallbackName,
+    license: first.license ?? null,
   };
 };
 
@@ -408,8 +420,8 @@ const enrichRows = (
     const [mediaRows, nameRows, descriptionRows, dishIngredientRows, dishPlaceRows] =
       yield* Effect.all(
         [
-          runQuery("dish/media-by-ids", (sql) =>
-            dishMediaByDishIds.run(sql, { ids: [...ids], status: "published" }),
+          runQuery("dish/media-published-by-ids", (sql) =>
+            dishMediaPublishedByDishIds.run(sql, { ids: [...ids] }),
           ),
           runQuery("dish/names-by-ids", (sql) => dishNamesByDishIds.run(sql, { ids: [...ids] })),
           runQuery("dish/descriptions-by-ids", (sql) =>
@@ -423,7 +435,9 @@ const enrichRows = (
         { concurrency: "unbounded" },
       );
 
-    const mediaByDish = groupRowsByDish<DishMediaRow>(mediaRows, (row) => row.dish_id);
+    const mediaByDish = groupRowsByDish<DishPublishedMediaRow>(mediaRows, (row) =>
+      BigInt(row.dish_id),
+    );
 
     const namesByDish = groupRowsByDish<DishNameRow>(nameRows, (row) => row.dish_id);
 

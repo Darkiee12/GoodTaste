@@ -6,9 +6,25 @@ import { z } from "zod";
  * preview (name, size, detected records) is never trusted.
  */
 
-export const MAX_IMPORT_FILE_BYTES = 2_000_000;
+export const MAX_IMPORT_FILE_BYTES = 16 * 1024 * 1024;
 
+/**
+ * Transport bound: at most this many records travel in ONE stage/apply
+ * server call. The per-call budget (transaction size, 60 s function budget)
+ * is what this caps — NOT the logical dataset. Batches chain by cursor to
+ * any size up to MAX_BATCHED_IMPORT_RECORDS. Kept at 100 so the existing
+ * single-shot upload path (one transaction per call) stays within its
+ * proven budget.
+ */
 export const MAX_IMPORT_RECORDS = 100;
+
+/**
+ * Logical-import bound: one job id, one provenance row, one review/apply
+ * flow covers at most this many records, staged and applied in bounded
+ * batches. Sized so the verified 4,474-record real dataset (and 2x headroom
+ * beyond the 10,000-record target) imports without splitting files.
+ */
+export const MAX_BATCHED_IMPORT_RECORDS = 20_000;
 
 /**
  * Single source of truth for import-job lifecycle states, mirroring the
@@ -103,6 +119,108 @@ export type AdminImportUpload = z.infer<typeof adminImportUploadSchema>;
 export const adminImportApplySchema = z.object({
   jobId: z.string().regex(/^[0-9]+$/, "job id must be a decimal id string"),
 });
+
+/**
+ * Bulk editorial publish transport (bounded per call):
+ * candidates pages review rows; publish flips at most 50 explicit ids or
+ * one ≤50 job window per call. Both acks are literals so a missing or
+ * false checkbox fails closed at the transport boundary.
+ */
+export const bulkPublishAcksSchema = z.object({
+  editorialAck: z.literal(true),
+  licenseAck: z.literal(true),
+});
+
+export const adminBulkReviewCandidatesSchema = z.object({
+  cursor: z
+    .string()
+    .regex(/^[0-9]+$/, "cursor must be a decimal id string")
+    .default("0"),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  jobId: z
+    .string()
+    .regex(/^[0-9]+$/, "job id must be a decimal id string")
+    .nullish(),
+});
+
+export type AdminBulkReviewCandidates = z.infer<typeof adminBulkReviewCandidatesSchema>;
+
+export const adminBulkPublishSchema = z.object({
+  ids: z
+    .array(z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"))
+    .min(1)
+    .max(50),
+  acks: bulkPublishAcksSchema,
+});
+
+export type AdminBulkPublish = z.infer<typeof adminBulkPublishSchema>;
+
+export const adminBulkPublishJobSchema = z.object({
+  jobId: z.string().regex(/^[0-9]+$/, "job id must be a decimal id string"),
+  cursor: z
+    .string()
+    .regex(/^[0-9]+$/, "cursor must be a decimal id string")
+    .default("0"),
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+  acks: bulkPublishAcksSchema,
+});
+
+export type AdminBulkPublishJob = z.infer<typeof adminBulkPublishJobSchema>;
+
+/**
+ * Batched import protocol (one logical job, bounded calls):
+ * begin reserves the job with the declared total; stageBatch appends one
+ * window of records at baseIndex (must equal the server's staged_count
+ * cursor); applyBatch applies one window of validated rows; issues pages
+ * through staged records without loading them all. The client parses the
+ * file locally and sends each batch once — the full file is never resent.
+ */
+export const adminImportBeginSchema = adminImportSourceSchema.extend({
+  fileName: z.string().trim().min(1).max(300),
+  fileType: z.enum(["json", "csv"]),
+  totalRecords: z.number().int().min(1).max(MAX_BATCHED_IMPORT_RECORDS),
+});
+
+export type AdminImportBegin = z.infer<typeof adminImportBeginSchema>;
+
+export const adminImportStageBatchSchema = z.object({
+  jobId: z.string().regex(/^[0-9]+$/, "job id must be a decimal id string"),
+  baseIndex: z.number().int().min(0),
+  records: z.array(z.unknown()).min(1).max(MAX_IMPORT_RECORDS),
+});
+
+export type AdminImportStageBatch = z.infer<typeof adminImportStageBatchSchema>;
+
+export const adminImportApplyBatchSchema = adminImportApplySchema.extend({
+  approvals: z.object({
+    licenseAck: z.boolean(),
+    reviewAck: z.boolean(),
+    duplicateRefs: z.array(z.string().min(1).max(300)),
+  }),
+  limit: z.coerce.number().int().min(1).max(MAX_IMPORT_RECORDS).default(MAX_IMPORT_RECORDS),
+});
+
+export type AdminImportApplyBatch = z.infer<typeof adminImportApplyBatchSchema>;
+
+export const adminImportIssueStatusSchema = z.enum([
+  "pending",
+  "valid",
+  "invalid",
+  "applied",
+  "skipped_duplicate",
+]);
+
+export const adminImportIssuesQuerySchema = z.object({
+  jobId: z.string().regex(/^[0-9]+$/, "job id must be a decimal id string"),
+  status: adminImportIssueStatusSchema.nullish(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z
+    .string()
+    .regex(/^[0-9]+$/, "cursor must be a decimal id string")
+    .default("0"),
+});
+
+export type AdminImportIssuesQuery = z.infer<typeof adminImportIssuesQuerySchema>;
 
 export const adminDishesQuerySchema = z.object({
   status: z.enum(["draft", "review", "published", "archived"]).default("review"),
@@ -449,9 +567,13 @@ const checkRecordArray = (records: Array<unknown>): Array<unknown> => {
     throw new Error("dataset contains no records");
   }
 
-  if (records.length > MAX_IMPORT_RECORDS) {
+  // Dataset-level guard only: the 100-record single-transaction bound lives
+  // in the stage/apply batch schemas (and the legacy single-shot path), so
+  // large real datasets parse here and travel in bounded batches instead of
+  // being rejected outright.
+  if (records.length > MAX_BATCHED_IMPORT_RECORDS) {
     throw new Error(
-      `dataset has ${records.length} records; at most ${MAX_IMPORT_RECORDS} per import job`,
+      `dataset has ${records.length} records; at most ${MAX_BATCHED_IMPORT_RECORDS} per import job`,
     );
   }
 

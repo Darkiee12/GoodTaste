@@ -41,7 +41,8 @@ export const GLOBE_REVOLUTION_SECONDS = 75;
  * View tilt of the globe group about the X axis, in radians. Negative tips
  * the north pole away from the viewer, bringing the dish band (~15-50N)
  * into the visible cap instead of the Arctic. Validated by a coverage sweep
- * over a full revolution: 11-12 of 16 dishes on desktop, all 16 on mobile.
+ * over a full revolution: a rotating subset of dishes stays visible
+ * depending on viewport width.
  */
 export const AXIAL_TILT_RADIANS = -0.45;
 

@@ -51,6 +51,21 @@ export function DishMedia({
   const figureId = useId();
   const [decoded, setDecoded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [shownKey, setShownKey] = useState<string | null>(null);
+
+  // A mounted instance can receive a different photo (carousel refetch,
+  // re-publish, list reorder reconciled by key): stale decoded/failed flags
+  // would otherwise pin the old skeleton or fallback over the new bytes.
+  // Identity is id + url so alt/focal-only edits keep the decoded image.
+  // State adjustment during render (not an effect): the endorsed reset-on-key
+  // pattern, runs only on the render where the photo actually changed.
+  const imageKey = image === null ? null : `${image.id}:${image.url}`;
+
+  if (shownKey !== imageKey) {
+    setShownKey(imageKey);
+    setDecoded(false);
+    setFailed(false);
+  }
 
   const aspect =
     image !== null && image.width !== null && image.height !== null && image.height > 0
@@ -64,10 +79,10 @@ export function DishMedia({
       style={{ aspectRatio: aspect }}
     >
       <span id={figureId} className="sr-only">
-        {image?.alt ?? unavailableLabel}
+        {image?.alt || unavailableLabel}
       </span>
       {image === null || failed || image.url.length === 0 ? (
-        <DishMediaFallback label={image?.alt ?? unavailableLabel} />
+        <DishMediaFallback label={image?.alt || unavailableLabel} />
       ) : (
         <>
           {decoded ? null : <DishMediaSkeleton label={loadingLabel} />}

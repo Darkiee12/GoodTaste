@@ -18,6 +18,7 @@ import {
   jsonToRecords,
   needsLicenseReview,
 } from "@/modules/food-discovery/admin.schema";
+import { formatFileSize } from "@/shared/format-file-size";
 
 /**
  * Import-wizard client contracts. Pure unit tests — no DB, no server.
@@ -49,7 +50,7 @@ describe("upload helpers", () => {
 
 describe("transport contracts", () => {
   test("size and record limits match the staged pipeline", () => {
-    expect(MAX_IMPORT_FILE_BYTES).toBe(2_000_000);
+    expect(MAX_IMPORT_FILE_BYTES).toBe(16 * 1024 * 1024);
     expect(MAX_IMPORT_RECORDS).toBe(100);
   });
 
@@ -84,6 +85,29 @@ describe("transport contracts", () => {
     const records = jsonToRecords(FEASTJOURNEY_JSON_TEMPLATE);
 
     expect(records.length).toBe(1);
+  });
+});
+
+describe("file-size formatter", () => {
+  test("uses binary units matching the enforced byte limits", () => {
+    expect(formatFileSize(0)).toBe("0 B");
+    expect(formatFileSize(900)).toBe("900 B");
+    expect(formatFileSize(1024)).toBe("1 KiB");
+    expect(formatFileSize(512 * 1024)).toBe("512 KiB");
+    expect(formatFileSize(16 * 1024 * 1024)).toBe("16 MiB");
+    expect(formatFileSize(2_274_836)).toBe("2.2 MiB");
+    expect(formatFileSize(19_084_288)).toBe("18.2 MiB");
+    expect(formatFileSize(1024 * 1024 * 1024)).toBe("1 GiB");
+  });
+
+  test("never throws on hostile input", () => {
+    expect(formatFileSize(-5)).toBe("0 B");
+    expect(formatFileSize(Number.NaN)).toBe("0 B");
+    expect(formatFileSize(Number.POSITIVE_INFINITY)).toBe("0 B");
+  });
+
+  test("the enforced upload limit renders as an exact binary label", () => {
+    expect(formatFileSize(MAX_IMPORT_FILE_BYTES)).toBe("16 MiB");
   });
 });
 

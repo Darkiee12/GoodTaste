@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import { ProgressBar } from "@/components/admin/import-wizard/chrome";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import { ImportStatusBadge } from "@/components/admin/ui";
 import { adminImportJobDetailFn } from "@/modules/food-discovery/admin.functions";
@@ -219,6 +220,35 @@ const payloadSummary = (payloadText: string): string => {
 const countByStatus = (records: ReadonlyArray<JobRecord>, status: JobRecord["status"]): number =>
   records.filter((record) => record.status === status).length;
 
+const jobProgressExtensionSchema = z
+  .object({
+    job: z.object({ processed_records: z.number().optional() }).passthrough(),
+  })
+  .passthrough();
+
+/**
+ * Defensive read of Agent 1's batched progress fields. The loader
+ * schema strips unknown keys, so extensions are parsed from the raw
+ * payload at this boundary: when the server reports `processed_records`,
+ * the progress section uses it; otherwise it falls back to record counts.
+ */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- the raw loader payload is untyped by design; jobProgressExtensionSchema parses it at this boundary and ignores unknown keys.
+const readProcessedRecords = (loaded: unknown): number | null => {
+  const parsed = jobProgressExtensionSchema.safeParse(loaded);
+
+  if (!parsed.success) {
+    return null;
+  }
+
+  const value = parsed.data.job.processed_records;
+
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  return Math.trunc(value);
+};
+
 const recordStatusClass = (status: JobRecord["status"]): string => {
   if (status === "applied") {
     return "border-green-200 bg-green-50 text-green-800";
@@ -388,7 +418,10 @@ function AdminImportDetail() {
   const applied = countByStatus(detail.records, "applied");
   const skipped = countByStatus(detail.records, "skipped_duplicate");
   const failed = countByStatus(detail.records, "invalid");
-  const processed = applied + skipped + failed;
+  const counted = applied + skipped + failed;
+  const jobTotal = detail.job.total_records > 0 ? detail.job.total_records : detail.records.length;
+  const reported = readProcessedRecords(loaded);
+  const processed = Math.min(reported ?? counted, jobTotal);
   const total = detail.records.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
@@ -414,7 +447,7 @@ function AdminImportDetail() {
 
   return (
     // The admin shell provides the page container; this view owns content only.
-    <div>
+    <div className="min-w-0">
       <ImportJobHeader
         jobId={detail.job.id}
         lang={lang}
@@ -444,7 +477,7 @@ function AdminImportDetail() {
       >
         <h2 className="font-display text-2xl tracking-wide">{copy.adminImportJobDetails}</h2>
 
-        <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
           <div>
             <dt className="text-xs font-semibold tracking-wide text-muted uppercase">
               {copy.adminSource}
@@ -551,9 +584,12 @@ function AdminImportDetail() {
       >
         <h2 className="font-display text-2xl tracking-wide">{copy.adminImportProgress}</h2>
 
+        <div className="mt-3">
+          <ProgressBar label={copy.adminImportProgress} max={jobTotal} value={processed} />
+        </div>
         <p className="mt-2 text-sm">
-          {processed} of {total} records processed ({applied} applied, {skipped} skipped duplicates,{" "}
-          {failed} failed).
+          {processed} of {jobTotal} records processed ({applied} applied, {skipped} skipped
+          duplicates, {failed} failed).
         </p>
 
         {!terminal ? <p className="mt-2 text-sm text-muted">{copy.adminImportRefreshing}</p> : null}
@@ -594,27 +630,30 @@ function AdminImportDetail() {
           <p className="mt-3 text-sm text-muted">{copy.adminNoResults}</p>
         ) : (
           <>
-            <div className="mt-3 overflow-x-auto rounded-lg border border-border-soft">
+            <div className="mt-3 max-h-[36rem] min-w-0 overflow-auto rounded-lg border border-border-soft">
               <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
-                <caption className="px-4 py-3 text-left text-xs font-medium text-muted">
+                <caption className="bg-cream/60 px-4 py-3 text-left text-xs font-medium text-muted">
                   Page {safePage + 1} of {totalPages} ({total} records)
                 </caption>
 
                 <thead>
-                  <tr className="border-y border-border-soft bg-cream/60">
-                    <th scope="col" className="w-40 px-4 py-3 font-semibold">
+                  <tr className="border-y border-border-soft">
+                    <th scope="col" className="sticky top-0 w-40 bg-cream px-4 py-3 font-semibold">
                       {copy.adminImportExternalRef}
                     </th>
-                    <th scope="col" className="w-40 px-4 py-3 font-semibold">
+                    <th scope="col" className="sticky top-0 w-40 bg-cream px-4 py-3 font-semibold">
                       {copy.adminStatus}
                     </th>
-                    <th scope="col" className="w-72 px-4 py-3 font-semibold">
+                    <th scope="col" className="sticky top-0 w-72 bg-cream px-4 py-3 font-semibold">
                       {copy.adminImportErrorsCol}
                     </th>
-                    <th scope="col" className="w-32 px-4 py-3 font-semibold">
+                    <th scope="col" className="sticky top-0 w-32 bg-cream px-4 py-3 font-semibold">
                       {copy.adminImportDishCol}
                     </th>
-                    <th scope="col" className="min-w-64 px-4 py-3 font-semibold">
+                    <th
+                      scope="col"
+                      className="sticky top-0 min-w-64 bg-cream px-4 py-3 font-semibold"
+                    >
                       {copy.adminImportPreviewCol}
                     </th>
                   </tr>

@@ -224,6 +224,13 @@ export const listCountriesFn = createServerFn({ method: "GET" })
  * coordinate (nearest associated places first) or by country filter, then
  * returns full cards with names, descriptions, ingredients, regions, and
  * image references. No per-card fetch.
+ *
+ * Visitor-country resolution is graceful, never a dead end: an unknown
+ * country code falls back to the worldwide pool instead of surfacing
+ * PlaceNotFound, and a known-but-empty country pool does the same. The
+ * service scope ("worldwide") labels the fallback honestly so the client
+ * never misreads it as local coverage. Malformed input stays a validation
+ * error; explicit search filters keep their strict semantics.
  */
 export const getLocalCarouselFn = createServerFn({ method: "GET" })
   .validator(carouselQuerySchema)
@@ -231,24 +238,52 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
     const [effects, { DishService }, _catalog, { Actor }, { withActor }, { runApp }] =
       await loadServer();
 
-    return runApp(
-      withActor(
-        Actor.Guest(),
-        effects.Effect.flatMap(DishService, (service) =>
-          service.getLocalCarousel({
-            country: data.country,
-            latitude: data.latitude,
-            limit: data.limit,
-            locale: data.locale,
-            longitude: data.longitude,
-            worldwide: data.worldwide,
-          }),
+    const { PlaceNotFound } = await import("@/modules/food-discovery/server/domain/errors");
+
+    const runCarousel = (scope: { country?: string; worldwide?: boolean }) =>
+      runApp(
+        withActor(
+          Actor.Guest(),
+          effects.Effect.flatMap(DishService, (service) =>
+            service.getLocalCarousel({
+              country: scope.country,
+              latitude: data.latitude,
+              limit: data.limit,
+              locale: data.locale,
+              longitude: data.longitude,
+              seed: data.seed,
+              worldwide: scope.worldwide,
+            }),
+          ),
         ),
-      ),
-      "fn/dishes/local-carousel",
-      15000,
-      "server-fn",
-    );
+        "fn/dishes/local-carousel",
+        15000,
+        "server-fn",
+      );
+
+    const runWorldwide = () => runCarousel({ worldwide: true });
+
+    try {
+      const scoped = await runCarousel({ country: data.country, worldwide: data.worldwide });
+
+      if (
+        data.country !== undefined &&
+        data.latitude === undefined &&
+        data.longitude === undefined &&
+        scoped.scope === "country" &&
+        scoped.items.length === 0
+      ) {
+        return await runWorldwide();
+      }
+
+      return scoped;
+    } catch (error) {
+      if (error instanceof PlaceNotFound) {
+        return await runWorldwide();
+      }
+
+      throw error;
+    }
   });
 
 /**

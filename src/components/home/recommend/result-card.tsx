@@ -1,5 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
+import { toCarouselPublishedImage } from "@/components/dish/dish-carousel";
+import { DishMedia } from "@/components/dish/dish-media";
 import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import {
   SaveDishButton,
@@ -16,7 +18,8 @@ const initialFor = (dish: DishSummary): string => displayTitle(dish).slice(0, 1)
 /**
  * Image-led recommendation card. The media slot is fixed (no layout shift):
  * a real dish photo when the catalog provides one, otherwise the branded
- * initial tile — never a fabricated photo. Actions mirror the local
+ * initial tile — never a fabricated photo. The photo normalizes through the
+ * shared carousel projection. Actions mirror the local
  * discovery cards: Explore plus the member save button.
  */
 export function ResultCard({
@@ -38,7 +41,10 @@ export function ResultCard({
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-soft bg-white transition hover:-translate-y-0.5 hover:border-food-orange motion-reduce:transition-none motion-reduce:hover:translate-y-0">
-      <div className="relative aspect-[16/10] w-full flex-none overflow-hidden bg-cream">
+      <div
+        className="relative aspect-[16/10] w-full flex-none overflow-hidden bg-cream"
+        title={dish.image?.attribution ?? undefined}
+      >
         {dish.image === undefined || dish.image === null ? (
           <span
             aria-hidden="true"
@@ -47,11 +53,11 @@ export function ResultCard({
             {initialFor(dish)}
           </span>
         ) : (
-          <img
-            src={dish.image.url}
-            alt={dish.image.alt ?? title}
-            loading="lazy"
-            className="h-full w-full object-cover"
+          <DishMedia
+            image={toCarouselPublishedImage(dish.image, dish.id)}
+            className="absolute inset-0 h-full w-full"
+            unavailableLabel={copy.carouselPhotoSoon}
+            loadingLabel={title}
           />
         )}
       </div>

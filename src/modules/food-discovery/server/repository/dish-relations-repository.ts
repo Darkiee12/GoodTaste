@@ -10,6 +10,7 @@ import dishFilter from "@/modules/food-discovery/server/repository/sql/dish-filt
 import dishIngredientLink from "@/modules/food-discovery/server/repository/sql/dish-ingredient-link.sql";
 import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-ingredients-by-dish-ids.sql";
 import dishMediaByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-by-dish-ids.sql";
+import dishMediaPublishedByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-published-by-dish-ids.sql";
 import dishNameInsert from "@/modules/food-discovery/server/repository/sql/dish-name-insert.sql";
 import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
 import dishPlaceLink from "@/modules/food-discovery/server/repository/sql/dish-place-link.sql";
@@ -28,6 +29,8 @@ export type DishDescriptionRow = (typeof dishDescriptionsByDishIds)["~reylo"]["e
 export type DishIngredientRow = (typeof dishIngredientsByDishIds)["~reylo"]["element"];
 
 export type DishMediaRow = (typeof dishMediaByDishIds)["~reylo"]["element"];
+
+export type DishPublishedMediaRow = (typeof dishMediaPublishedByDishIds)["~reylo"]["element"];
 
 export type DishPlaceRow = (typeof dishPlacesByDishIds)["~reylo"]["element"];
 
@@ -49,9 +52,24 @@ export class DishRelationsRepository extends Context.Service<
     readonly ingredientsByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishIngredientRow>, DatabaseError, Database>;
+    /**
+     * Legacy status-filtered read. No public surface uses this anymore —
+     * prefer publishedMediaByDishIds for catalog projections.
+     * @deprecated Use publishedMediaByDishIds for public surfaces.
+     */
     readonly mediaByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishMediaRow>, DatabaseError, Database>;
+    /**
+     * Public catalog projection: published + ready rows only, ordered by
+     * sort_order (primary first). Backed by
+     * dish-media-published-by-dish-ids.sql — the same source as
+     * DishMediaService.publishedImagesByDishIds. Prefer this over
+     * mediaByDishIds for any public surface.
+     */
+    readonly publishedMediaByDishIds: (
+      ids: ReadonlyArray<bigint>,
+    ) => Effect.Effect<ReadonlyArray<DishPublishedMediaRow>, DatabaseError, Database>;
     readonly placesByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishPlaceRow>, DatabaseError, Database>;
@@ -153,6 +171,16 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
     Effect.gen(function* () {
       return yield* runQuery("dish/media-by-ids", (sql) =>
         dishMediaByDishIds.run(sql, { ids: [...ids], status: "published" }),
+      );
+    }),
+  publishedMediaByDishIds: (ids) =>
+    Effect.gen(function* () {
+      if (ids.length === 0) {
+        return [];
+      }
+
+      return yield* runQuery("dish/media-published-by-ids", (sql) =>
+        dishMediaPublishedByDishIds.run(sql, { ids: [...ids] }),
       );
     }),
   placesByDishIds: (ids) =>

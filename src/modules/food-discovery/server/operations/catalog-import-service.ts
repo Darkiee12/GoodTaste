@@ -1,6 +1,10 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
-import { needsLicenseReview } from "@/modules/food-discovery/admin.schema";
+import {
+  MAX_BATCHED_IMPORT_RECORDS,
+  MAX_IMPORT_RECORDS,
+  needsLicenseReview,
+} from "@/modules/food-discovery/admin.schema";
 import {
   CatalogConflict,
   DishNotFound,
@@ -8,8 +12,11 @@ import {
   InvalidRelationship,
 } from "@/modules/food-discovery/server/domain/errors";
 import { encodeDbId, isDbIdString, slugifyName } from "@/modules/food-discovery/server/domain/ids";
-import { ImportPayload, StoredImportRecord } from "@/modules/food-discovery/server/domain/schemas";
-import type { AuthoringDish } from "@/modules/food-discovery/server/domain/schemas";
+import {
+  AuthoringDish,
+  ImportPayload,
+  StoredImportRecord,
+} from "@/modules/food-discovery/server/domain/schemas";
 import {
   isSearchableQuery,
   normalizeSearchKey,
@@ -66,6 +73,94 @@ export interface ImportApplyReport {
   readonly applied: number;
   readonly skippedDuplicate: number;
   readonly failed: number;
+  /**
+   * Bounded-batch apply: one call applies at most `limit` rows. `done` is
+   * true only when no `valid` rows remain (and the job flipped to applied);
+   * otherwise the client must call again. `pending` is the remaining `valid`
+   * count for progress display. Past `done`, re-entry is a typed conflict
+   * (exactly-once holds: no row can apply twice, and the caller learns the
+   * terminal state from the conflict reason instead of a silent no-op).
+   */
+  readonly done: boolean;
+  readonly pending: number;
+}
+
+export interface ImportBeginInput {
+  readonly sourceName: string;
+  readonly format?: "json" | "csv";
+  readonly totalRecords: number;
+  readonly sourceUrl?: string | null;
+  readonly sourceVersion?: string | null;
+  readonly license?: string | null;
+  readonly attribution?: string | null;
+  readonly editorialNotes?: string | null;
+}
+
+export interface ImportBeginReport {
+  readonly jobId: string;
+  readonly status: "staged";
+  readonly stagedCount: number;
+  readonly totalRecords: number;
+}
+
+export interface ImportStageBatchInput {
+  readonly jobId: string;
+  /** Global 0-based position of records[0] in the logical dataset. */
+  readonly baseIndex: number;
+  readonly records: ReadonlyArray<unknown>;
+}
+
+export interface ImportStageBatchReport {
+  readonly jobId: string;
+  readonly status: string;
+  readonly stagedCount: number;
+  readonly totalRecords: number;
+  readonly validRecords: number;
+  readonly invalidRecords: number;
+  readonly batchValid: number;
+  readonly batchInvalid: number;
+  /** True once stagedCount reaches totalRecords (job is review-ready). */
+  readonly complete: boolean;
+}
+
+export interface ImportJobIssueRecord {
+  readonly id: string;
+  readonly jobId: string;
+  readonly externalRef: string;
+  readonly status: string;
+  readonly errors: string | null;
+  readonly dishId: string | null;
+  readonly recordIndex: number | null;
+  readonly recordSlug: string | null;
+  readonly createdAt: string;
+}
+
+export interface ImportJobIssuesPage {
+  readonly job: {
+    readonly id: string;
+    readonly sourceName: string;
+    readonly status: string;
+    readonly totalRecords: number;
+    readonly validRecords: number;
+    readonly invalidRecords: number;
+  };
+  readonly records: ReadonlyArray<ImportJobIssueRecord>;
+  readonly nextCursor: string | null;
+  readonly totals: {
+    readonly total: number;
+    readonly pending: number;
+    readonly valid: number;
+    readonly invalid: number;
+    readonly applied: number;
+    readonly skippedDuplicate: number;
+  };
+}
+
+export interface ImportJobIssuesInput {
+  readonly jobId: string;
+  readonly status?: "pending" | "valid" | "invalid" | "applied" | "skipped_duplicate" | null;
+  readonly limit?: number;
+  readonly cursor?: string;
 }
 
 export interface ImportValidateInput {
@@ -89,7 +184,46 @@ export interface ImportApplyInput {
   readonly jobId: string;
   readonly approvals: ImportApplyApprovals;
   readonly actorUserId: string;
+  /**
+   * Bounded-batch apply: at most this many `valid` rows per call.
+   * Defaults to IMPORT_APPLY_BATCH_SIZE; the client drives the cursor
+   * forward (repeat until the report says done) to stay inside the
+   * server-function budget on large jobs.
+   */
+  readonly limit?: number;
 }
+
+/** Bounded batch sizes: every stage/apply call commits at most this many rows. */
+export const IMPORT_STAGE_BATCH_SIZE = MAX_IMPORT_RECORDS;
+
+export const IMPORT_APPLY_BATCH_SIZE = MAX_IMPORT_RECORDS;
+
+/**
+ * Best-effort duplicate target from a stored import-record payload envelope.
+ * Corrupt payloads surface as null and fail loudly at apply time, never
+ * silently. Module scope: captures nothing from the service closure.
+ * Uses Effect's documented safe-parse idiom (Option.liftThrowable over
+ * JSON.parse, then a schema decode) instead of try/catch.
+ */
+const StoredDuplicateEnvelope = Schema.Struct({ duplicateOf: Schema.NullOr(Schema.String) });
+
+const safeJsonParse = Option.liftThrowable(JSON.parse);
+
+const storedDuplicateOf = (payloadText: string | null): string | null => {
+  if (payloadText === null || payloadText === "") {
+    return null;
+  }
+
+  const decoded = Option.flatMap(safeJsonParse(payloadText), (raw) =>
+    Schema.decodeUnknownOption(StoredDuplicateEnvelope)(raw),
+  );
+
+  if (Option.isSome(decoded) && decoded.value.duplicateOf !== null) {
+    return decoded.value.duplicateOf;
+  }
+
+  return null;
+};
 
 export class CatalogImportService extends Context.Service<
   CatalogImportService,
@@ -100,6 +234,18 @@ export class CatalogImportService extends Context.Service<
     readonly applyImport: (
       input: ImportApplyInput,
     ) => Effect.Effect<ImportApplyReport, CatalogImportError, Database>;
+    readonly beginImport: (
+      input: ImportBeginInput,
+    ) => Effect.Effect<ImportBeginReport, CatalogImportError, Database>;
+    readonly stageImportBatch: (
+      input: ImportStageBatchInput,
+    ) => Effect.Effect<ImportStageBatchReport, CatalogImportError, Database>;
+    readonly applyImportBatch: (
+      input: ImportApplyInput,
+    ) => Effect.Effect<ImportApplyReport, CatalogImportError, Database>;
+    readonly importJobIssues: (
+      input: ImportJobIssuesInput,
+    ) => Effect.Effect<ImportJobIssuesPage, CatalogImportError, Database>;
   }
 >()("feastjourney/food-discovery/CatalogImportService") {}
 
@@ -412,11 +558,14 @@ export const CatalogImportServiceLive = Layer.effect(
 
             const invalid = decoded.records.length - valid;
 
-            yield* curation.updateImportJob({
+            // Single-shot legacy path stages its full dataset atomically, so
+            // the stage cursor lands on totalRecords in the same transaction.
+            yield* curation.updateImportJobStage({
               id: job.id,
-              status: valid > 0 ? "validated" : "failed",
+              stagedCount: decoded.records.length,
               validRecords: valid,
               invalidRecords: invalid,
+              status: valid > 0 ? "validated" : "failed",
               completedAt: new Date().toISOString(),
             });
 
@@ -708,7 +857,317 @@ export const CatalogImportServiceLive = Layer.effect(
         }),
       );
 
-    const applyImport = (input: ImportApplyInput) =>
+    /**
+     * Declares ONE logical import job up front: the client parsed the file
+     * locally (never sent in full) and now reserves a job for exactly
+     * totalRecords staged rows. The job sits in `staged` with staged_count 0
+     * — open for batch appends until the cursor reaches totalRecords.
+     */
+    const beginImport = (input: ImportBeginInput) =>
+      Effect.gen(function* () {
+        const trimmedSource = input.sourceName.trim().slice(0, 200);
+
+        if (trimmedSource.length === 0) {
+          return yield* new InvalidDishData({ reason: "source name is required" });
+        }
+
+        if (
+          !Number.isInteger(input.totalRecords) ||
+          input.totalRecords < 1 ||
+          input.totalRecords > MAX_BATCHED_IMPORT_RECORDS
+        ) {
+          return yield* new InvalidDishData({
+            reason: `totalRecords must be between 1 and ${MAX_BATCHED_IMPORT_RECORDS}; got ${input.totalRecords}`,
+          });
+        }
+
+        const job = yield* curation.insertImportJob({
+          sourceName: trimmedSource,
+          format: input.format ?? "json",
+          status: "staged",
+          totalRecords: input.totalRecords,
+          validRecords: 0,
+          invalidRecords: 0,
+          dryRun: true,
+          sourceUrl: input.sourceUrl ?? null,
+          sourceVersion: input.sourceVersion ?? null,
+          license: input.license ?? null,
+          attribution: input.attribution ?? null,
+          editorialNotes: input.editorialNotes ?? null,
+        });
+
+        return {
+          jobId: encodeDbId(job.id),
+          status: "staged" as const,
+          stagedCount: 0,
+          totalRecords: input.totalRecords,
+        };
+      });
+
+    /**
+     * Stages ONE bounded batch of a logical import. The batch commits in a
+     * single short transaction (<= IMPORT_STAGE_BATCH_SIZE rows), so every
+     * call fits the server-function budget no matter how large the dataset.
+     *
+     * Stable identity: record_index is the global 0-based dataset position
+     * (UNIQUE per job — a retried batch conflicts instead of duplicating),
+     * externalRef is the slug or `record-<global 1-based index>`, and
+     * record_slug feeds the GLOBAL duplicate scan: the batch is compared
+     * against every slug already staged for this job (persisted findings,
+     * one indexed query) plus the live catalog, without loading all stored
+     * payloads into memory.
+     *
+     * Cursor protocol: the next batch must start exactly at staged_count.
+     * A batch fully below the cursor is an idempotent replay (returns
+     * current progress without writing); a partially overlapping batch is a
+     * conflict telling the client the exact cursor to resume from. A crash
+     * can never leave a half-written batch: the whole batch is one
+     * transaction.
+     */
+    const stageImportBatch = (input: ImportStageBatchInput) =>
+      Effect.gen(function* () {
+        if (!isDbIdString(input.jobId)) {
+          return yield* new InvalidDishData({ reason: "job id must be a decimal id string" });
+        }
+
+        if (!Number.isInteger(input.baseIndex) || input.baseIndex < 0) {
+          return yield* new InvalidDishData({ reason: "baseIndex must be a non-negative integer" });
+        }
+
+        if (input.records.length === 0 || input.records.length > IMPORT_STAGE_BATCH_SIZE) {
+          return yield* new InvalidDishData({
+            reason: `each stage batch holds 1 to ${IMPORT_STAGE_BATCH_SIZE} records; got ${input.records.length}`,
+          });
+        }
+
+        return yield* withTransaction(
+          "import/stage-batch",
+          Effect.gen(function* () {
+            const jobId = BigInt(input.jobId);
+            const locked = yield* curation.lockImportJob(jobId);
+
+            if (locked === null) {
+              return yield* new DishNotFound({ dishId: input.jobId });
+            }
+
+            if (locked.status !== "staged") {
+              return yield* new CatalogConflict({
+                reason: `import job ${input.jobId} is ${locked.status}; only open staged jobs accept batches`,
+              });
+            }
+
+            const endIndex = input.baseIndex + input.records.length;
+
+            // Idempotent replay: this exact batch (or an earlier prefix the
+            // client is re-asking about) already committed — report progress.
+            if (endIndex <= locked.staged_count) {
+              const complete = locked.staged_count >= locked.total_records;
+              let status: string = locked.status;
+
+              if (complete) {
+                if (locked.valid_records > 0) {
+                  status = "validated";
+                } else {
+                  status = "failed";
+                }
+              }
+
+              return {
+                jobId: input.jobId,
+                status,
+                stagedCount: locked.staged_count,
+                totalRecords: locked.total_records,
+                validRecords: locked.valid_records,
+                invalidRecords: locked.invalid_records,
+                batchValid: 0,
+                batchInvalid: 0,
+                complete,
+              };
+            }
+
+            if (input.baseIndex !== locked.staged_count) {
+              return yield* new CatalogConflict({
+                reason:
+                  `import job ${input.jobId} resume cursor is ${locked.staged_count}; ` +
+                  `re-send the batch starting at record index ${locked.staged_count}`,
+              });
+            }
+
+            if (endIndex > locked.total_records) {
+              return yield* new InvalidDishData({
+                reason:
+                  `batch of ${input.records.length} records at index ${input.baseIndex} ` +
+                  `overruns the declared total of ${locked.total_records} records`,
+              });
+            }
+
+            // Global duplicate preflight: persisted staged slugs for the
+            // whole job in one indexed scan — no payload parsing in memory.
+            const staged = yield* curation.stagedSlugsByJobId(jobId);
+            const stagedSlugs = new Map<string, string>();
+
+            for (const row of staged) {
+              if (row.record_slug !== null && !stagedSlugs.has(row.record_slug)) {
+                stagedSlugs.set(row.record_slug, row.external_ref);
+              }
+            }
+
+            const batchSlugs = new Map<string, string>();
+            let batchValid = 0;
+            let batchInvalid = 0;
+
+            for (const [offset, raw] of input.records.entries()) {
+              const globalIndex = input.baseIndex + offset;
+
+              // Undecodable rows are staged invalid (never applied) with the
+              // raw envelope preserved for inspection — the batch continues.
+              const record = yield* Option.match(Schema.decodeUnknownOption(AuthoringDish)(raw), {
+                onNone: () =>
+                  Effect.gen(function* () {
+                    yield* curation.insertStagedImportRecord({
+                      jobId,
+                      externalRef: `record-${globalIndex + 1}`,
+                      status: "invalid",
+                      errors: JSON.stringify(["record is not a valid dish entry"]),
+                      dishId: null,
+                      payload: { record: raw, duplicateOf: null },
+                      recordIndex: globalIndex,
+                      recordSlug: null,
+                    });
+
+                    batchInvalid += 1;
+
+                    return null;
+                  }),
+                onSome: (value) => Effect.succeed(value),
+              });
+
+              if (record === null) {
+                continue;
+              }
+
+              const externalRef = record.slug ?? `record-${globalIndex + 1}`;
+              const checked = yield* validateRecord(record, globalIndex);
+              const errors = [...checked.errors];
+              let duplicateSlug = false;
+
+              if (record.slug !== undefined) {
+                const earlierBatch = batchSlugs.get(record.slug);
+
+                if (earlierBatch !== undefined) {
+                  errors.push(
+                    `duplicate slug "${record.slug}" also used by "${earlierBatch}" in this import (record ${globalIndex + 1})`,
+                  );
+                  duplicateSlug = true;
+                } else {
+                  batchSlugs.set(record.slug, externalRef);
+                }
+
+                const earlierStaged = stagedSlugs.get(record.slug);
+
+                if (earlierStaged !== undefined) {
+                  errors.push(
+                    `duplicate slug "${record.slug}" already staged as "${earlierStaged}" in this import`,
+                  );
+                  duplicateSlug = true;
+                }
+              }
+
+              // Colliding rows keep the global finding (record_slug plus the
+              // error text name the slug) but need a distinct external_ref:
+              // (job_id, external_ref) is UNIQUE, so reusing the bare slug
+              // would reject the second occurrence. `#` never appears in
+              // real slugs, so the suffix cannot collide with a genuine ref;
+              // the global index keeps even pathological repeats unique.
+              // Truncated to the 300-char column bound with the index
+              // suffix intact, so uniqueness always survives.
+              let storedExternalRef = externalRef;
+
+              if (duplicateSlug && record.slug !== undefined) {
+                const tag = `#record-${globalIndex + 1}`;
+                const candidate = `${record.slug}${tag}`;
+
+                storedExternalRef =
+                  candidate.length > 300
+                    ? `${record.slug.slice(0, 300 - tag.length)}${tag}`
+                    : candidate;
+              }
+
+              const status = errors.length === 0 ? "valid" : "invalid";
+
+              if (status === "valid") {
+                batchValid += 1;
+              } else {
+                batchInvalid += 1;
+              }
+
+              yield* curation.insertStagedImportRecord({
+                jobId,
+                externalRef: storedExternalRef,
+                status,
+                errors: errors.length === 0 ? null : JSON.stringify(errors),
+                dishId: null,
+                payload: { record, duplicateOf: checked.duplicateOf },
+                recordIndex: globalIndex,
+                recordSlug: record.slug ?? null,
+              });
+            }
+
+            const stagedCount = locked.staged_count + input.records.length;
+            const validRecords = locked.valid_records + batchValid;
+            const invalidRecords = locked.invalid_records + batchInvalid;
+            const complete = stagedCount >= locked.total_records;
+            let status: string = "staged";
+
+            if (complete) {
+              if (validRecords > 0) {
+                status = "validated";
+              } else {
+                status = "failed";
+              }
+            }
+
+            yield* curation.updateImportJobStage({
+              id: jobId,
+              stagedCount,
+              validRecords,
+              invalidRecords,
+              status,
+              completedAt: complete ? new Date().toISOString() : null,
+            });
+
+            return {
+              jobId: input.jobId,
+              status,
+              stagedCount,
+              totalRecords: locked.total_records,
+              validRecords,
+              invalidRecords,
+              batchValid,
+              batchInvalid,
+              complete,
+            };
+          }),
+        );
+      });
+    /**
+     * Bounded apply core shared by the legacy single-call `applyImport` and
+     * the cursor-driven `applyImportBatch`. One call applies at most `limit`
+     * `valid` rows, persists per-batch outcomes on the job row, and reports
+     * whether more work remains — so every call fits the server-function
+     * budget and a crash resumes from stored row statuses, never by
+     * replaying applied rows.
+     *
+     * Concurrency: mutual exclusion is a non-blocking try-lock on the job
+     * row. A concurrent apply colliding with a live batch fails fast with
+     * a typed conflict (exactly one winner), while sequential batches,
+     * crash resumes, and post-completion repeats never contend and proceed.
+     * Only `valid` rows are ever selected, so even racing workers could
+     * never double-apply the same record — but races are rejected before
+     * selection, not after.
+     */
+
+    const runApplyBatch = (input: ImportApplyInput & { readonly limit: number }) =>
       Effect.gen(function* () {
         if (!isDbIdString(input.jobId)) {
           return yield* new InvalidDishData({ reason: "job id must be a decimal id string" });
@@ -751,27 +1210,31 @@ export const CatalogImportServiceLive = Layer.effect(
         }
 
         // Guarded apply: the whole claim-and-finish sequence runs in one
-        // short guard transaction that holds an exclusive row lock on the
-        // job from the SELECT ... FOR UPDATE below until commit. The lock —
-        // not the status flip — is the mutual-exclusion mechanism: a
-        // concurrent apply blocks on the lock, then sees the finished state
-        // and fails with a typed conflict, so exactly one worker processes
-        // each job. Under our own lock, observing `applying` can only mean
-        // crash residue (a live worker would hold the lock), so resume is
-        // safe. Record writes still commit in their own per-record
-        // transactions on separate connections (withTransaction always
-        // reserves a fresh connection), so a crash keeps applied records and
-        // resume skips them by row status; only the job-row guard aborts.
-        // The pending set is rebuilt inside from current row statuses, so a
+        // short guard transaction. Mutual exclusion is a non-blocking
+        // try-lock (SELECT ... FOR UPDATE NOWAIT): a concurrent apply
+        // colliding with a live batch fails fast with a typed conflict
+        // naming the running apply, instead of queueing behind the winner
+        // and double-reporting success. Sequential batches, crash resumes,
+        // and post-completion repeats never contend, so they proceed. Row
+        // selection is always rebuilt from current row statuses, so a
         // guard-transaction retry never replays an already-applied record.
         return yield* withTransaction(
           "import/apply",
           Effect.gen(function* () {
-            const locked = yield* curation.lockImportJobForApply(job.id);
+            const attempt = yield* curation.tryLockImportJobForApply(job.id);
 
-            if (locked === null) {
-              return yield* new DishNotFound({ dishId: input.jobId });
-            }
+            const locked = yield* Option.match(attempt, {
+              onNone: () =>
+                Effect.fail(
+                  new CatalogConflict({
+                    reason: `another apply is already running for import job ${input.jobId}`,
+                  }),
+                ),
+              onSome: (row) =>
+                row === null
+                  ? Effect.fail(new DishNotFound({ dishId: input.jobId }))
+                  : Effect.succeed(row),
+            });
 
             if (locked.status !== "validated" && locked.status !== "applying") {
               return yield* new CatalogConflict({
@@ -779,7 +1242,12 @@ export const CatalogImportServiceLive = Layer.effect(
               });
             }
 
-            const rows = yield* curation.recordsByJobId(locked.id, 1000);
+            // Bounded pending window in original dataset order: only `valid`
+            // rows are ever selected, so applied/skipped/failed rows are
+            // never replayed after a crash or a budget timeout. The caller
+            // drives the cursor forward call by call until done.
+            const limit = Math.min(Math.max(Math.floor(input.limit), 1), IMPORT_APPLY_BATCH_SIZE);
+            const rows = yield* curation.pendingRecordsByJobId(locked.id, limit);
             const acknowledged = new Set(input.approvals.duplicateRefs);
 
             const pending: Array<{
@@ -789,11 +1257,11 @@ export const CatalogImportServiceLive = Layer.effect(
               readonly duplicateOf: string | null;
             }> = [];
 
+            // Ack pre-scan BEFORE any write in this batch: unlike the legacy
+            // all-at-once apply (which could commit early rows then fail on a
+            // later unacknowledged duplicate), a batch never leaves a
+            // half-applied window behind an acknowledgement failure.
             for (const row of rows) {
-              if (row.status !== "valid") {
-                continue;
-              }
-
               const raw: unknown = JSON.parse(row.payload);
 
               const stored = yield* Option.match(
@@ -894,23 +1362,161 @@ export const CatalogImportServiceLive = Layer.effect(
             // Job counters keep validation semantics: valid_records/invalid_records
             // stay frozen at their validation values (so total == valid + invalid
             // still holds for the dashboard, and valid >= applied), while apply
-            // outcomes live on the per-record rows (applied/skipped_duplicate/
-            // invalid) and in the returned report. The recompute here reuses the
-            // claimed validation counts rather than overwriting them with apply
-            // outcomes.
-            yield* curation.updateImportJob({
+            // outcomes accumulate in applied/skipped/failed counters plus the
+            // per-record rows. The job flips to applied only when no `valid`
+            // rows remain — checked AFTER this batch commits its row writes,
+            // so `done: false` honestly means "call again".
+            const counts = yield* curation.recordCountsByJobId(claimed.id);
+            let pendingValid = 0;
+
+            for (const entry of counts) {
+              if (entry.status === "valid") {
+                pendingValid = entry.total;
+              }
+            }
+
+            const done = pendingValid === 0;
+
+            yield* curation.updateImportJobApply({
               id: claimed.id,
-              status: "applied",
-              validRecords: claimed.valid_records,
-              invalidRecords: claimed.invalid_records,
-              completedAt: new Date().toISOString(),
+              appliedCount: claimed.applied_count + applied,
+              skippedCount: claimed.skipped_count + skippedDuplicate,
+              applyFailedCount: claimed.apply_failed_count + failed,
+              status: done ? "applied" : "applying",
+              completedAt: done ? new Date().toISOString() : null,
             });
 
-            return { jobId: input.jobId, applied, skippedDuplicate, failed };
+            return {
+              jobId: input.jobId,
+              applied,
+              skippedDuplicate,
+              failed,
+              done,
+              pending: pendingValid,
+            };
           }),
         );
       });
 
-    return CatalogImportService.of({ validateImport, applyImport });
+    /**
+     * Legacy single-call apply: one bounded batch (default
+     * IMPORT_APPLY_BATCH_SIZE). Small jobs finish in one call with
+     * `done: true`; large jobs report `done: false` plus the remaining
+     * `pending` count and the client repeats the call. Use
+     * `applyImportBatch` explicitly for cursor-driven loops.
+     */
+    const applyImport = (input: ImportApplyInput) =>
+      runApplyBatch({ ...input, limit: input.limit ?? IMPORT_APPLY_BATCH_SIZE });
+
+    const applyImportBatch = (input: ImportApplyInput) =>
+      runApplyBatch({ ...input, limit: input.limit ?? IMPORT_APPLY_BATCH_SIZE });
+
+    /**
+     * Paginated review surface for large jobs: keyset page over staged
+     * records with an optional status filter, plus per-status totals for
+     * progress display. Never loads the whole staged set at once.
+     * `duplicateOf` is read from the stored payload envelope (best effort:
+     * corrupt payloads surface as null and fail loudly at apply time, never
+     * silently), so the review UI can offer duplicate acknowledgement
+     * without loading every payload.
+     */
+    const importJobIssues = (input: ImportJobIssuesInput) =>
+      Effect.gen(function* () {
+        if (!isDbIdString(input.jobId)) {
+          return yield* new InvalidDishData({ reason: "job id must be a decimal id string" });
+        }
+
+        const jobId = BigInt(input.jobId);
+        const job = yield* curation.adminFindImportJob(jobId);
+
+        if (job === null) {
+          return yield* new DishNotFound({ dishId: input.jobId });
+        }
+
+        const limit = Math.min(Math.max(Math.floor(input.limit ?? 50), 1), 200);
+
+        let cursor = 0n;
+
+        if (input.cursor !== undefined && input.cursor !== "0") {
+          if (!isDbIdString(input.cursor)) {
+            return yield* new InvalidDishData({ reason: "cursor must be a decimal id string" });
+          }
+
+          cursor = BigInt(input.cursor);
+        }
+
+        const status = input.status ?? null;
+
+        const page = yield* curation.recordsPageByJobId({
+          jobId,
+          cursor,
+          status,
+          limit: limit + 1,
+        });
+
+        const counts = yield* curation.recordCountsByJobId(jobId);
+
+        const totals = {
+          total: 0,
+          pending: 0,
+          valid: 0,
+          invalid: 0,
+          applied: 0,
+          skippedDuplicate: 0,
+        };
+
+        for (const entry of counts) {
+          totals.total += entry.total;
+
+          if (entry.status === "pending") {
+            totals.pending = entry.total;
+          } else if (entry.status === "valid") {
+            totals.valid = entry.total;
+          } else if (entry.status === "invalid") {
+            totals.invalid = entry.total;
+          } else if (entry.status === "applied") {
+            totals.applied = entry.total;
+          } else if (entry.status === "skipped_duplicate") {
+            totals.skippedDuplicate = entry.total;
+          }
+        }
+
+        const hasMore = page.length > limit;
+        const window = hasMore ? page.slice(0, limit) : page;
+
+        return {
+          job: {
+            id: job.id,
+            sourceName: job.source_name,
+            status: job.status,
+            totalRecords: job.total_records,
+            validRecords: job.valid_records,
+            invalidRecords: job.invalid_records,
+          },
+          records: window.map((row) => ({
+            id: row.id,
+            jobId: row.job_id,
+            externalRef: row.external_ref,
+            status: row.status,
+            errors: row.errors,
+            dishId: row.dish_id,
+            recordIndex: row.record_index,
+            recordSlug: row.record_slug,
+            duplicateOf: storedDuplicateOf(row.payload),
+            createdAt: String(row.created_at),
+          })),
+          nextCursor: hasMore ? (window[window.length - 1]?.id ?? null) : null,
+          totals,
+        };
+      });
+
+    return CatalogImportService.of({
+      validateImport,
+      applyImport,
+      beginImport,
+      stageImportBatch,
+      applyImportBatch,
+      importJobIssues,
+    });
   }),
 );

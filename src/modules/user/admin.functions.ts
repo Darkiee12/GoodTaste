@@ -10,6 +10,7 @@ import {
   roleMutationSchema,
 } from "@/modules/user/user.schema";
 import { InsufficientPermissions } from "@/server/auth/errors";
+import type { PermissionRequest } from "@/server/auth/permissions";
 
 /**
  * Administration server functions: users, roles, grants, and bans.
@@ -31,6 +32,7 @@ const loadServer = async () => {
     roleService,
     identifiers,
     permissions,
+    roleCatalog,
   ] = await Promise.all([
     import("effect"),
     import("@tanstack/react-start/server"),
@@ -43,6 +45,7 @@ const loadServer = async () => {
     import("@/modules/user/server/operations/role-service"),
     import("@/modules/user/server/domain/identifiers"),
     import("@/server/auth/permissions"),
+    import("@/modules/user/server/domain/role-catalog"),
   ]);
 
   return {
@@ -57,6 +60,7 @@ const loadServer = async () => {
     roleService,
     identifiers,
     permissions,
+    roleCatalog,
   };
 };
 
@@ -705,6 +709,124 @@ export const adminRevokeUserSessionsFn = createServerFn({ method: "POST" })
         ).pipe(effects.Effect.as({ ok: true as const })),
       ),
       "fn/admin/revoke-user-sessions",
+      15000,
+      requestId,
+    );
+  });
+
+/**
+ * Roles capability probe + permission catalog for the Discord-style editor.
+ * Guests fail closed (signed-out → 401 via requireAuthenticatedActor, then
+ * the route treats any failure as read-only). Direct calls still require
+ * `role:read`; per-action editing stays gated by the mutation functions.
+ */
+export const adminRoleCapabilitiesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { effects, server, session, actor, currentActor, runtime, roleService, roleCatalog } =
+    await loadServer();
+
+  const headers = server.getRequestHeaders();
+  const requestId = crypto.randomUUID();
+
+  const trusted = await runtime.runApp(
+    effects.Effect.gen(function* () {
+      const verified = yield* session.requireAuthenticatedActor(headers);
+
+      yield* session.requirePermission(headers, [{ resource: "role", actions: ["read"] }]);
+
+      return verified;
+    }),
+    "fn/admin/role-capabilities",
+    15000,
+    requestId,
+  );
+
+  const member = actor.Actor.Member({ userId: trusted.userId });
+
+  return runtime.runApp(
+    currentActor.withActor(
+      member,
+      effects.Effect.gen(function* () {
+        const capabilities = yield* roleService.RoleService.pipe(
+          effects.Effect.flatMap((service) => service.roleCapabilities(member)),
+        );
+
+        return { capabilities, catalog: roleCatalog.permissionCatalog() };
+      }),
+    ),
+    "fn/admin/role-capabilities",
+    15000,
+    requestId,
+  );
+});
+
+/**
+ * Atomic metadata + grants save for one role. Always requires
+ * `role:update`; when `permissions` is non-null it additionally requires
+ * `role:manage-permissions` (checked here AND enforced with delegation
+ * rules in the service). Recent authentication is required like every
+ * other roles mutation.
+ */
+export const adminSaveRoleFn = createServerFn({ method: "POST" })
+  .validator(
+    roleMutationSchema.extend(roleIdSchema.shape).extend({
+      permissions: z.array(z.string().min(1).max(80)).max(100).nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { effects, server, session, actor, currentActor, runtime, roleService, identifiers } =
+      await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const withGrants = data.permissions !== null;
+
+    const trusted = await runtime.runApp(
+      effects.Effect.gen(function* () {
+        const verified = yield* session.requireAuthenticatedActor(headers);
+
+        yield* session.requireRecentAuthentication(verified);
+
+        const checks: ReadonlyArray<PermissionRequest> = withGrants
+          ? [
+              { resource: "role", actions: ["update"] },
+              { resource: "role", actions: ["manage-permissions"] },
+              { resource: "admin", actions: ["access"] },
+            ]
+          : [
+              { resource: "role", actions: ["update"] },
+              { resource: "admin", actions: ["access"] },
+            ];
+
+        yield* session.requirePermission(headers, checks);
+
+        return verified;
+      }),
+      "fn/admin/save-role",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(roleService.RoleService, (service) =>
+          service.saveRole(
+            actor.Actor.Member({ userId: trusted.userId }),
+            identifiers.RoleId.parse(data.role_id),
+            {
+              slug: data.slug,
+              name: data.name,
+              description: data.description,
+              color: data.color,
+              position: data.position,
+            },
+            data.permissions,
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ),
+      ),
+      "fn/admin/save-role",
       15000,
       requestId,
     );

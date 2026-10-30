@@ -55,6 +55,13 @@ export const carouselQuerySchema = z.object({
   worldwide: z.boolean().optional(),
   locale: localeSchema,
   limit: z.coerce.number().int().min(1).max(20).default(5),
+  /**
+   * Rotation seed for the carousel selection (Agent B). Same seed + same
+   * scope renders the same set (session-stable); incrementing it renders
+   * "another set". Additive optional field — older clients omit it and get
+   * the stable default order.
+   */
+  seed: z.coerce.number().int().min(0).max(2147483647).default(0),
 });
 
 export type CarouselQuery = z.infer<typeof carouselQuerySchema>;
