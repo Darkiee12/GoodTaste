@@ -744,6 +744,20 @@ const degradeToDeterministic = (
       ),
   });
 
+/**
+ * Provider input bound: Muse re-ranks the first 10 deterministic
+ * candidates, never the whole pool. The reasoning model burns ~1k tokens
+ * ranking 3 dishes; feeding it 30-60 candidates routinely blows the 15s
+ * budget (timeout → transient fallback) or truncates the strict JSON
+ * (invalid-output fallback). Deterministic scoring already ordered the
+ * pool, so the model only needs room to reorder — not to search. Exported
+ * pure so the bound is unit-testable.
+ */
+export const MUSE_RANK_INPUT_LIMIT = 10;
+
+export const museRankInput = <Row>(sortedAll: ReadonlyArray<Row>): ReadonlyArray<Row> =>
+  sortedAll.slice(0, MUSE_RANK_INPUT_LIMIT);
+
 const rankWithMuse = (
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   input: RecommendDishesInput,
@@ -855,8 +869,13 @@ const finishRecommendations = (
       });
     }
 
+    // Muse re-ranks the deterministic head only (first 10), never the
+    // whole pool — see museRankInput. Membership is validated against
+    // exactly what was sent.
+    const rankInput = museRankInput(sortedAll);
+
     const ranked = yield* rankWithMuse(
-      sortedAll,
+      rankInput,
       input,
       muse,
       deterministicIds,

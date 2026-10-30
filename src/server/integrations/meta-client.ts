@@ -240,6 +240,7 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
                 { role: "user", content: buildUserPrompt(candidates, context) },
               ],
               response_format: RANKING_RESPONSE_FORMAT,
+              max_tokens: config.maxTokens,
             }),
             signal: AbortSignal.timeout(config.timeoutMs),
           }),

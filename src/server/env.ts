@@ -42,6 +42,7 @@ const envSchema = z.object({
   MODEL_TIMEOUT_MS: z.coerce.number().int().optional(),
   MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
   MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
+  MODEL_MAX_TOKENS: z.coerce.number().int().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
@@ -104,6 +105,7 @@ export type RankingConfig = Data.TaggedEnum<{
     readonly timeoutMs: number;
     readonly candidateLimit: number;
     readonly outputLimit: number;
+    readonly maxTokens: number;
   };
   Misconfigured: { readonly reason: string };
 }>;
@@ -115,6 +117,28 @@ export const DEFAULT_MODEL_ID = "muse-spark-1.3";
 export const DEFAULT_MODEL_BASE_URL = "https://api.meta.ai/v1";
 
 export const DEFAULT_MODEL_TIMEOUT_MS = 15000;
+
+/**
+ * Default ceiling on a single ranking call's tokens (reasoning + output).
+ * The reasoning model burns ~1k tokens ranking 3 dishes; uncapped, a
+ * 30-candidate prompt routinely blows the 15s budget (timeout) or
+ * truncates the strict JSON (invalid output). The candidate trim below is
+ * the primary guard; this cap bounds cost per call.
+ */
+export const DEFAULT_MODEL_MAX_TOKENS = 4000;
+
+/**
+ * Bounded per-call token ceiling: 1000 floor keeps reasoning models usable,
+ * 16000 ceiling keeps a single call from eating the request budget. Ranks
+ * only (reasoning + the short id list), never the candidate catalog itself.
+ */
+const clampMaxTokens = (value: number | undefined): number => {
+  if (value === undefined || Number.isNaN(value)) {
+    return DEFAULT_MODEL_MAX_TOKENS;
+  }
+
+  return Math.min(Math.max(Math.floor(value), 1000), 16000);
+};
 
 const clampCandidateLimit = (value: number | undefined): number => {
   if (value === undefined || Number.isNaN(value)) {
@@ -197,5 +221,6 @@ export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
     timeoutMs: clampTimeoutMs(env.MODEL_TIMEOUT_MS),
     candidateLimit,
     outputLimit,
+    maxTokens: clampMaxTokens(env.MODEL_MAX_TOKENS),
   });
 };

@@ -38,6 +38,22 @@ const baseEnv: ServerEnv = {
 
 const withOverrides = (overrides: Partial<ServerEnv>): ServerEnv => ({ ...baseEnv, ...overrides });
 
+const resolveMuse = (value: number | undefined): RankingConfig =>
+  resolveRankingConfig(
+    withOverrides({
+      RECOMMENDATION_PROVIDER: "muse",
+      MODEL_API_KEY: "key",
+      MODEL_MAX_TOKENS: value,
+    }),
+  );
+
+const maxOfMuse = (config: RankingConfig): number =>
+  RankingConfig.$match(config, {
+    Deterministic: (): number => expect.unreachable("expected Muse"),
+    Muse: ({ maxTokens }): number => maxTokens,
+    Misconfigured: (): number => expect.unreachable("expected Muse"),
+  });
+
 describe("resolveRankingConfig", () => {
   test("deterministic is the default with documented limits", () => {
     const config = resolveRankingConfig(withOverrides({}));
@@ -81,16 +97,24 @@ describe("resolveRankingConfig", () => {
 
     RankingConfig.$match(config, {
       Deterministic: () => expect.unreachable("expected Muse"),
-      Muse: ({ apiKey, modelId, baseUrl, timeoutMs, candidateLimit, outputLimit }) => {
+      Muse: ({ apiKey, modelId, baseUrl, timeoutMs, candidateLimit, outputLimit, maxTokens }) => {
         expect(apiKey).toBe("key");
         expect(modelId).toBe(DEFAULT_MODEL_ID);
         expect(baseUrl).toBe(DEFAULT_MODEL_BASE_URL);
         expect(timeoutMs).toBe(DEFAULT_MODEL_TIMEOUT_MS);
         expect(candidateLimit).toBe(60);
         expect(outputLimit).toBe(10);
+        expect(maxTokens).toBe(4000);
       },
       Misconfigured: () => expect.unreachable("expected Muse"),
     });
+  });
+
+  test("max tokens clamps to the documented band", () => {
+    expect(maxOfMuse(resolveMuse(undefined))).toBe(4000);
+    expect(maxOfMuse(resolveMuse(200))).toBe(1000);
+    expect(maxOfMuse(resolveMuse(20000))).toBe(16000);
+    expect(maxOfMuse(resolveMuse(8000))).toBe(8000);
   });
 
   test("muse without a key is misconfigured, never silent", () => {

@@ -94,7 +94,9 @@ honest note and no provider call)
   |
   +--> deterministic / no key -> ReadyDeterministic
   |
-  +--> Muse structured ranking (single bounded call, 15 s timeout)
+  +--> Muse structured ranking (single bounded call, 15 s timeout,
+         4000-token ceiling, re-ranks the first 10 deterministic
+         candidates — never the whole pool)
          valid -> ReadyMuse | auth/permanent/misconfigured -> typed
          failure (no fallback) | 429/transient/invalid -> deterministic
          fallback reported as deterministic + warning
@@ -140,8 +142,12 @@ terms become hard SQL exclusions.
   transient (5xx/timeout), and invalid-output failures fall back to
   deterministic order reported as `deterministic`.
 - No retries (single attempt), `AbortSignal.timeout` (default 15 s),
+  `max_tokens` (default 4000, `MODEL_MAX_TOKENS`, clamped 1000–16000),
   no key/payload logging — only backend, model id, counts, duration,
-  and fallback reason. All secrets stay in server-only `MODEL_*`
+  and fallback reason. The model re-ranks the first 10 deterministic
+  candidates, never the whole pool: reasoning-token bloat on 30–60
+  candidates routinely blew the timeout or truncated the
+  strict JSON. All secrets stay in server-only `MODEL_*`
   env vars; without an explicit `muse` provider selection the pipeline
   runs deterministically with an explicit note (never mislabeled).
 

@@ -71,6 +71,7 @@ const testConfig: MuseRankingConfig = RankingConfig.Muse({
   timeoutMs: 1000,
   candidateLimit: 60,
   outputLimit: 10,
+  maxTokens: 4000,
 });
 
 type FetchImpl = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -281,6 +282,7 @@ describe("MetaClientLive failure taxonomy (stubbed transport, real adapter)", ()
         timeoutMs: 25,
         candidateLimit: 60,
         outputLimit: 10,
+        maxTokens: 4000,
       }),
     );
 
@@ -366,10 +368,12 @@ describe("MetaClientLive failure taxonomy (stubbed transport, real adapter)", ()
           type: z.string(),
           json_schema: z.object({ strict: z.boolean() }),
         }),
+        max_tokens: z.number(),
       })
       .parse(JSON.parse(raw));
 
     expect(body.model).toBe("muse-spark-1.3");
+    expect(body.max_tokens).toBe(4000);
     expect(body.response_format.type).toBe("json_schema");
     expect(body.response_format.json_schema.strict).toBe(true);
 

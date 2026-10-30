@@ -40,7 +40,7 @@ fast when a required value is missing; see `.env.example` for the full list):
   `RATE_LIMIT_*`, `REQUEST_TIMEOUT_MS`, `HOST`, `PORT`,
   `RECOMMENDATION_PROVIDER`, `MODEL_API_KEY`, `MODEL_MODEL_ID`,
   `MODEL_BASE_URL`, `MODEL_TIMEOUT_MS`, `MODEL_CANDIDATE_LIMIT`,
-  `MODEL_OUTPUT_LIMIT`, `OWNER_EMAIL`. `DATABASE_DIRECT_URL` is declared in server config
+  `MODEL_OUTPUT_LIMIT`, `MODEL_MAX_TOKENS`, `OWNER_EMAIL`. `DATABASE_DIRECT_URL` is declared in server config
   but not consumed by any application path yet.
 
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
