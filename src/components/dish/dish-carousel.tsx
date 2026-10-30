@@ -88,6 +88,33 @@ export const toCarouselPublishedImage = (
   };
 };
 
+/** Maximum dot buttons rendered; the compact counter carries the exact total. */
+export const MAX_VISIBLE_CAROUSEL_DOTS = 5;
+
+/**
+ * Windowed dot indexes around the active slide. Small sets render every
+ * dot; large sets render a sliding window of five so the control row never
+ * turns into dot noise. The full range stays reachable via prev/next,
+ * arrows, and swipe. Exported pure so the windowing is unit-testable
+ * without a DOM renderer.
+ */
+export const carouselVisibleDots = (total: number, active: number): Array<number> => {
+  if (total <= MAX_VISIBLE_CAROUSEL_DOTS) {
+    return Array.from({ length: Math.max(total, 0) }, (_, dot) => dot);
+  }
+
+  const start = Math.min(Math.max(active - 2, 0), total - MAX_VISIBLE_CAROUSEL_DOTS);
+
+  return Array.from({ length: MAX_VISIBLE_CAROUSEL_DOTS }, (_, offset) => start + offset);
+};
+
+/**
+ * Visible progress noun ("Dish"/"Món"). Inline until the coordinator-owned
+ * i18n key lands (reported: `carouselDish`); mirrors the existing inline
+ * `lang === "vi"` precedent in discovery-section.
+ */
+export const dishCounterNoun = (lang: Locale): string => (lang === "vi" ? "Món" : "Dish");
+
 /** Display index resolution shared by both carousel modes. The controlled
  * `activeIndex` wins when provided; otherwise the internal fallback (the
  * uncontrolled state) shows. Out-of-range values wrap; empty input stays
@@ -130,12 +157,13 @@ export interface DishCarouselProps {
 
 /**
  * Shared featured-slide dish carousel: one large image+info slide at a
- * time (stacked on mobile, side-by-side on desktop), prev/next + dots +
- * counter, arrow-key and touch-swipe navigation, autoplay that pauses on
- * hover/focus/off-screen and never runs under reduced motion, and
- * inert+hidden inactive slides so keyboard focus never lands off-screen.
- * Recommendation-specific content (AI note, summary, warnings) stays with
- * the caller, outside this component.
+ * time (stacked on mobile, side-by-side on desktop), prev/next + windowed
+ * dots + compact dish counter, arrow-key and touch-swipe navigation,
+ * autoplay that pauses on hover/focus/off-screen/hidden-tab and never runs
+ * under reduced motion, and inert+hidden inactive slides so keyboard focus
+ * never lands off-screen. Richer "Slide X of Y" phrasing lives only in the
+ * sr-only live region and slide labels. Recommendation-specific content
+ * (AI note, summary, warnings) stays with the caller, outside this component.
  */
 export function DishCarousel({
   activeIndex,
@@ -153,12 +181,12 @@ export function DishCarousel({
   const controlled = activeIndex !== undefined;
   const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
   const [activeResetKey, setActiveResetKey] = useState(resetKey);
-  const [playing, setPlaying] = useState(true);
-  const [hoverPaused, setHoverPaused] = useState(false);
-  const [focusPaused, setFocusPaused] = useState(false);
-  const [inView, setInView] = useState(true);
+
+  const [tabVisible, setTabVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+
   const [announcement, setAnnouncement] = useState("");
-  const sectionRef = useRef<HTMLElement | null>(null);
   const touchStartX = useRef<number | null>(null);
   const reducedMotion = usePrefersReducedMotion();
 
@@ -177,92 +205,61 @@ export function DishCarousel({
 
   const total = items.length;
 
-  const running =
-    autoplay && playing && !reducedMotion && !hoverPaused && !focusPaused && inView && total > 1;
+  // The ONLY automatic suspension conditions are reduced motion, a hidden
+  // browser tab, and opt-out/single-slide states. No hover, focus, or
+  // offscreen stopping: pausing on hover made autoplay look broken.
+  const running = autoplay && tabVisible && !reducedMotion && total > 1 && autoplayMs > 0;
 
   useEffect(() => {
-    const node = sectionRef.current;
-
-    // Container-level behavior: the carousel section itself is not an
-    // interactive element for JSX mouse/focus props.
-    const onPointerEnter = (): void => {
-      setHoverPaused(true);
+    const onVisibilityChange = (): void => {
+      setTabVisible(document.visibilityState === "visible");
     };
 
-    const onPointerLeave = (): void => {
-      setHoverPaused(false);
-    };
-
-    const onFocusIn = (): void => {
-      setFocusPaused(true);
-    };
-
-    const onFocusOut = (): void => {
-      setFocusPaused(false);
-    };
-
-    let observer: IntersectionObserver | undefined;
-
-    if (node !== null) {
-      node.addEventListener("pointerenter", onPointerEnter);
-      node.addEventListener("pointerleave", onPointerLeave);
-      node.addEventListener("focusin", onFocusIn);
-      node.addEventListener("focusout", onFocusOut);
-
-      if (typeof IntersectionObserver !== "undefined") {
-        observer = new IntersectionObserver(
-          (entries) => {
-            setInView(entries[0]?.isIntersecting ?? true);
-          },
-          { threshold: 0.2 },
-        );
-        observer.observe(node);
-      }
-    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      node?.removeEventListener("pointerenter", onPointerEnter);
-      node?.removeEventListener("pointerleave", onPointerLeave);
-      node?.removeEventListener("focusin", onFocusIn);
-      node?.removeEventListener("focusout", onFocusOut);
-      observer?.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
   const safeIndex = carouselDisplayIndex(activeIndex, uncontrolledIndex, total);
 
-  // Latest control-channel snapshot for the autoplay timer. The timer effect
-  // intentionally keeps its original dependency set (running/total/ms) so
-  // Discover autoplay cadence is untouched; refs carry the live values.
-  const controlRef = useRef({ controlled, onIndexChange });
+  // Callback-identity guard: an inline `onIndexChange` must never wedge the
+  // cadence, so the timer reads it through a ref while depending only on
+  // values it actually consumes.
+  const onIndexChangeRef = useRef(onIndexChange);
   useEffect(() => {
-    controlRef.current = { controlled, onIndexChange };
-  });
-
-  const liveIndexRef = useRef(safeIndex);
-  useEffect(() => {
-    liveIndexRef.current = safeIndex;
+    onIndexChangeRef.current = onIndexChange;
   });
 
   useEffect(() => {
-    // Autoplay advances silently: manual navigation announces via the
-    // live region, the timer never spams screen readers.
+    if (!running) {
+      return undefined;
+    }
+
+    // Self-perpetuating one-shot: every committed transition (auto or
+    // manual) changes `safeIndex`, which reschedules a fresh full delay —
+    // so the timer can neither stall (while the index keeps moving) nor
+    // double-fire, and a manual pick never jumps immediately. Exactly one
+    // timeout exists at a time; cleanup clears it on re-run and unmount
+    // (StrictMode-safe). `controlled` is read directly (a stable boolean);
+    // the callback goes through a ref. Autoplay advances silently: manual
+    // navigation announces via the live region, the timer never spams
+    // screen readers.
     const timer = window.setTimeout(() => {
-      if (running) {
-        const wrapped = carouselWrappedIndex(liveIndexRef.current + 1, total);
+      const wrapped = carouselWrappedIndex(safeIndex + 1, total);
 
-        if (!controlRef.current.controlled) {
-          setUncontrolledIndex(wrapped);
-        }
-
-        controlRef.current.onIndexChange?.(wrapped);
+      if (!controlled) {
+        setUncontrolledIndex(wrapped);
       }
+
+      onIndexChangeRef.current?.(wrapped);
     }, autoplayMs);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [running, total, autoplayMs]);
+  }, [running, total, autoplayMs, safeIndex, controlled]);
 
   // Empty states stay with the caller; every hook above still ran.
   if (total === 0) {
@@ -272,6 +269,8 @@ export function DishCarousel({
   const goTo = (next: number): void => {
     const wrapped = carouselWrappedIndex(next, total);
 
+    // The index change reschedules the autoplay timer for a full delay,
+    // so a manual pick never jumps immediately.
     if (!controlled) {
       setUncontrolledIndex(wrapped);
     }
@@ -311,7 +310,7 @@ export function DishCarousel({
   };
 
   return (
-    <section ref={sectionRef} aria-roledescription="carousel" aria-label={label}>
+    <section aria-roledescription="carousel" aria-label={label}>
       <output aria-live="polite" className="sr-only">
         {announcement}
       </output>
@@ -442,40 +441,9 @@ export function DishCarousel({
           >
             →
           </button>
-          {autoplay ? (
-            <button
-              type="button"
-              onClick={() => {
-                setPlaying((value) => !value);
-              }}
-              onKeyDown={handleKeyDown}
-              aria-label={playing ? copy.carouselPause : copy.carouselPlay}
-              aria-pressed={playing}
-              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
-            >
-              {playing ? "❚❚" : "▶"}
-            </button>
-          ) : null}
-          <div className="flex items-center gap-1.5" aria-label={label}>
-            {items.map((dish, dot) => (
-              <button
-                key={dish.id}
-                type="button"
-                aria-current={dot === safeIndex}
-                aria-label={`${copy.carouselGoTo} ${dot + 1}`}
-                onClick={() => {
-                  goTo(dot);
-                }}
-                onKeyDown={handleKeyDown}
-                className={`size-3 cursor-pointer rounded-full transition ${
-                  dot === safeIndex ? "bg-ink" : "bg-border-soft hover:bg-muted"
-                }`}
-              />
-            ))}
-          </div>
-          <p className="text-sm font-bold text-muted">
-            {copy.carouselSlide} {safeIndex + 1} {copy.carouselOf} {total}
-          </p>
+          {/* No dots, counter, progress bar, or pause control by design:
+              two arrows are the entire visible navigation. Screen-reader
+              announcements and slide labels keep carousel semantics. */}
         </div>
       ) : null}
     </section>

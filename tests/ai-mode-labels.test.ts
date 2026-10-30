@@ -3,18 +3,16 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { AiExplanationCard } from "@/components/home/recommend/quiz-status";
+import { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 import { messagesFor } from "@/shared/i18n";
 
 const copyEn = messagesFor("en");
 const copyVi = messagesFor("vi");
 
-const UNAVAILABLE_FALLBACK = "AI ranking was unavailable; used deterministic order instead.";
-const SURPRISE = "Surprise variety applied: showing a different slice of the eligible pool.";
-
 describe("ai explanation card", () => {
   test("ai mode renders the cream card with sparkles, Muse note, and ranking-only explainer", () => {
     const html = renderToStaticMarkup(
-      AiExplanationCard({ copy: copyEn, mode: "ai", warnings: [] }),
+      AiExplanationCard({ copy: copyEn, mode: "ai", ranking: RankingProvenance.LiveMuse() }),
     );
 
     expect(html).toContain(copyEn.recAiRankedTitle);
@@ -26,7 +24,7 @@ describe("ai explanation card", () => {
 
   test("ai mode never presents catalog copy as AI-written and never invents scores", () => {
     const html = renderToStaticMarkup(
-      AiExplanationCard({ copy: copyEn, mode: "ai", warnings: [] }),
+      AiExplanationCard({ copy: copyEn, mode: "ai", ranking: RankingProvenance.LiveMuse() }),
     ).toLowerCase();
 
     expect(html).not.toContain("written by");
@@ -37,7 +35,7 @@ describe("ai explanation card", () => {
 
   test("ai mode explains ranking-only in Vietnamese", () => {
     const html = renderToStaticMarkup(
-      AiExplanationCard({ copy: copyVi, mode: "ai", warnings: [] }),
+      AiExplanationCard({ copy: copyVi, mode: "ai", ranking: RankingProvenance.LiveMuse() }),
     );
 
     expect(html).toContain(copyVi.recAiRankedTitle);
@@ -47,7 +45,11 @@ describe("ai explanation card", () => {
 
   test("deterministic mode shows catalog wording with no Muse branding", () => {
     const html = renderToStaticMarkup(
-      AiExplanationCard({ copy: copyEn, mode: "deterministic", warnings: [] }),
+      AiExplanationCard({
+        copy: copyEn,
+        mode: "deterministic",
+        ranking: RankingProvenance.DeterministicCatalog(),
+      }),
     );
 
     expect(html).toContain("Selected from our food catalog");
@@ -60,7 +62,7 @@ describe("ai explanation card", () => {
       AiExplanationCard({
         copy: copyEn,
         mode: "deterministic",
-        warnings: [UNAVAILABLE_FALLBACK],
+        ranking: RankingProvenance.DegradedMuse({ cause: "transient" }),
       }),
     );
 
@@ -74,7 +76,7 @@ describe("ai explanation card", () => {
       AiExplanationCard({
         copy: copyEn,
         mode: "deterministic",
-        warnings: [SURPRISE],
+        ranking: RankingProvenance.DeterministicCatalog(),
       }),
     );
 
@@ -87,8 +89,8 @@ describe("ai explanation card", () => {
       AiExplanationCard({
         copy: copyEn,
         mode: "empty",
+        ranking: RankingProvenance.DeterministicCatalog(),
         reasons: ["No dishes match those filters."],
-        warnings: [],
       }),
     );
 
@@ -104,8 +106,8 @@ describe("ai explanation card", () => {
       AiExplanationCard({
         copy: copyEn,
         mode: "uncertain",
+        ranking: RankingProvenance.DeterministicCatalog(),
         reasons: ["Could not verify safety for those allergies."],
-        warnings: [],
       }),
     );
 
@@ -120,7 +122,7 @@ describe("ai explanation card", () => {
       AiExplanationCard({
         copy: copyEn,
         mode: "ai",
-        warnings: [UNAVAILABLE_FALLBACK],
+        ranking: RankingProvenance.LiveMuse(),
       }),
     );
 

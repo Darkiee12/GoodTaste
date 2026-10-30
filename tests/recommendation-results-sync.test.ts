@@ -10,6 +10,7 @@ import { RememberPrefs } from "@/components/home/recommend/quiz-summary";
 import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
 import { ResultsSidebar } from "@/components/home/recommend/results-sidebar";
 import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
+import { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 import { messagesFor } from "@/shared/i18n";
 
 const copyEn = messagesFor("en");
@@ -81,7 +82,8 @@ const sidebarHtml = (aiMode: "ai" | "deterministic" = "ai"): string =>
       aiCard: createElement(AiExplanationCard, {
         copy: copyEn,
         mode: aiMode,
-        warnings: [],
+        ranking:
+          aiMode === "ai" ? RankingProvenance.LiveMuse() : RankingProvenance.DeterministicCatalog(),
       }),
       copy: copyEn,
       countryOptions: [{ code: "VN", label: "Vietnam" }],

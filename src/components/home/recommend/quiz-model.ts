@@ -455,10 +455,20 @@ export const formatAccuracyM = (accuracy: number): string =>
   `±${Math.round(accuracy).toString()} m`;
 
 /**
+ * Precise scope wording now reads from i18n copy (recWhereUsingLocation,
+ * recWhereAccuracyNote with a {meters} slot) instead of the interim
+ * English fallbacks.
+ */
+
+/**
  * Result-scope label for the summary chips, composed from existing copy plus
  * catalog country names: approximate home regions explore by name, precise
- * fixes show the nearby label with accuracy, destinations show the plain
- * country name, worldwide stays unlabeled. Never claims city precision.
+ * fixes lead with the using-location note plus accuracy as secondary detail,
+ * destinations show the plain country name, worldwide stays unlabeled.
+ * The precise wording never claims food within X meters: it names association
+ * use (dishes matched with your area in play) plus fix accuracy, and stays
+ * silent on restaurant availability, which the places lookup answers
+ * separately. Never claims city precision.
  */
 export const scopeLabelFor = (
   input: {
@@ -478,9 +488,11 @@ export const scopeLabelFor = (
       case "approx":
         return formatTemplate(copy.recWhereExploring, nameOf(location.country));
       case "precise":
-        return location.accuracy === null || location.accuracy === undefined
-          ? copy.recWhereNearYou
-          : `${copy.recWhereNearYou} · ${formatAccuracyM(location.accuracy)}`;
+        if (location.accuracy === null || location.accuracy === undefined) {
+          return copy.recWhereUsingLocation;
+        }
+
+        return `${copy.recWhereUsingLocation} · ${copy.recWhereAccuracyNote.replace("{meters}", Math.round(location.accuracy).toString())}`;
       case "destination":
         return nameOf(location.country);
       case "worldwide":

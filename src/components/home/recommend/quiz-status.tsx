@@ -1,5 +1,7 @@
+import { Match } from "effect";
 import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
 
+import type { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { Messages } from "@/shared/i18n";
 
 /**
@@ -8,7 +10,8 @@ import type { Messages } from "@/shared/i18n";
  * - Errors (transport failure) are retryable alerts with a recovery action.
  * - Allergy limits are prominent: the backend refuses to rank when safety is
  *   unverifiable, so the refusal reads as a safety notice, never a warning.
- * - Deterministic-rank fallbacks are a subtle status line, never a panel.
+ * - Deterministic-rank fallbacks are one discreet sidebar notice, never a
+ *   dominant banner; dietary/unknown-dislike warnings keep the banner.
  * - Unknown-dislike warnings stay visible but secondary to results.
  */
 export function QuizError({
@@ -53,7 +56,12 @@ export function ResultWarnings({
   readonly copy: Messages;
   readonly warnings: ReadonlyArray<string>;
 }) {
-  if (warnings.length === 0) {
+  // Ranking-availability fallbacks are status, not warnings: they render
+  // once, discreetly, in the sidebar ranking card. The banner keeps only
+  // user-actionable notes (dietary/unknown-dislike), which stay prominent.
+  const visible = userWarningsFor(warnings);
+
+  if (visible.length === 0) {
     return null;
   }
 
@@ -63,7 +71,7 @@ export function ResultWarnings({
         <TriangleAlertIcon aria-hidden="true" className="size-4" /> {copy.recWarningsLabel}
       </p>
       <ul className="mt-2 flex list-disc flex-col gap-1 pl-6 text-sm text-ink">
-        {warnings.map((warning) => (
+        {visible.map((warning) => (
           <li key={warning}>{warning}</li>
         ))}
       </ul>
@@ -80,17 +88,60 @@ export function ResultWarnings({
 export type RecommendationModeLabel = "ai" | "deterministic";
 
 /**
- * Server-English warning markers. The recommendation service hardcodes these
- * English sentences regardless of UI locale, so the deterministic label can
- * detect an AI-failure fallback honestly. Markers select the *explainer
- * variant* only; the `mode` prop stays the single branding source of truth.
+ * Ranking-status markers. These server-English sentences are filtered out of
+ * the banner (userWarningsFor): the degraded *variant* branches on the
+ * structured `ranking` field, but warning strings still need markers to tell
+ * ranking-availability notes (shown once, in the ranking card) apart from
+ * dietary/unknown-dislike notes (shown in the banner).
  */
-const AI_FALLBACK_MARKER = "AI ranking was";
+const RANKING_STATUS_MARKERS = [
+  "AI ranking was",
+  "Sign in for AI-ranked picks",
+  "AI ranking is not configured",
+] as const;
+
+/** True for ranking-availability notes: ranking status, not warnings. */
+export const isAiFallbackWarning = (warning: string): boolean =>
+  RANKING_STATUS_MARKERS.some((marker) => warning.includes(marker));
 
 /**
- * Interim localized sentences for mode labels (see the TODO on RankingNote).
- * One writer only: both RankingNote and AiExplanationCard read these, so the
- * inline note and the sidebar card can never drift apart.
+ * Banner-visible warnings: everything except AI-availability fallbacks.
+ * Dietary and unknown-dislike notes stay prominent in the banner; the
+ * fallback renders once, discreetly, in the sidebar ranking card instead of
+ * duplicating across both.
+ */
+export const userWarningsFor = (warnings: ReadonlyArray<string>): Array<string> =>
+  warnings.filter((warning) => !isAiFallbackWarning(warning));
+
+/**
+ * One coherent ranking status for both placements (inline note and sidebar
+ * card). `mode` is the single branding source of truth — only `mode === "ai"`
+ * renders Muse branding, with the ranking-only explainer. Deterministic
+ * renders neutral catalog wording with no icon; a degraded AI attempt
+ * (`ranking._tag === "DegradedMuse"`) says so honestly instead of silently
+ * passing as catalog order. Warning text is never parsed to decide state.
+ */
+export type RankingVariant = "ai" | "degraded" | "catalog";
+
+export const rankingVariantFor = (
+  mode: RecommendationModeLabel,
+  ranking: RankingProvenance,
+): RankingVariant => {
+  if (mode === "ai") {
+    return "ai";
+  }
+
+  return Match.value(ranking).pipe(
+    Match.tag("DegradedMuse", (): RankingVariant => "degraded"),
+    Match.orElse((): RankingVariant => "catalog"),
+  );
+};
+
+/**
+ * Interim localized sentences for mode labels (see the TODO on
+ * AI_FALLBACK_MARKER). One writer only: both RankingNote and
+ * AiExplanationCard read these, so the inline note and the sidebar card can
+ * never drift apart.
  */
 const aiExplainerFor = (copy: Messages): string => copy.recAiExplainer;
 
@@ -100,20 +151,23 @@ const fallbackNoteFor = (copy: Messages): string => copy.recFallbackNote;
 
 type RankingNoteModeProps = {
   readonly mode: RecommendationModeLabel;
-  readonly warnings: ReadonlyArray<string>;
+  readonly ranking: RankingProvenance;
   readonly copy: Messages;
 };
 
 /**
- * Mode label for the results area. AI shows a subtle sparkles
- * icon, the localized AI title, and a one-line explainer that credits Muse
- * with ranking only — catalog names and descriptions stay as curated and are
- * never presented as AI-written. Deterministic shows no icon and states the
- * picks come from the food catalog; a degraded AI attempt (fallback warning
- * present) says so instead of silently passing as catalog order.
+ * Mode label for the results area. Thin inline placement over the shared
+ * ranking core: AI shows a subtle sparkles icon, the localized AI title, and
+ * a one-line explainer that credits Muse with ranking only — catalog names
+ * and descriptions stay as curated and are never presented as AI-written.
+ * Deterministic shows no icon and states the picks come from the food
+ * catalog; a degraded AI attempt (fallback warning present) says so instead
+ * of silently passing as catalog order.
  */
 export function RankingNote(props: RankingNoteModeProps) {
-  if (props.mode === "ai") {
+  const variant = rankingVariantFor(props.mode, props.ranking);
+
+  if (variant === "ai") {
     return (
       <div className="mb-3 flex flex-col gap-1">
         <p className="flex items-center gap-1.5 text-sm font-bold text-ink">
@@ -125,9 +179,7 @@ export function RankingNote(props: RankingNoteModeProps) {
     );
   }
 
-  const degraded = props.warnings.some((warning) => warning.includes(AI_FALLBACK_MARKER));
-
-  if (degraded) {
+  if (variant === "degraded") {
     return <p className="mb-3 text-sm font-semibold text-muted">{fallbackNoteFor(props.copy)}</p>;
   }
 
@@ -135,20 +187,17 @@ export function RankingNote(props: RankingNoteModeProps) {
 }
 
 /**
- * Sidebar-ready AI explanation card. Explicit props only: `mode` (straight
- * from `outcome.mode`) is the single branding source of truth — only
- * `mode === "ai"` renders Muse branding, and only with the ranking-only
- * explainer (catalog names/descriptions are never presented as AI-written,
- * and no scores are shown or invented). Deterministic renders neutral
- * catalog wording with no icon; a degraded AI attempt (fallback warning
- * present) says so honestly instead of passing as catalog order. Empty and
- * uncertain render explanatory states — the panel owns those, so the card
- * never renders dish content for them.
- *
- * Drop-in for the lead integrator: where quiz-flow renders
- * `<RankingNote note={modeNoteFor(outcome.mode, copy)} />`, pass
- * `mode={outcome.mode} warnings={outcome.warnings} copy` here plus
- * `reasons={outcome.reasons}` for the empty/uncertain states.
+ * Sidebar-ready ranking card over the same shared core as RankingNote, so
+ * the inline note and the sidebar card can never drift apart. Explicit props
+ * only: `mode` (straight from `outcome.mode`) is the single branding source
+ * of truth — only `mode === "ai"` renders Muse branding, and only with the
+ * ranking-only explainer (catalog names/descriptions are never presented as
+ * AI-written, and no scores are shown or invented). Deterministic renders
+ * neutral catalog wording with no icon; a degraded AI attempt (fallback
+ * warning present) renders ONE discreet notice here — the banner no longer
+ * repeats it (see userWarningsFor), and the fallback reason stays distinct
+ * from dietary warnings. Empty and uncertain render explanatory states — the
+ * panel owns those, so the card never renders dish content for them.
  */
 export type AiCardMode = "ai" | "deterministic" | "uncertain" | "empty";
 
@@ -156,12 +205,12 @@ const NO_REASONS: ReadonlyArray<string> = [];
 
 export function AiExplanationCard({
   mode,
-  warnings,
+  ranking,
   copy,
   reasons = NO_REASONS,
 }: {
   readonly mode: AiCardMode;
-  readonly warnings: ReadonlyArray<string>;
+  readonly ranking: RankingProvenance;
   readonly copy: Messages;
   readonly reasons?: ReadonlyArray<string>;
 }) {
@@ -181,12 +230,12 @@ export function AiExplanationCard({
   }
 
   if (mode === "deterministic") {
-    const degraded = warnings.some((warning) => warning.includes(AI_FALLBACK_MARKER));
+    const variant = rankingVariantFor(mode, ranking);
 
     return (
       <aside className="rounded-2xl border-2 border-border-soft bg-white px-4 py-3">
         <p className="text-sm font-semibold text-muted">
-          {degraded ? fallbackNoteFor(copy) : catalogNoteFor(copy)}
+          {variant === "degraded" ? fallbackNoteFor(copy) : catalogNoteFor(copy)}
         </p>
       </aside>
     );

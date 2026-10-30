@@ -1,79 +1,87 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { getRouteApi, Link } from "@tanstack/react-router";
-import { Globe2Icon, LocateFixedIcon, MapPinIcon, RefreshCwIcon } from "lucide-react";
+import { getRouteApi } from "@tanstack/react-router";
+import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
-import { DishCarousel, DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import { DishCarousel } from "@/components/dish/dish-carousel";
+import {
+  DiscoveryFallback,
+  DiscoveryLoadingState,
+  resolveDiscoveryFallbackState,
+} from "@/components/home/discovery-fallback";
+import {
+  DiscoveryLocation,
+  discoveryHeadingFor,
+  discoveryServedScopeFor,
+  discoverySubtitleFor,
+  type DiscoveryServedScope,
+} from "@/components/home/discovery-location";
 import { sanitizeCountryCode } from "@/components/home/recommend/quiz-model";
-import {
-  accuracyLabelFor,
-  fallbackOptionsFor,
-  isPoorAccuracy,
-  usePreciseLocation,
-} from "@/components/home/recommend/use-precise-location";
-import {
-  getLocalCarouselFn,
-  getVisitorRegionFn,
-  listCountriesFn,
-} from "@/modules/food-discovery/food.functions";
+import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
+import { getLocalCarouselFn, listCountriesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
 import { useFavoriteStatus } from "@/modules/user/components/save-dish-button";
-import type { VisitorRegion } from "@/server/geo/visitor-region";
 import type { Locale, Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
 const CAROUSEL_LIMIT = 5;
 
-function locationLabel(region: VisitorRegion | null): string | null {
-  if (region === null) {
+function countryNameFor(
+  countries:
+    | ReadonlyArray<{ readonly iso3166: string | null; readonly displayName: string | undefined }>
+    | undefined,
+  code: string | null,
+): string | null {
+  if (code === null) {
     return null;
   }
 
-  const parts = [region.city, region.regionCode ?? region.region, region.country].filter(
-    (part): part is string => part !== null && part !== "",
-  );
-
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return countries?.find((entry) => entry.iso3166 === code)?.displayName ?? code;
 }
 
 /**
- * Homepage food carousel with honest scopes: the heading names the
- * trusted network country when one is known, and the scope line always
- * says what the cards actually show — network area, precise fix,
- * or worldwide (manual or automatic fallback when no region resolved).
- * Dishes come from a single server-side projection keyed by visitor
- * coordinates (nearest real catalog associations) or region, falling
- * back to an explicit worldwide browse — never random picks labeled as
- * local. Geolocation only runs on explicit tap; coordinates never enter
- * query keys or persisted state.
+ * Homepage food discovery: show relevant published dishes immediately,
+ * letting location improve relevance rather than gate it. One exclusive
+ * scope per request (precise nearby, country, or worldwide); the server
+ * falls back automatically (nearby -> country -> worldwide) and labels the
+ * served scope honestly. Cards on screen are always described by the scope
+ * that served them — never by a newly selected region — because headings
+ * follow the last served response, not the pending request.
  */
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
   const { session } = rootRoute.useRouteContext();
 
   // Precise location is explicit-only: the shared locator never prompts on
-  // mount or on render. The carousel starts from the trusted approximate
-  // region and upgrades to coordinates only after the visitor taps the
-  // precise action below.
+  // mount or on render. Coordinates never enter query keys, logs, or
+  // persisted state — the precise scope keys on the locator success count.
   const precise = usePreciseLocation();
 
+  // Explicit visitor choices. The destination overrides trusted detection;
+  // worldwide is an explicit mode. Neither is overwritten by async detection.
   const [worldwide, setWorldwide] = useState(false);
-  // Rotation seed for the carousel selection: same scope + same seed renders
-  // the same set (stable within the session); bumping it renders another
-  // set. Reset explicitly on scope change, preserved otherwise.
+  const [destination, setDestination] = useState<string | null>(null);
+  // Rotation seed for another set: same scope + same seed renders the same
+  // set (stable within the session); bumping it renders another set.
   const [rotation, setRotation] = useState(0);
   const [activeScope, setActiveScope] = useState<string | null>(null);
 
-  const regionQuery = useQuery({
-    queryKey: ["geo", "visitor-region"],
-    queryFn: () => getVisitorRegionFn(),
-    retry: 1,
-    staleTime: Number.POSITIVE_INFINITY,
-  });
+  // Last SERVED response (scope + country + supplemented + precise flag).
+  // Labels and the selector always describe these cards; a pending refetch
+  // keeps the old labels until its own response commits.
+  const [served, setServed] = useState<{
+    key: string;
+    scopeKey: string | null;
+    country: string | null;
+    precise: boolean;
+    supplemented: boolean;
+  } | null>(null);
 
   // Trusted approximate country shared with the quiz cache key, so the
-  // homepage issues one region request, not two. The carousel filters by
-  // this country first and falls back to the header-derived visitor region.
+  // homepage issues one region request, not two. Cloudflare `cf-*` headers
+  // are only honored behind a verified trusted proxy (see trusted-region);
+  // locally only DEV_VISITOR_COUNTRY applies, otherwise the answer is an
+  // honest null and discovery falls back to worldwide automatically.
   const quizRegionQuery = useQuery({
     queryKey: ["geo", "quiz-region"],
     queryFn: () => getQuizRegionFn(),
@@ -90,49 +98,25 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
     staleTime: 5 * 60_000,
   });
 
-  const trustedName =
-    trustedCountry === null
-      ? null
-      : ((countriesQuery.data ?? []).find((entry) => entry.iso3166 === trustedCountry)
-          ?.displayName ?? trustedCountry);
-
-  let heading = copy.discoverLocalTitle;
-
-  if (trustedName !== null) {
-    heading =
-      lang === "vi" ? `Khám phá món ngon tại ${trustedName}` : `Discover Food in ${trustedName}`;
-  }
-
-  const region = regionQuery.data ?? null;
-  const country = worldwide ? null : (trustedCountry ?? region?.country ?? null);
-  const where = worldwide ? null : (locationLabel(region) ?? trustedName);
+  const effectiveCountry = destination ?? trustedCountry;
   const preciseFix = precise.status === "success" ? precise.fix : null;
-  const geoSettled = !regionQuery.isPending && !quizRegionQuery.isPending;
+  const geoSettled = !quizRegionQuery.isPending;
 
-  // Coordinates never enter the query key: the precise scope is the
-  // locator's success counter, so re-locating refetches without persisting
-  // visitor coordinates in the cache. When geography settles with no
-  // country and no precise fix, the carousel falls back to an explicitly
-  // labeled automatic worldwide scope instead of rendering nothing.
+  // Exactly one scope per request — never coordinates alongside worldwide.
   let scopeKey: string | null = null;
 
   if (worldwide) {
     scopeKey = "world";
   } else if (preciseFix !== null) {
     scopeKey = `nearby-${precise.successCount.toString()}`;
-  } else if (country !== null) {
-    scopeKey = `country-${country}`;
+  } else if (effectiveCountry !== null) {
+    scopeKey = `country-${effectiveCountry}`;
   } else if (geoSettled) {
     scopeKey = "world-auto";
   }
 
   const isAutoWorldwide = scopeKey === "world-auto";
-  const located = worldwide || preciseFix !== null || country !== null || isAutoWorldwide;
 
-  // Reset rotation explicitly when the scope changes (React
-  // endorsed render-time adjustment: the discarded render never commits, so
-  // no stale-seed fetch fires). The shared carousel resets its own slide
-  // from the same scope signal via resetKey.
   if (scopeKey !== activeScope) {
     setActiveScope(scopeKey);
     setRotation(0);
@@ -152,7 +136,7 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
       if (preciseFix !== null) {
         return getLocalCarouselFn({
           data: {
-            country: country ?? undefined,
+            country: effectiveCountry ?? undefined,
             latitude: preciseFix.latitude,
             limit: CAROUSEL_LIMIT,
             locale: lang,
@@ -162,9 +146,9 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
         });
       }
 
-      if (country !== null) {
+      if (effectiveCountry !== null) {
         return getLocalCarouselFn({
-          data: { country, limit: CAROUSEL_LIMIT, locale: lang, seed: rotation },
+          data: { country: effectiveCountry, limit: CAROUSEL_LIMIT, locale: lang, seed: rotation },
         });
       }
 
@@ -173,6 +157,22 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
     retry: 1,
     staleTime: 60_000,
   });
+
+  const requestKey = scopeKey === null ? null : `${scopeKey}:${rotation.toString()}`;
+
+  if (
+    requestKey !== null &&
+    carouselQuery.data !== undefined &&
+    (served === null || served.key !== requestKey)
+  ) {
+    setServed({
+      key: requestKey,
+      scopeKey,
+      country: worldwide ? null : effectiveCountry,
+      precise: preciseFix !== null,
+      supplemented: carouselQuery.data.supplemented,
+    });
+  }
 
   const items = carouselQuery.data?.items ?? [];
   const total = items.length;
@@ -187,44 +187,93 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
     setRotation((value) => value + 1);
   };
 
-  // The scope line follows the scope actually served, not the scope asked
-  // for: a precise request that falls back to country dishes is labeled as
-  // the network area, never as "near you".
-  const resolvedScope = carouselQuery.data?.scope ?? null;
+  // Scope line follows the scope actually served, not the scope asked for:
+  // a precise request that fell back to country dishes is labeled regional,
+  // and worldwide fallback is labeled worldwide — never local. A sparse
+  // nearby pool topped up with country dishes (supplemented) is regional
+  // with the country named. While a scope change is still loading, the
+  // heading already names the requested scope so the skeleton below it is
+  // never mislabeled.
+  const servedScopeName = carouselQuery.data?.scope ?? null;
 
-  let locationLine = copy.discoverLocalUnknown;
+  const servedScope = discoveryServedScopeFor({
+    preciseActive: served?.precise ?? false,
+    servedScope: servedScopeName,
+    supplemented: served?.supplemented ?? false,
+  });
 
-  if (worldwide || isAutoWorldwide) {
-    locationLine = copy.carouselWorldwide;
-  } else if (preciseFix !== null && resolvedScope !== "country") {
-    const accuracy = isPoorAccuracy(preciseFix) ? accuracyLabelFor(preciseFix) : null;
+  const servedRegionName = countryNameFor(countriesQuery.data, served?.country ?? null);
 
-    if (accuracy !== null) {
-      locationLine = `${copy.discoverLocalNearYou} (${accuracy})`;
-    } else {
-      locationLine = copy.discoverLocalNearYou;
+  const requestedRegionName = countryNameFor(countriesQuery.data, effectiveCountry);
+
+  // A scope change (new country, precise fix, worldwide toggle) invalidates
+  // the served cards: the section shows the skeleton with the newly
+  // requested scope instead of stale cards under a stale label.
+  const scopeChanged = served !== null && served.scopeKey !== scopeKey;
+
+  // The subtitle always matches the heading's scope: country results get
+  // the country line, worldwide fallback owns the catalog-gap explanation.
+  // Heading + subtitle can never contradict ("around the world" above
+  // "local favorites" is the exact mismatch this prevents).
+  let heading = copy.discoverLocalTitle;
+  let subtitle = copy.discoveryWorldwideNote;
+
+  if (scopeChanged || servedScope === null) {
+    if (effectiveCountry !== null || worldwide) {
+      let requestedScope: DiscoveryServedScope = "regional";
+
+      if (worldwide) {
+        requestedScope = "worldwide";
+      } else if (preciseFix !== null) {
+        requestedScope = "nearby";
+      }
+
+      heading = discoveryHeadingFor({
+        lang,
+        regionName: requestedRegionName,
+        scope: requestedScope,
+      });
+      subtitle = discoverySubtitleFor({
+        lang,
+        regionName: requestedRegionName,
+        scope: requestedScope,
+        supplemented: false,
+      });
     }
-  } else if (where !== null) {
-    locationLine = `${copy.discoverLocalNear}: ${where}`;
+  } else {
+    heading = discoveryHeadingFor({ lang, regionName: servedRegionName, scope: servedScope });
+    subtitle = discoverySubtitleFor({
+      lang,
+      regionName: servedRegionName,
+      scope: servedScope,
+      supplemented: served?.supplemented ?? false,
+    });
   }
 
-  const loading =
-    regionQuery.isPending ||
-    quizRegionQuery.isPending ||
-    (scopeKey !== null && carouselQuery.isPending);
+  // A scope change (new country, precise fix, worldwide toggle) invalidates
+  // the served cards: show the skeleton with the newly requested scope
+  // instead of stale cards under a stale label. Plain refetches (rotation,
+  // "show another set") keep the cards with a small updating note.
+  const loading = scopeKey !== null && (carouselQuery.isPending || scopeChanged);
+  const failed = carouselQuery.isError || quizRegionQuery.isError;
+  const refetching = !carouselQuery.isPending && carouselQuery.isFetching && total > 0;
 
-  const failed = carouselQuery.isError || regionQuery.isError || quizRegionQuery.isError;
+  const preciseDenied =
+    precise.status === "denied" || precise.status === "timeout" || precise.status === "unavailable";
 
-  const preciseFailed =
-    precise.status === "denied" ||
-    precise.status === "timeout" ||
-    precise.status === "unavailable" ||
-    precise.status === "unsupported" ||
-    precise.status === "insecure";
+  const preciseDisabled = precise.status === "unsupported" || precise.status === "insecure";
 
-  const preciseRetryable = fallbackOptionsFor(precise.status, null).some(
-    (option) => option.retryPrecise,
-  );
+  const servedCountryCode = served?.country ?? null;
+
+  const fallbackState = resolveDiscoveryFallbackState({
+    failed,
+    geoSettled,
+    isAutoWorldwide,
+    loading,
+    located: scopeKey !== null,
+    total,
+    worldwide: scopeKey === "world" || servedScopeName === "worldwide",
+  });
 
   return (
     <section
@@ -240,132 +289,50 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
           {heading}
         </h2>
 
-        <p className="mb-2 max-w-[60ch] text-lg font-bold text-ink">{locationLine}</p>
+        <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
 
-        <p className="mb-8 max-w-[60ch] text-lg text-muted">{copy.discoverLocalSub}</p>
-
-        <div className="mb-8 flex flex-wrap items-center gap-3">
-          {!worldwide && precise.status === "locating" ? (
-            <output className="text-sm font-bold text-muted">{copy.discoverLocalLoading}</output>
-          ) : null}
-          {!worldwide && precise.status !== "success" && precise.status !== "locating" ? (
-            <button
-              type="button"
-              onClick={precise.request}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
-            >
-              <LocateFixedIcon aria-hidden="true" className="size-4 flex-none" />
-              {lang === "vi" ? "Dùng vị trí chính xác" : "Use precise location"}
-            </button>
-          ) : null}
-          {!worldwide && precise.status === "success" ? (
-            <button
-              type="button"
-              onClick={() => {
-                precise.reset();
-              }}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-            >
-              <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
-              {lang === "vi" ? "Về vùng mạng" : "Back to network region"}
-            </button>
-          ) : null}
-          {!worldwide ? (
-            <button
-              type="button"
-              onClick={() => {
-                setWorldwide(true);
-              }}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-            >
-              <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
-              {copy.carouselExploreWorld}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setWorldwide(false);
-              }}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-            >
-              <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
-              {lang === "vi" ? "Về vùng của bạn" : "Back to region"}
-            </button>
-          )}
-          <Link
-            to="/"
-            search={{ lang }}
-            hash="recommend"
-            resetScroll={false}
-            className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-          >
-            <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
-            {copy.recWhereAnother}
-          </Link>
-          {preciseFailed ? (
-            <p
-              role="alert"
-              className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
-            >
-              {copy.recError}
-            </p>
-          ) : null}
-          {preciseFailed && preciseRetryable ? (
-            <button
-              type="button"
-              onClick={precise.request}
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
-            >
-              {copy.recRetry}
-            </button>
-          ) : null}
+        <div className="mb-8">
+          <DiscoveryLocation
+            countries={(countriesQuery.data ?? []).flatMap((entry) =>
+              entry.iso3166 === null
+                ? []
+                : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
+            )}
+            countriesLoading={countriesQuery.isPending}
+            currentLabel={servedRegionName ?? requestedRegionName ?? copy.discoverAroundWorld}
+            disabled={false}
+            lang={lang}
+            locating={precise.status === "locating"}
+            preciseDenied={preciseDenied}
+            preciseDisabled={preciseDisabled}
+            selectedCountry={servedCountryCode ?? effectiveCountry}
+            selection={servedScope ?? (worldwide ? "worldwide" : "regional")}
+            showBackToRegion={(served?.precise === true || worldwide) && effectiveCountry !== null}
+            onBackToRegion={() => {
+              precise.reset();
+              setWorldwide(false);
+            }}
+            onChooseCountry={(code) => {
+              precise.reset();
+              setDestination(code);
+              setWorldwide(false);
+            }}
+            onExploreWorldwide={() => {
+              setWorldwide(true);
+            }}
+            onUsePrecise={precise.request}
+          />
         </div>
 
-        {loading ? (
+        {fallbackState === "loading" ? <DiscoveryLoadingState copy={copy} /> : null}
+
+        {fallbackState === "ready" ? (
           <div>
-            <output className="block text-base font-semibold text-muted">
-              {copy.discoverLocalLoading}
-            </output>
-            <div className="mt-4">
-              <DishCarouselSkeleton />
-            </div>
-          </div>
-        ) : null}
-
-        {!loading && failed ? (
-          <p
-            role="alert"
-            className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
-          >
-            {copy.discoverLocalError}
-          </p>
-        ) : null}
-
-        {!loading && !failed && !located && geoSettled ? (
-          <p className="text-base text-muted">{copy.discoverLocalUnknown}</p>
-        ) : null}
-
-        {!loading && !failed && located && total === 0 ? (
-          <div>
-            <p className="text-base text-muted">{copy.carouselRegionEmpty}</p>
-            {!worldwide && !isAutoWorldwide ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setWorldwide(true);
-                }}
-                className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
-              >
-                <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
-                {copy.carouselExploreWorld}
-              </button>
+            {refetching ? (
+              <output className="mb-2 block text-sm font-semibold text-muted">
+                {copy.discoverLocalLoading}
+              </output>
             ) : null}
-          </div>
-        ) : null}
-
-        {total > 0 ? (
-          <div>
             <DishCarousel
               autoplay
               copy={copy}
@@ -373,7 +340,7 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
               items={items}
               label={heading}
               lang={lang}
-              resetKey={`${scopeKey ?? "pending"}:${rotation}`}
+              resetKey={`${scopeKey ?? "pending"}:${rotation.toString()}`}
               session={session}
             />
             <div className="mt-4">
@@ -389,6 +356,18 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
             </div>
           </div>
         ) : null}
+
+        <DiscoveryFallback
+          copy={copy}
+          emptyTagline={copy.discoveryCatalogTagline}
+          state={fallbackState}
+          onExploreWorldwide={() => {
+            setWorldwide(true);
+          }}
+          onRetry={() => {
+            void carouselQuery.refetch();
+          }}
+        />
       </div>
     </section>
   );

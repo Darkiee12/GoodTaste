@@ -205,12 +205,22 @@ const carouselScopes = async (input: {
   readonly worldwide?: boolean | undefined;
   readonly limit?: number | undefined;
   readonly seed?: number | undefined;
-}): Promise<{ readonly slugs: Array<string>; readonly scope: string }> => {
+}): Promise<{
+  readonly slugs: Array<string>;
+  readonly scope: string;
+  readonly ids: Array<string>;
+  readonly fallback: boolean;
+}> => {
   const output = await run(
     Effect.flatMap(DishService, (service) => service.getLocalCarousel({ locale: "en", ...input })),
   );
 
-  return { slugs: output.items.map((item) => item.slug), scope: output.scope };
+  return {
+    slugs: output.items.map((item) => item.slug),
+    scope: output.scope,
+    ids: output.items.map((item) => item.id),
+    fallback: output.fallback,
+  };
 };
 
 const carouselSlugs = async (input: {
@@ -381,10 +391,21 @@ describe("discovery carousel", () => {
 
   test("dishes without geo associations never appear as nearby", async () => {
     // Fixture centroid (-25,-15) is the nearest place to itself; the
-    // no-geo dish has no place links at all.
-    const nearby = await carouselSlugs({ latitude: -25.0, longitude: -15.0, limit: 20 });
+    // no-geo dish has no place links at all. Under the fallback chain the
+    // request either serves a nearby band (which can only hold place-linked
+    // dishes) or falls back to worldwide (honestly labeled, never "nearby").
+    const output = await run(
+      Effect.flatMap(DishService, (service) =>
+        service.getLocalCarousel({ locale: "en", latitude: -25.0, longitude: -15.0, limit: 20 }),
+      ),
+    );
 
-    expect(nearby).not.toContain(noGeoSlug);
+    if (output.scope === "nearby") {
+      expect(output.items.map((item) => item.slug)).not.toContain(noGeoSlug);
+    } else {
+      expect(output.scope).toBe("worldwide");
+      expect(output.fallback).toBe(true);
+    }
 
     const worldwide = await carouselSlugs({ worldwide: true, limit: 100 });
 
@@ -399,14 +420,21 @@ describe("discovery carousel", () => {
     expect(output.items).toEqual([]);
   });
 
-  test("zero-dish country returns empty instead of inventing dishes", async () => {
+  test("zero-dish country falls back to worldwide instead of inventing dishes", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", country: emptyIso, limit: 10 }),
       ),
     );
 
-    expect(output.items).toEqual([]);
+    expect(output.scope).toBe("worldwide");
+    expect(output.fallback).toBe(true);
+    expect(output.items.length).toBeGreaterThan(0);
+
+    for (const item of output.items) {
+      expect(item.slug.length).toBeGreaterThan(0);
+      expect(item.id).toMatch(/^[0-9]+$/);
+    }
   });
 
   test("worldwide scope returns real published dishes", async () => {
@@ -505,13 +533,15 @@ describe("discovery carousel", () => {
 
     const ocean = await carouselScopes({ latitude: 0, longitude: -160, limit: 5 });
 
-    expect(ocean.slugs).toEqual([]);
-    expect(ocean.scope).toBe("nearby");
+    expect(ocean.slugs.length).toBeGreaterThan(0);
+    expect(ocean.scope).toBe("worldwide");
+    expect(ocean.fallback).toBe(true);
 
     const emptyCountry = await carouselScopes({ country: emptyIso, limit: 5 });
 
-    expect(emptyCountry.slugs).toEqual([]);
-    expect(emptyCountry.scope).toBe("country");
+    expect(emptyCountry.slugs.length).toBeGreaterThan(0);
+    expect(emptyCountry.scope).toBe("worldwide");
+    expect(emptyCountry.fallback).toBe(true);
   });
 
   test("country selection is per-country appropriate", async () => {
@@ -565,14 +595,20 @@ describe("discovery carousel", () => {
     }
   });
 
-  test("sparse ocean visitor gets an honest empty outcome, not a far continent", async () => {
+  test("sparse ocean visitor falls back to worldwide, never a far continent", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", latitude: 0, longitude: -160, limit: 5 }),
       ),
     );
 
-    expect(output.items).toEqual([]);
+    expect(output.scope).toBe("worldwide");
+    expect(output.fallback).toBe(true);
+    expect(output.items.length).toBeGreaterThan(0);
+
+    for (const item of output.items) {
+      expect(item.slug.length).toBeGreaterThan(0);
+    }
   });
 
   test("malformed country codes fail closed", async () => {

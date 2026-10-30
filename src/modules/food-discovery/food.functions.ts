@@ -30,6 +30,7 @@ const loadRecommendServer = () =>
     import("@/modules/food-discovery/server/operations/recommendation-service"),
     import("@/server/auth/actor"),
     import("@/server/auth/current-actor"),
+    import("@/server/auth/session"),
     import("@/server/runtime"),
     import("@/server/http/rate-limit"),
     import("@tanstack/react-start/server"),
@@ -220,15 +221,20 @@ export const listCountriesFn = createServerFn({ method: "GET" })
   });
 
 /**
- * Single-round-trip local carousel projection: resolves dishes by visitor
- * coordinate (nearest associated places first) or by country filter, then
- * returns full cards with names, descriptions, ingredients, regions, and
- * image references. No per-card fetch.
+ * Single-round-trip local carousel projection: resolves dishes for exactly
+ * one scope — visitor coordinates (nearest real catalog associations, with
+ * the country hint as fallback pool), a country filter, or the worldwide
+ * pool — then returns full cards with names, descriptions, ingredients,
+ * regions, and image references. No per-card fetch.
  *
- * Visitor-country resolution is graceful, never a dead end: an unknown
+ * Scope forwarding is exclusive by construction: a worldwide request never
+ * carries coordinates or a country, so the service can never silently run a
+ * precise search for it (fail-closed in the service too). The full
+ * empty-pool fallback chain (nearby -> country -> worldwide -> honest empty;
+ * country -> worldwide -> honest empty) lives in the service operation; this
+ * adapter only keeps the graceful visitor-country behavior — an unknown
  * country code falls back to the worldwide pool instead of surfacing
- * PlaceNotFound, and a known-but-empty country pool does the same. The
- * service scope ("worldwide") labels the fallback honestly so the client
+ * PlaceNotFound. The served scope labels the fallback honestly so the client
  * never misreads it as local coverage. Malformed input stays a validation
  * error; explicit search filters keep their strict semantics.
  */
@@ -240,17 +246,22 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
 
     const { PlaceNotFound } = await import("@/modules/food-discovery/server/domain/errors");
 
-    const runCarousel = (scope: { country?: string; worldwide?: boolean }) =>
+    const runCarousel = (scope: {
+      readonly country?: string | undefined;
+      readonly latitude?: number | undefined;
+      readonly longitude?: number | undefined;
+      readonly worldwide?: boolean | undefined;
+    }) =>
       runApp(
         withActor(
           Actor.Guest(),
           effects.Effect.flatMap(DishService, (service) =>
             service.getLocalCarousel({
               country: scope.country,
-              latitude: data.latitude,
+              latitude: scope.latitude,
               limit: data.limit,
               locale: data.locale,
-              longitude: data.longitude,
+              longitude: scope.longitude,
               seed: data.seed,
               worldwide: scope.worldwide,
             }),
@@ -264,19 +275,23 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
     const runWorldwide = () => runCarousel({ worldwide: true });
 
     try {
-      const scoped = await runCarousel({ country: data.country, worldwide: data.worldwide });
-
-      if (
-        data.country !== undefined &&
-        data.latitude === undefined &&
-        data.longitude === undefined &&
-        scoped.scope === "country" &&
-        scoped.items.length === 0
-      ) {
+      if (data.worldwide === true) {
         return await runWorldwide();
       }
 
-      return scoped;
+      if (data.latitude !== undefined && data.longitude !== undefined) {
+        return await runCarousel({
+          country: data.country,
+          latitude: data.latitude,
+          longitude: data.longitude,
+        });
+      }
+
+      if (data.country !== undefined) {
+        return await runCarousel({ country: data.country });
+      }
+
+      return await runCarousel({});
     } catch (error) {
       if (error instanceof PlaceNotFound) {
         return await runWorldwide();
@@ -285,18 +300,6 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
       throw error;
     }
   });
-
-/**
- * Coarse visitor region for the local-discovery carousel: Cloudflare
- * `cf-*` headers when deployed behind the CDN, nulls locally. The country
- * code filters the public catalog; nothing here identifies a person.
- */
-export const getVisitorRegionFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { getVisitorRegionFromHeaders } = await import("@/server/geo/visitor-region");
-  const server = await import("@tanstack/react-start/server");
-
-  return getVisitorRegionFromHeaders(server.getRequestHeaders());
-});
 
 export const listCuisinesFn = createServerFn({ method: "GET" })
   .validator(z.object({ locale: localeSchema.optional() }))
@@ -318,11 +321,13 @@ export const listCuisinesFn = createServerFn({ method: "GET" })
   });
 
 /**
- * Public dish recommendations: deterministic baseline, optionally re-ranked
- * by Muse when RECOMMENDATION_PROVIDER is "muse" with valid credentials. No
- * authentication needed. The outcome envelope always returns HTTP 200; empty
- * pools and allergy refusals are honest outcomes, not errors. Auth, permanent
- * provider, and misconfiguration failures reject and surface as HTTP 500.
+ * Public dish recommendations: deterministic baseline for guests, optionally
+ * re-ranked by Muse for signed-in members when RECOMMENDATION_PROVIDER is
+ * "muse" with valid credentials. The actor always resolves from the verified
+ * Better Auth session — never from a client flag. The outcome envelope
+ * always returns HTTP 200; empty pools and allergy refusals are honest
+ * outcomes, not errors. Auth, permanent provider, and misconfiguration
+ * failures reject and surface as HTTP 500.
  */
 export const recommendDishesFn = createServerFn({ method: "POST" })
   .validator(recommendationQuerySchema)
@@ -332,6 +337,7 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       { RecommendationService, toWireOutcome },
       { Actor },
       { withActor },
+      { resolveSession },
       { runApp },
       { RateLimitPolicy },
       server,
@@ -383,9 +389,24 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    // Session-first actor resolution AFTER the budget check (abuse protection
+    // runs before any identity work). A verified Better Auth session yields a
+    // member (Muse-eligible); no session stays a guest with deterministic
+    // ranking. Suspended sessions and store outages fail loudly instead of
+    // masquerading as guests.
+    const actor = await runApp(
+      resolveSession(headers).pipe(
+        effects.Effect.map((trusted) => Actor.Member({ userId: trusted.userId })),
+        effects.Effect.catchTag("SignInRequired", () => effects.Effect.succeed(Actor.Guest())),
+      ),
+      "fn/dishes/recommend-actor",
+      5000,
+      requestId,
+    );
+
     const outcome = await runApp(
       withActor(
-        Actor.Guest(),
+        actor,
         effects.Effect.flatMap(RecommendationService, (service) =>
           service.recommend({
             meal: data.meal,

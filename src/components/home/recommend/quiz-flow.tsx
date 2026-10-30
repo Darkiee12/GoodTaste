@@ -3,7 +3,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import { SparklesIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DishCarousel, DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
@@ -45,6 +45,10 @@ import {
   ResultWarnings,
 } from "@/components/home/recommend/quiz-status";
 import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
+import {
+  ResultsExplanationSkeleton,
+  ResultsLoadingSkeleton,
+} from "@/components/home/recommend/results-loading";
 import { SidebarPrefsCard, YourPicksCard } from "@/components/home/recommend/results-sidebar";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
@@ -607,7 +611,11 @@ export function RecommendSection() {
     <section
       id="recommend"
       aria-labelledby="recommend-heading"
-      className="mx-auto w-full max-w-6xl scroll-mt-20 px-5 pt-10"
+      className={
+        showResults
+          ? "mx-auto w-full max-w-[90rem] scroll-mt-20 px-5 pt-10 sm:px-8"
+          : "mx-auto w-full max-w-6xl scroll-mt-20 px-5 pt-10"
+      }
       style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
     >
       <div
@@ -625,7 +633,16 @@ export function RecommendSection() {
             >
               {copy.recTitle}
             </h1>
-            <p className="mt-3 max-w-[60ch] text-lg text-muted">{copy.recIntro}</p>
+            <p className="mt-3 max-w-[60ch] text-lg text-muted">
+              {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
+            </p>
+            {showResults &&
+            outcome !== null &&
+            (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+              <p className="mt-2 max-w-[60ch] text-base font-bold text-ink">
+                {copy.recResultsCount.replace("{count}", String(outcome.dishes.length))}
+              </p>
+            ) : null}
             {detectedName !== null ? (
               <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
                 {formatTemplate(copy.recWhereExploring, detectedName)}
@@ -684,7 +701,12 @@ export function RecommendSection() {
           outcome !== null &&
           (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
             <div className="order-5 mt-4 min-w-0 lg:order-none">
-              <AiExplanationCard mode={outcome.mode} warnings={outcome.warnings} copy={copy} />
+              <AiExplanationCard copy={copy} mode={outcome.mode} ranking={outcome.ranking} />
+            </div>
+          ) : null}
+          {showResults && submitted !== null && recommend.isPending && outcome === null ? (
+            <div className="order-5 mt-4 min-w-0 lg:order-none">
+              <ResultsExplanationSkeleton />
             </div>
           ) : null}
           {showResults && submitted !== null ? (
@@ -851,7 +873,7 @@ export function RecommendSection() {
 
   function renderOutcome(copyMessages: Messages) {
     if (recommend.isPending) {
-      return <DishCarouselSkeleton />;
+      return <ResultsLoadingSkeleton copy={copyMessages} />;
     }
 
     if (recommend.isError) {
@@ -868,8 +890,8 @@ export function RecommendSection() {
           <AiExplanationCard
             copy={copyMessages}
             mode={outcome.mode}
+            ranking={outcome.ranking}
             reasons={outcome.reasons}
-            warnings={outcome.warnings}
           />
           {outcome.mode === "empty" && submitted?.location?.kind === "precise" ? (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -913,6 +935,8 @@ export function RecommendSection() {
         ) : null}
         <DishCarousel
           activeIndex={railIndex}
+          autoplay
+          autoplayMs={5000}
           copy={copyMessages}
           favoriteStatus={resultFavorites}
           items={carouselItems}
