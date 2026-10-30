@@ -229,53 +229,58 @@ describe("border grid", () => {
 });
 
 describe("computeGlobeLayout", () => {
-  test("is full-bleed on a narrow phone at 104% width with a 70% cap", () => {
+  test("is full-bleed on a narrow phone at 104% width with an 80% cap", () => {
     const layout = computeGlobeLayout({ width: 390, height: 784 });
 
-    expect(layout.diameterPx).toBeCloseTo(390 * 1.04, 5);
-    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.7, 3);
-    expect(layout.diameterPx).toBeGreaterThan(390);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(390 * 1.04, 784 * 1.25), 5);
+    expect(layout.capPx).toBeCloseTo(Math.min(layout.diameterPx * 0.8, 784), 5);
+    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.8, 3);
+    expect(layout.centerX).toBe(0);
     expect(layout.centerY).toBeLessThan(0);
   });
 
-  test("spans a 90%-of-width radius on a tall desktop hero with a 32% cap", () => {
+  test("spans a wide right-shifted globe on a tall desktop hero", () => {
     const layout = computeGlobeLayout({ width: 1000, height: 1400 });
 
-    expect(layout.diameterPx).toBeCloseTo(1000 * 1.8, 5);
-    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.32, 3);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(1000 * 1.3, 1400 * 2), 5);
+    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.8, 3);
+    expect(layout.centerX).toBeCloseTo((0.26 * 1000) / layout.pixelsPerUnit, 5);
     expect(layout.centerY).toBeLessThan(0);
   });
 
-  test("gives a 90%-of-width radius on a 1920x1080 screen", () => {
+  test("bounds the diameter by hero height on a 1920x1080 screen", () => {
     const layout = computeGlobeLayout({ width: 1920, height: 1080 });
 
-    expect(layout.diameterPx / 2).toBeCloseTo(1920 * 0.9, 5);
-    expect(layout.capPx).toBeLessThanOrEqual(1080 * 0.5);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(1920 * 1.3, 1080 * 2), 5);
+    expect(layout.capPx).toBeLessThanOrEqual(1080);
+    expect(layout.centerX).toBeCloseTo((0.26 * 1920) / layout.pixelsPerUnit, 5);
     expect(layout.centerY).toBeLessThan(0);
   });
 
-  test("clamps the cap to 50% of the hero on a typical 16:9 desktop", () => {
+  test("shows 80% of the diameter on a typical 16:9 desktop", () => {
     const layout = computeGlobeLayout({ width: 1440, height: 844 });
 
-    expect(layout.diameterPx).toBeCloseTo(1440 * 1.8, 5);
-    expect(layout.capPx).toBeCloseTo(844 * 0.5, 5);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(1440 * 1.3, 844 * 2), 5);
+    expect(layout.capPx).toBeCloseTo(Math.min(layout.diameterPx * 0.8, 844), 5);
+    expect(layout.centerX).toBeCloseTo((0.26 * 1440) / layout.pixelsPerUnit, 5);
     expect(layout.centerY).toBeLessThan(0);
   });
 
   test("stays height-bounded on ultrawide desktop screens", () => {
     const layout = computeGlobeLayout({ width: 3440, height: 1440 });
 
-    expect(layout.diameterPx).toBeCloseTo(1440 * 3.2, 5);
-    expect(layout.capPx).toBeLessThanOrEqual(1440 * 0.5);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(3440 * 1.3, 1440 * 2), 5);
+    expect(layout.capPx).toBeLessThanOrEqual(1440);
+    expect(layout.centerX).toBeCloseTo((0.26 * 3440) / layout.pixelsPerUnit, 5);
     expect(layout.centerY).toBeLessThan(0);
   });
 
-  test("clamps the cap on short landscape screens while staying full-bleed", () => {
+  test("keeps 80% of the diameter visible on short landscape screens", () => {
     const layout = computeGlobeLayout({ width: 667, height: 311 });
 
-    expect(layout.diameterPx).toBeCloseTo(667 * 1.04, 5);
-    expect(layout.diameterPx).toBeGreaterThanOrEqual(667);
-    expect(layout.capPx).toBeLessThanOrEqual(311 * 0.5);
+    expect(layout.diameterPx).toBeCloseTo(Math.min(667 * 1.04, 311 * 1.25), 5);
+    expect(layout.capPx / layout.diameterPx).toBeCloseTo(0.8, 5);
+    expect(layout.centerX).toBe(0);
     expect(layout.centerY).toBeLessThan(0);
   });
 

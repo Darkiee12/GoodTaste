@@ -62,12 +62,6 @@ export const SPIN_DIRECTION = 1;
 /** Cosine threshold for treating a surface anchor as facing the camera. */
 export const FACING_COSINE_THRESHOLD = 0.15;
 
-/**
- * Maximum globe cap as a fraction of hero height. Keep in sync with the
- * 50cqh clamp in the fallback-planet CSS (styles.css).
- */
-export const GLOBE_CAP_HERO_FRACTION = 0.5;
-
 /** Mutable per-frame link between the 3D scene and the DOM food overlay. */
 export type GlobeOverlayBridge = {
   activeId: string | null;
@@ -84,6 +78,7 @@ export type GlobeLayout = {
   capPx: number;
   pixelsPerUnit: number;
   frustumHalfHeight: number;
+  centerX: number;
   centerY: number;
 };
 
@@ -166,32 +161,32 @@ export function isFacingCamera(
 }
 
 /**
- * Place the globe so only its upper cap shows: ~70% of the projected diameter
- * on narrow screens, ~32% on desktop. The full sphere still exists in 3D with
- * its center below the hero's lower edge. The cap never exceeds 50% of the
- * hero height so short landscape screens keep room for the hero copy.
- *
- * The sphere is full-bleed on mobile (104% of the hero width, so rounding
- * never leaves edge gaps) and huge on desktop: a 90%-of-width radius
- * (180% diameter), still bounded by the hero height on very wide screens.
- * The tall mobile cap plus the negative axial tilt put all 16 dishes in
- * view over a revolution; desktop shows 11 (southern dishes stay in the
- * discovery section below).
+ * Place a large planet filling the background: full-bleed on narrow screens,
+ * and on desktop a 130%-of-width globe (bounded by twice the hero height)
+ * pushed right of center so the left stays open universe behind the hero
+ * copy. Vertically 80% of the diameter shows above the hero's lower edge,
+ * clamped to the hero height on short screens.
  */
 export function computeGlobeLayout(viewport: ViewportSize): GlobeLayout {
   const narrow = viewport.width < 768;
-  const capFraction = narrow ? 0.7 : 0.32;
 
   const diameterPx = narrow
-    ? viewport.width * 1.04
-    : Math.min(viewport.width * 1.8, viewport.height * 3.2);
+    ? Math.min(viewport.width * 1.04, viewport.height * 1.25)
+    : Math.min(viewport.width * 1.3, viewport.height * 2);
 
-  const capPx = Math.min(diameterPx * capFraction, viewport.height * GLOBE_CAP_HERO_FRACTION);
+  const capPx = Math.min(diameterPx * 0.8, viewport.height);
+
   const pixelsPerUnit = diameterPx / (GLOBE_RADIUS * 2);
+
   const frustumHalfHeight = viewport.height / pixelsPerUnit / 2;
+
+  // Wide screens push the globe right so the left reads as open universe:
+  // screen-x 0.76 lands the limb ~20% in from the left edge.
+  const centerX = narrow ? 0 : ((0.76 - 0.5) * viewport.width) / pixelsPerUnit;
+
   const centerY = -frustumHalfHeight + capPx / pixelsPerUnit - GLOBE_RADIUS;
 
-  return { diameterPx, capPx, pixelsPerUnit, frustumHalfHeight, centerY };
+  return { diameterPx, capPx, pixelsPerUnit, frustumHalfHeight, centerX, centerY };
 }
 
 /** World-space angular velocity vector in radians per second. */

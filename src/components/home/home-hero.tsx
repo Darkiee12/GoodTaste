@@ -107,8 +107,10 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
           </button>
 
           <Link
-            to="/recommend"
+            to="/"
             search={{ lang }}
+            hash="recommend"
+            resetScroll={false}
             className="inline-flex min-h-12 items-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 sm:min-h-13 sm:px-8 sm:text-lg"
           >
             <UtensilsIcon />

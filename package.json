@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "vite dev",
+    "dev:docker": "docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.dev.yaml up --build -d",
     "build": "vite build",
     "build:node": "NITRO_PRESET=node_server vite build",
     "start": "bun .output/server/index.mjs",

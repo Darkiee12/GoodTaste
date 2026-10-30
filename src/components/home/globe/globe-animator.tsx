@@ -47,7 +47,7 @@ function readAnchor(
   temps: AnimatorTemps,
 ): AnchorReading {
   anchor.getWorldPosition(temps.world);
-  temps.center.set(0, layout.centerY, 0);
+  temps.center.set(layout.centerX, layout.centerY, 0);
 
   const cosine = facingCosine(temps.world, temps.center, camera.position);
   temps.projected.copy(temps.world).project(camera);

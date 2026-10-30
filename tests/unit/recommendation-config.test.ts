@@ -4,7 +4,7 @@ import {
   DEFAULT_MODEL_BASE_URL,
   DEFAULT_MODEL_ID,
   DEFAULT_MODEL_TIMEOUT_MS,
-  META_MODEL_ALLOWLIST,
+  isSupportedModelId,
   RankingConfig,
   resolveRankingConfig,
   type ServerEnv,
@@ -107,8 +107,24 @@ describe("resolveRankingConfig", () => {
     }
   });
 
-  test("muse accepts exactly the allowlisted models", () => {
-    for (const modelId of META_MODEL_ALLOWLIST) {
+  test("muse accepts any Spark release and tier without a code change", () => {
+    // Shape-validated (including versions that do not exist yet and the
+    // Contributor tier): well-formedness is the config layer's job, while
+    // existence is the provider's job at request time.
+    for (const modelId of [
+      "muse-spark-1.1",
+      "muse-spark-1.2",
+      "muse-spark-1.3",
+      "muse-spark-1.4",
+      "muse-spark-2.0",
+      "muse-spark-1.2-contributor",
+      "muse-spark-1.3-contributor",
+      "muse-spark-9.9",
+      "muse-wonder-1.0",
+      "muse-wonder-2.3",
+    ]) {
+      expect(isSupportedModelId(modelId)).toBe(true);
+
       const config = resolveRankingConfig(
         withOverrides({
           RECOMMENDATION_PROVIDER: "muse",
@@ -118,29 +134,40 @@ describe("resolveRankingConfig", () => {
       );
 
       RankingConfig.$match(config, {
-        Deterministic: () => expect.unreachable("expected Muse"),
-        Muse: () => undefined,
-        Misconfigured: () => expect.unreachable("expected Muse"),
+        Deterministic: () => expect.unreachable(`expected Muse for ${modelId}`),
+        Muse: ({ modelId: resolved }) => expect(resolved).toBe(modelId),
+        Misconfigured: () => expect.unreachable(`expected Muse for ${modelId}`),
       });
     }
-
-    expect(META_MODEL_ALLOWLIST).toEqual(["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1"]);
   });
 
-  test("muse rejects unknown models", () => {
-    const config = resolveRankingConfig(
-      withOverrides({
-        RECOMMENDATION_PROVIDER: "muse",
-        MODEL_API_KEY: "key",
-        MODEL_MODEL_ID: "muse-spark-9.9",
-      }),
-    );
+  test("muse rejects out-of-shape model identities", () => {
+    for (const modelId of [
+      "",
+      "gpt-4",
+      "muse-spark",
+      "muse-spark-1",
+      "muse-sparc-1.3",
+      "muse-glimmer-1.0",
+      "muse-wonder-1.0-contributor",
+      "muse-spark-1.3-contributo",
+    ]) {
+      expect(isSupportedModelId(modelId)).toBe(false);
 
-    RankingConfig.$match(config, {
-      Deterministic: () => expect.unreachable("expected Misconfigured"),
-      Muse: () => expect.unreachable("expected Misconfigured"),
-      Misconfigured: ({ reason }) => expect(reason).toContain("muse-spark-9.9"),
-    });
+      const config = resolveRankingConfig(
+        withOverrides({
+          RECOMMENDATION_PROVIDER: "muse",
+          MODEL_API_KEY: "key",
+          MODEL_MODEL_ID: modelId,
+        }),
+      );
+
+      RankingConfig.$match(config, {
+        Deterministic: () => expect.unreachable(`expected Misconfigured for ${modelId}`),
+        Muse: () => expect.unreachable(`expected Misconfigured for ${modelId}`),
+        Misconfigured: ({ reason }) => expect(reason).toContain("muse-spark-"),
+      });
+    }
   });
 
   test("muse requires an https base URL", () => {

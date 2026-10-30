@@ -1,0 +1,18 @@
+# Local development image ONLY. Never use for production.
+# Built against the pinned Bun toolchain from package.json engines.
+# Runtime configuration arrives via Compose env_file; no secrets are baked in.
+FROM oven/bun:1.4.4
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY . .
+RUN chmod +x /app/infra/docker-entrypoint.dev.sh
+
+EXPOSE 3000
+
+# Development entrypoint: refresh dependencies, start Vite, then warm the
+# cold module graph so the first browser load is fast instead of timing out.
+CMD ["/app/infra/docker-entrypoint.dev.sh"]

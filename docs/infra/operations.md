@@ -90,8 +90,10 @@ Local email delivery: run Mailpit and point SMTP at it —
 docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
 ```
 
-— then read mail at `http://localhost:8025`. Without reachable SMTP the
-server refuses to start; tests use an in-memory sender instead.
+— then read mail at `http://localhost:8025`. Without SMTP *configuration* the
+server refuses to start; with configuration present but no reachable server
+it starts and public discovery works, but verification and password-reset
+emails fail at send time. Tests use an in-memory sender instead.
 
 Bootstrap the first administrator (shell + database access required; there is
 no HTTP path to admin):

@@ -16,3 +16,5 @@ coverage/
 
 # Aislop local scan history (config.yml is tracked)
 .aislop/history.jsonl
+
+.local
