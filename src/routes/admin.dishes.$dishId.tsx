@@ -1,5 +1,4 @@
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
 import { useCallback } from "react";
 import { z } from "zod";
 
@@ -18,6 +17,8 @@ import {
 import { dishDetailReturnSchema, resolveDishesBackSearch } from "@/components/admin/page-header";
 import { AdminRouteError } from "@/components/admin/ui";
 import {
+  adminDishDetailFn,
+  adminDishRevisionHistoryFn,
   adminPublicationCheckFn,
   adminUpdateDishStatusFn,
 } from "@/modules/food-discovery/admin.functions";
@@ -28,110 +29,6 @@ import { formatAdminDate } from "@/shared/format";
 import { localeSearchSchema, messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
-
-const revisionHistoryQuerySchema = z.object({
-  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
-  cursor: z.string().max(500).nullable().default(null),
-});
-
-const loadHistoryServer = async () => {
-  const [effects, server, dashboard, authorization, session, actor, currentActor, runtime] =
-    await Promise.all([
-      import("effect"),
-      import("@tanstack/react-start/server"),
-      import("@/modules/food-discovery/server/operations/admin-dashboard-service"),
-      import("@/modules/user/server/operations/authorization"),
-      import("@/server/auth/session"),
-      import("@/server/auth/actor"),
-      import("@/server/auth/current-actor"),
-      import("@/server/runtime"),
-    ]);
-
-  return {
-    effects,
-    server,
-    dashboard,
-    authorization,
-    session,
-    actor,
-    currentActor,
-    runtime,
-  };
-};
-
-const SURFACE_CHECKS = [
-  { resource: "admin", actions: ["access"] },
-  { resource: "food", actions: ["import"] },
-  { resource: "moderation", actions: ["read"] },
-] as const;
-
-/**
- * Dish-detail history endpoint. The initial detail loader carries the dish
- * and notes only; revision history pages load separately through this
- * function so long timelines never block the first paint. Every call
- * rechecks `food:read` against current database grants at the server
- * boundary, and the keyset cursor is validated before it reaches SQL.
- */
-export const adminDishRevisionHistoryFn = createServerFn({ method: "GET" })
-  .validator(revisionHistoryQuerySchema)
-  .handler(async ({ data }) => {
-    const loaded = await loadHistoryServer();
-
-    const {
-      effects,
-      server,
-      dashboard: { AdminDashboardService },
-      authorization,
-      session,
-      actor,
-      currentActor,
-      runtime,
-    } = loaded;
-
-    const headers = server.getRequestHeaders();
-    const requestId = crypto.randomUUID();
-
-    await runtime.runApp(
-      effects.Effect.flatMap(session.requireAuthenticatedActor(headers), (trusted) => {
-        const member = actor.Actor.Member({ userId: trusted.userId });
-
-        return effects.Effect.flatMap(
-          effects.Effect.forEach(SURFACE_CHECKS, (check) =>
-            effects.Effect.flatMap(authorization.Authorization, (authz) =>
-              authz.has(member, check),
-            ),
-          ),
-          (results) =>
-            results.some(Boolean)
-              ? effects.Effect.succeed(trusted)
-              : effects.Effect.fail(new Error("administration requires access grants")),
-        );
-      }),
-      "fn/admin/dish-revision-history",
-      15000,
-      requestId,
-    );
-
-    const trusted = await runtime.runApp(
-      session.requirePermission(headers, { resource: "food", actions: ["read"] }),
-      "fn/admin/dish-revision-history",
-      15000,
-      requestId,
-    );
-
-    return runtime.runApp(
-      currentActor.withActor(
-        actor.Actor.Member({ userId: trusted.userId }),
-        effects.Effect.flatMap(AdminDashboardService, (service) =>
-          service.dishRevisionHistory(data.dishId, { limit: data.limit, cursor: data.cursor }),
-        ),
-      ),
-      "fn/admin/dish-revision-history",
-      15000,
-      requestId,
-    );
-  });
 
 export const Route = createFileRoute("/admin/dishes/$dishId")({
   // Optional return destination for the breadcrumb back-link: the dishes
@@ -249,8 +146,6 @@ const adminDishDetailLoader = async (input: {
   readonly dishId: string;
   readonly locale: Locale;
 }): Promise<DishDetailData> => {
-  const { adminDishDetailFn } = await import("@/modules/food-discovery/admin.functions");
-
   const parsed = dishDetailSchema.parse(
     await adminDishDetailFn({ data: { dishId: input.dishId, locale: input.locale } }),
   );

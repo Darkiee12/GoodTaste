@@ -4,8 +4,15 @@ import type * as EffectModule from "effect";
 import { z } from "zod";
 
 import {
+  adminBulkPublishJobSchema,
+  adminBulkPublishSchema,
+  adminBulkReviewCandidatesSchema,
   adminDishesQuerySchema,
+  adminImportApplyBatchSchema,
   adminImportApplySchema,
+  adminImportBeginSchema,
+  adminImportIssuesQuerySchema,
+  adminImportStageBatchSchema,
   adminImportUploadSchema,
   adminJobQuerySchema,
   adminReviewsQuerySchema,
@@ -33,6 +40,7 @@ import type { Database } from "@/server/database/client";
 import type { TransactionFailed } from "@/server/database/errors";
 import type { DatabaseError } from "@/server/database/query";
 import type * as RuntimeModule from "@/server/runtime";
+import { formatFileSize } from "@/shared/format-file-size";
 
 /**
  * Food-discovery administration transport: dashboard stats, dish curation
@@ -48,17 +56,27 @@ import type * as RuntimeModule from "@/server/runtime";
  * Import mutations never run without `food:import`.
  */
 const loadServer = async () => {
-  const [effects, server, dashboard, authorization, session, actor, currentActor, runtime] =
-    await Promise.all([
-      import("effect"),
-      import("@tanstack/react-start/server"),
-      import("@/modules/food-discovery/server/operations/admin-dashboard-service"),
-      import("@/modules/user/server/operations/authorization"),
-      import("@/server/auth/session"),
-      import("@/server/auth/actor"),
-      import("@/server/auth/current-actor"),
-      import("@/server/runtime"),
-    ]);
+  const [
+    effects,
+    server,
+    dashboard,
+    authorization,
+    session,
+    actor,
+    currentActor,
+    runtime,
+    bulkPublish,
+  ] = await Promise.all([
+    import("effect"),
+    import("@tanstack/react-start/server"),
+    import("@/modules/food-discovery/server/operations/admin-dashboard-service"),
+    import("@/modules/user/server/operations/authorization"),
+    import("@/server/auth/session"),
+    import("@/server/auth/actor"),
+    import("@/server/auth/current-actor"),
+    import("@/server/runtime"),
+    import("@/modules/food-discovery/server/operations/bulk-publish-service"),
+  ]);
 
   return {
     effects,
@@ -69,6 +87,7 @@ const loadServer = async () => {
     actor,
     currentActor,
     runtime,
+    bulkPublish,
   };
 };
 
@@ -267,6 +286,59 @@ export const adminDishDetailFn = createServerFn({ method: "GET" })
     );
   });
 
+const dishRevisionHistoryQuerySchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().max(500).nullable().default(null),
+});
+
+/**
+ * Dish-detail revision history page. The initial detail loader carries the
+ * dish and notes only; revision history pages load separately through this
+ * function so long timelines never block the first paint. Every call
+ * rechecks `food:read` against current database grants at the server
+ * boundary, and the keyset cursor is validated before it reaches SQL.
+ */
+export const adminDishRevisionHistoryFn = createServerFn({ method: "GET" })
+  .validator(dishRevisionHistoryQuerySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      dashboard: { AdminDashboardService },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/dish-revision-history", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["read"] }),
+      "fn/admin/dish-revision-history",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.dishRevisionHistory(data.dishId, { limit: data.limit, cursor: data.cursor }),
+        ),
+      ),
+      "fn/admin/dish-revision-history",
+      15000,
+      requestId,
+    );
+  });
+
 export const adminReviewQueueFn = createServerFn({ method: "GET" })
   .validator(adminReviewsQuerySchema)
   .handler(async ({ data }) => {
@@ -426,7 +498,7 @@ export const adminImportValidateFn = createServerFn({ method: "POST" })
     if (contentBytes > MAX_IMPORT_FILE_BYTES) {
       return {
         ok: false as const,
-        reason: `file exceeds ${MAX_IMPORT_FILE_BYTES} byte limit (${contentBytes} bytes)`,
+        reason: `file is ${formatFileSize(contentBytes)} (${contentBytes} bytes); the maximum allowed size is ${formatFileSize(MAX_IMPORT_FILE_BYTES)}`,
       };
     }
 
@@ -434,10 +506,14 @@ export const adminImportValidateFn = createServerFn({ method: "POST" })
       const parsed =
         data.fileType === "json" ? jsonToRecords(data.contentText) : csvToRecords(data.contentText);
 
+      // Single-shot legacy bound: this path stages the whole payload in one
+      // transaction, so it stays capped at one batch. Larger datasets use
+      // the batched protocol (begin + stage batches), which has no
+      // per-dataset cap below MAX_BATCHED_IMPORT_RECORDS.
       if (parsed.length > 100) {
         return {
           ok: false as const,
-          reason: `dataset has ${parsed.length} records; at most 100 per import job`,
+          reason: `dataset has ${parsed.length} records; single-shot validation holds at most 100 per call. Use the batched upload (begin the import, then send stage batches of 100) for larger datasets`,
         };
       }
 
@@ -527,6 +603,326 @@ export const adminImportApplyFn = createServerFn({ method: "POST" })
         ),
       ),
       "fn/admin/import-apply",
+      60000,
+      requestId,
+    );
+  });
+
+/**
+ * Batched import transport: one logical job id, one provenance row, one
+ * review/apply flow for datasets up to MAX_BATCHED_IMPORT_RECORDS. The
+ * client parses the file locally and drives the cursor forward:
+ * begin → stage batches (baseIndex 0, 100, …) until complete → review →
+ * apply batches until done → paginated issues for review. The full file is
+ * never resent; every call is bounded (≤100 records) for the 60 s budget.
+ */
+const loadImportServer = async () => {
+  const [effects, server, imports, authorization, session, actor, currentActor, runtime] =
+    await Promise.all([
+      import("effect"),
+      import("@tanstack/react-start/server"),
+      import("@/modules/food-discovery/server/operations/catalog-import-service"),
+      import("@/modules/user/server/operations/authorization"),
+      import("@/server/auth/session"),
+      import("@/server/auth/actor"),
+      import("@/server/auth/current-actor"),
+      import("@/server/runtime"),
+    ]);
+
+  return { effects, server, imports, authorization, session, actor, currentActor, runtime };
+};
+
+export const adminImportBeginFn = createServerFn({ method: "POST" })
+  .validator(adminImportBeginSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadImportServer();
+    const { effects, server, imports, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/import-begin", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/import-begin",
+      15000,
+      requestId,
+    );
+
+    // Reserve ONE logical job for the declared total. Provenance uses the
+    // same `<sourceId>:<license>` convention as the single-shot path, so
+    // review/apply gates behave identically once staging completes.
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(imports.CatalogImportService, (service) =>
+          service.beginImport({
+            sourceName: data.sourceName,
+            format: data.fileType,
+            totalRecords: data.totalRecords,
+            sourceUrl: data.sourceUrl ?? null,
+            sourceVersion: data.sourceVersion ?? null,
+            license: `${data.sourceId}:${data.license}`,
+            attribution: data.attribution ?? null,
+            editorialNotes: data.editorialNotes ?? null,
+          }),
+        ),
+      ),
+      "fn/admin/import-begin",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminImportStageBatchFn = createServerFn({ method: "POST" })
+  .validator(adminImportStageBatchSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadImportServer();
+    const { effects, server, imports, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/import-stage-batch", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/import-stage-batch",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(imports.CatalogImportService, (service) =>
+          service.stageImportBatch({
+            jobId: data.jobId,
+            baseIndex: data.baseIndex,
+            records: data.records,
+          }),
+        ),
+      ),
+      "fn/admin/import-stage-batch",
+      60000,
+      requestId,
+    );
+  });
+
+export const adminImportApplyBatchFn = createServerFn({ method: "POST" })
+  .validator(adminImportApplyBatchSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadImportServer();
+    const { effects, server, imports, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/import-apply-batch", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/import-apply-batch",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(imports.CatalogImportService, (service) =>
+          service.applyImportBatch({
+            jobId: data.jobId,
+            approvals: {
+              licenseAck: data.approvals.licenseAck,
+              reviewAck: data.approvals.reviewAck,
+              duplicateRefs: data.approvals.duplicateRefs,
+            },
+            actorUserId: trusted.userId,
+            limit: data.limit,
+          }),
+        ),
+      ),
+      "fn/admin/import-apply-batch",
+      60000,
+      requestId,
+    );
+  });
+
+export const adminImportJobIssuesFn = createServerFn({ method: "GET" })
+  .validator(adminImportIssuesQuerySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadImportServer();
+    const { effects, server, imports, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/import-issues", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/import-issues",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(imports.CatalogImportService, (service) =>
+          service.importJobIssues({
+            jobId: data.jobId,
+            status: data.status,
+            limit: data.limit,
+            cursor: data.cursor,
+          }),
+        ),
+      ),
+      "fn/admin/import-issues",
+      15000,
+      requestId,
+    );
+  });
+
+/**
+ * Bulk editorial publish transport. Candidates require `moderation:read`
+ * (same as the review queue); publishing requires `food:publish`.
+ * Every call is bounded (≤100 candidates, ≤50 publishes) for the 60 s
+ * budget; the client pages with the returned cursor until it is null.
+ * The service layer (not this transport) owns idempotency: re-running
+ * the same ids yields `skipped`, never a double publish.
+ */
+export const adminBulkReviewCandidatesFn = createServerFn({ method: "GET" })
+  .validator(adminBulkReviewCandidatesSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      bulkPublish: { BulkPublishService, BulkPublishServiceLive },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/bulk-review-candidates", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "moderation", actions: ["read"] }),
+      "fn/admin/bulk-review-candidates",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(BulkPublishService, (service) =>
+          service.listReviewCandidates({
+            cursor: BigInt(data.cursor),
+            limit: data.limit,
+            jobId: data.jobId === null || data.jobId === undefined ? null : BigInt(data.jobId),
+          }),
+        ).pipe(effects.Effect.provide(BulkPublishServiceLive)),
+      ),
+      "fn/admin/bulk-review-candidates",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminBulkPublishFn = createServerFn({ method: "POST" })
+  .validator(adminBulkPublishSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      bulkPublish: { BulkPublishService, BulkPublishServiceLive },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/bulk-publish", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["publish"] }),
+      "fn/admin/bulk-publish",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(BulkPublishService, (service) =>
+          service.publishBatch({
+            actor: `admin:${trusted.userId}`,
+            ids: data.ids,
+            acks: data.acks,
+          }),
+        ).pipe(effects.Effect.provide(BulkPublishServiceLive)),
+      ),
+      "fn/admin/bulk-publish",
+      60000,
+      requestId,
+    );
+  });
+
+export const adminBulkPublishJobFn = createServerFn({ method: "POST" })
+  .validator(adminBulkPublishJobSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+
+    const {
+      effects,
+      server,
+      bulkPublish: { BulkPublishService, BulkPublishServiceLive },
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/bulk-publish-job", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["publish"] }),
+      "fn/admin/bulk-publish-job",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(BulkPublishService, (service) =>
+          service.publishImportJobBatch({
+            actor: `admin:${trusted.userId}`,
+            jobId: data.jobId,
+            cursor: BigInt(data.cursor),
+            limit: data.limit,
+            acks: data.acks,
+          }),
+        ).pipe(effects.Effect.provide(BulkPublishServiceLive)),
+      ),
+      "fn/admin/bulk-publish-job",
       60000,
       requestId,
     );

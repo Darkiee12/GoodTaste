@@ -418,23 +418,24 @@ export function DishPhotoEditor({
             <p className="text-xs text-muted">
               JPG · PNG · WebP — {formatBytes(MAX_UPLOAD_BYTES)} max
             </p>
-            <input
-              ref={fileInputRef}
-              id={fileInputId}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
-              tabIndex={-1}
-              onChange={(event) => {
-                acceptFile(event.target.files?.item(0) ?? null);
-                event.target.value = "";
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-            />
           </button>
         ) : null}
+        <label htmlFor={fileInputId} className="sr-only">
+          {pick(lang, "Choose a photo to upload", "Chọn ảnh để tải lên")}
+        </label>
+        <input
+          ref={fileInputRef}
+          id={fileInputId}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label={pick(lang, "Choose a photo to upload", "Chọn ảnh để tải lên")}
+          onChange={(event) => {
+            acceptFile(event.target.files?.item(0) ?? null);
+            event.target.value = "";
+          }}
+        />
 
         {fileError !== null ? (
           <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

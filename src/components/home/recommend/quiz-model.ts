@@ -219,11 +219,9 @@ export const validateRegion = (
   precise: PreciseFix | null = null,
 ): string | null => {
   if (mode === "country") {
-    if (!recCountrySchema.safeParse(country.trim().toUpperCase()).success) {
-      return copy.recCountryError;
-    }
-
-    return null;
+    return isRegionComplete({ ...EMPTY_DRAFT, regionMode: mode, country })
+      ? null
+      : copy.recCountryError;
   }
 
   if (mode === "precise") {
@@ -232,6 +230,182 @@ export const validateRegion = (
 
   return null;
 };
+
+/**
+ * Provenance of one quiz answer: where the currently displayed value came
+ * from. Untouched defaults look unanswered, app-suggested values carry an
+ * approximate indicator, opt-in restored values carry a saved label, and
+ * anything the visitor tapped or typed this visit renders as an explicit
+ * answer. Confirming or changing a suggested/restored value flips it to
+ * explicit, restoring the normal style.
+ */
+export type AnswerOrigin = "untouched" | "suggested" | "restored" | "explicit";
+
+/**
+ * Provenance badge copy. Defaults are English fallbacks so stages render
+ * honestly before the coordinator wires real i18n keys; pass explicit
+ * labels to override. Needed keys (en+vi): a "saved from last visit"
+ * label and an "approximate" indicator. Do NOT touch src/shared/i18n.ts
+ * from feature branches — the coordinator owns it.
+ */
+export interface ProvenanceLabels {
+  readonly saved: string;
+  readonly approximate: string;
+}
+
+export const DEFAULT_PROVENANCE_LABELS: ProvenanceLabels = {
+  approximate: "Approximate",
+  saved: "Saved from last visit",
+};
+
+/** Meal/mood origin: only an explicit tap this visit counts as an answer. */
+export const flagOriginFor = (touched: boolean): AnswerOrigin =>
+  touched ? "explicit" : "untouched";
+
+/**
+ * Region origin from the current draft plus how it got there. `touched`
+ * wins: any tap or edit this visit makes the value explicit. Otherwise a
+ * non-empty country matching the opt-in saved preference is restored, a
+ * detected source is app-suggested, and everything else (including the
+ * anywhere default and an empty destination) is untouched. A bare default
+ * is therefore never presented as saved.
+ */
+export const regionOriginFor = (input: {
+  readonly touched: boolean;
+  readonly draft: QuizDraft;
+  readonly savedCountry: string | null;
+}): AnswerOrigin => {
+  if (input.touched) {
+    return "explicit";
+  }
+
+  if (
+    input.draft.regionMode === "country" &&
+    input.draft.country !== "" &&
+    input.savedCountry !== null &&
+    input.draft.country.toUpperCase() === input.savedCountry.toUpperCase()
+  ) {
+    return "restored";
+  }
+
+  if (input.draft.countrySource === "detected") {
+    return "suggested";
+  }
+
+  return "untouched";
+};
+
+/**
+ * Free-text origin (dislikes box): restored only when the visible text is
+ * non-empty and matches the opt-in saved value. Empty text is untouched
+ * even when a preference exists, so "anything goes" is never claimed as
+ * saved. Allergies never restore and always resolve through the touched
+ * flag only.
+ */
+export const textOriginFor = (input: {
+  readonly touched: boolean;
+  readonly value: string;
+  readonly savedValue: string | null;
+}): AnswerOrigin => {
+  if (input.touched) {
+    return "explicit";
+  }
+
+  if (input.value !== "" && input.savedValue !== null && input.value === input.savedValue) {
+    return "restored";
+  }
+
+  return "untouched";
+};
+
+/**
+ * Copy-free completeness check for one draft snapshot. Home and worldwide
+ * are complete by construction; a destination needs a valid ISO country;
+ * precise needs a live fix. Used by the single auto-advance commit site so
+ * pointer taps advance only on explicitly complete answers.
+ */
+export const isRegionComplete = (draft: QuizDraft): boolean => {
+  if (draft.regionMode === "country") {
+    return recCountrySchema.safeParse(draft.country.trim().toUpperCase()).success;
+  }
+
+  if (draft.regionMode === "precise") {
+    return draft.precise !== null;
+  }
+
+  return true;
+};
+
+/** True when two drafts select the same Step-1 lane and country. */
+export const sameRegion = (left: QuizDraft, right: QuizDraft): boolean =>
+  left.regionMode === right.regionMode &&
+  left.country.toUpperCase() === right.country.toUpperCase() &&
+  left.countrySource === right.countrySource;
+
+/**
+ * Pure Step-1 lane transition for a radio tap. Home pins the trusted
+ * detection (worldwide fallback when detection vanished); precise opens
+ * the locator lane with no fix yet (never complete, so never advances);
+ * destination opens the catalog selector empty (incomplete until a valid
+ * country is chosen); worldwide clears everything (complete at once).
+ * The caller commits the returned candidate and advances only when it is
+ * complete, so async detection and saved prefs — which never flow through
+ * here — can never trigger advancement.
+ */
+export const pickRegionChoice = (
+  draft: QuizDraft,
+  choice: RegionChoice,
+  detected: string | null,
+): QuizDraft => {
+  if (choice === "home" && detected !== null) {
+    return {
+      ...draft,
+      country: detected,
+      countrySource: "detected",
+      precise: null,
+      regionMode: "country",
+    };
+  }
+
+  if (choice === "precise") {
+    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "precise" };
+  }
+
+  if (choice === "destination") {
+    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "country" };
+  }
+
+  return { ...draft, country: "", countrySource: null, precise: null, regionMode: "anywhere" };
+};
+
+/**
+ * Pure destination-selector transition: a valid pick is a chosen country
+ * (complete, advances on pointer); clearing back to the placeholder keeps
+ * the lane open but incomplete (reveals the selector, never advances).
+ */
+export const pickDestinationCountry = (draft: QuizDraft, country: string): QuizDraft => ({
+  ...draft,
+  country,
+  countrySource: country === "" ? null : "chosen",
+  precise: null,
+  regionMode: "country",
+});
+
+/**
+ * Auto-advance gate for an explicitly committed Step-1 candidate: advance
+ * if and only if the NEW snapshot is complete. Evaluate the candidate the
+ * visitor just picked — never the pre-update batched state.
+ */
+export const shouldAutoAdvanceRegion = (candidate: QuizDraft): boolean =>
+  isRegionComplete(candidate);
+
+/**
+ * Precise-fix arrival: the draft moved from no fix to a live fix while
+ * staying on the precise lane. The only advance path for Near-you (never
+ * while locating, denied, or unavailable — those keep no fix).
+ */
+export const didPreciseFixArrive = (previous: QuizDraft, next: QuizDraft): boolean =>
+  previous.precise === null && next.precise !== null && next.regionMode === "precise";
 
 /**
  * Choice precedence for the initial region: an explicit journey choice beats
@@ -350,6 +524,9 @@ const savedPrefsSchema = z.object({
 export type SavedRecommendPrefs = z.infer<typeof savedPrefsSchema>;
 
 const PREFS_KEY = "feastjourney.recommend.prefs.v1";
+
+/** Storage key for the opt-in recommendation prefs; quiz-flow mirrors hasSaved reads against it. */
+export const PREFS_STORAGE_KEY = PREFS_KEY;
 
 export const EMPTY_DRAFT: QuizDraft = {
   avoidRaw: "",

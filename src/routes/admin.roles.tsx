@@ -1,7 +1,34 @@
-import { useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import {
+  buildPermissionCatalog,
+  CreateRoleDialog,
+  draftOf,
+  draftsEqual,
+  RoleEditor,
+  RoleNavigator,
+  validateDraft,
+  type CreateRoleDialogStrings,
+  type DraftFieldErrors,
+  type RoleDraft,
+  type RoleEditorStrings,
+  type RoleEntry,
+  type RoleNavigatorStrings,
+  type RolesCapabilities,
+} from "@/components/admin/roles";
+import {
+  AdminConfirmDialog,
+  AdminDialog,
+  AdminEmptyState,
+  AdminGhostButton,
+  AdminSecondaryButton,
+} from "@/components/admin/ui";
+import {
+  GlobalNotification,
+  type GlobalNotificationVariant,
+} from "@/components/ui/global-notification";
 import {
   adminCreateRoleFn,
   adminDeleteRoleFn,
@@ -12,7 +39,7 @@ import {
   authorizeFn,
 } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { messagesFor } from "@/shared/i18n";
+import { messagesFor, type Locale } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -45,464 +72,776 @@ export const Route = createFileRoute("/admin/roles")({
   component: AdminRoles,
 });
 
-interface RoleDraft {
-  readonly name: string;
+interface Notice {
+  readonly variant: GlobalNotificationVariant;
+  readonly title: string;
   readonly description: string;
-  readonly color: string;
-  readonly position: string;
 }
 
-const draftOf = (role: {
-  readonly name: string;
-  readonly description: string;
-  readonly color: string;
-  readonly position: number;
-}): RoleDraft => ({
-  name: role.name,
-  description: role.description,
-  color: role.color,
-  position: String(role.position),
-});
+const firstOrdered = (roles: ReadonlyArray<RoleEntry>): RoleEntry | null => {
+  let first: RoleEntry | null = null;
 
-const groupVocabulary = (
-  keys: ReadonlyArray<string>,
-): ReadonlyMap<string, ReadonlyArray<string>> => {
-  const mutable = new Map<string, Array<string>>();
-
-  for (const key of keys) {
-    const [domain] = key.split(":");
-
-    if (domain === undefined) {
-      continue;
-    }
-
-    const list = mutable.get(domain);
-
-    if (list === undefined) {
-      mutable.set(domain, [key]);
-    } else {
-      list.push(key);
+  for (const role of roles) {
+    if (first === null || role.position < first.position) {
+      first = role;
     }
   }
 
-  return mutable;
+  return first;
 };
 
-const inputClass =
-  "mt-1 w-full min-w-0 rounded-md border border-border-soft bg-white px-3 py-2 text-sm text-ink motion-safe:transition-colors focus:border-brand-blue";
+const capabilityQuery = (action: string) => ({
+  queryKey: ["admin", "capabilities", "roles", action] as const,
+  queryFn: () =>
+    authorizeFn({ data: { checks: [{ resource: "role", actions: [action] }] } }).then(
+      (result) => result.allowed,
+    ),
+  initialData: false,
+  staleTime: 60_000,
+  retry: 1,
+});
 
 function AdminRoles() {
   const initial = Route.useLoaderData();
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
-  const pageId = useId();
-  const createErrorId = `${pageId}-create-error`;
-  const listErrorId = `${pageId}-list-error`;
-  const [roles, setRoles] = useState(initial.roles);
+  const locale: "en" | "vi" = lang === "vi" ? "vi" : "en";
+
+  const [roles, setRoles] = useState<ReadonlyArray<RoleEntry>>(initial.roles);
   const [counts, setCounts] = useState(initial.counts);
-  const [vocabulary] = useState(initial.vocabulary);
   const [drafts, setDrafts] = useState<ReadonlyMap<string, RoleDraft>>(new Map());
 
-  const [grantSelections, setGrantSelections] = useState<
-    ReadonlyMap<string, ReadonlyArray<string>>
-  >(new Map());
+  const [activeRoleId, setActiveRoleId] = useState<string | null>(
+    () => firstOrdered(initial.roles)?.id ?? null,
+  );
 
-  const [newSlug, setNewSlug] = useState("");
-  const [newName, setNewName] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [mobileEditing, setMobileEditing] = useState(false);
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createFailed, setCreateFailed] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<RoleEntry | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [partialFailures, setPartialFailures] = useState<ReadonlySet<string>>(new Set());
+  const [saveErrors, setSaveErrors] = useState<DraftFieldErrors | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  const refreshCatalog = useMutation({
-    mutationFn: async () => {
-      const [catalog, list] = await Promise.all([adminListRolesFn(), adminRoleMemberCountsFn()]);
+  const canCreateQuery = useQuery(capabilityQuery("create"));
+  const canUpdateQuery = useQuery(capabilityQuery("update"));
+  const canGrantsQuery = useQuery(capabilityQuery("manage-permissions"));
+  const canDeleteQuery = useQuery(capabilityQuery("delete"));
 
-      return { catalog, list };
-    },
-    onSuccess: ({ catalog, list }) => {
-      setRoles(catalog.roles);
-      setCounts(list);
-      setDrafts(new Map());
-      setGrantSelections(new Map());
-    },
-  });
+  const capabilities: RolesCapabilities = useMemo(
+    () => ({
+      canCreate: canCreateQuery.data,
+      canUpdate: canUpdateQuery.data,
+      canManagePermissions: canGrantsQuery.data,
+      canDelete: canDeleteQuery.data,
+    }),
+    [canCreateQuery.data, canUpdateQuery.data, canGrantsQuery.data, canDeleteQuery.data],
+  );
 
-  const memberCount = (roleId: string): number =>
-    counts.find((entry) => entry.roleId === roleId)?.memberCount ?? 0;
+  const catalog = useMemo(
+    () => buildPermissionCatalog(initial.vocabulary, locale),
+    [initial.vocabulary, locale],
+  );
 
-  const groups = groupVocabulary(vocabulary);
+  const totalPermissions = initial.vocabulary.length;
 
-  const createRole = useMutation({
-    mutationFn: () =>
-      adminCreateRoleFn({
+  const countMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const entry of counts) {
+      map.set(entry.roleId, entry.memberCount);
+    }
+
+    return map;
+  }, [counts]);
+
+  const activeRole = roles.find((role) => role.id === activeRoleId) ?? null;
+
+  const activeDraft =
+    activeRole === null ? null : (drafts.get(activeRole.id) ?? draftOf(activeRole));
+
+  const activeDirty =
+    activeRole !== null && activeDraft !== null && !draftsEqual(activeDraft, draftOf(activeRole));
+
+  const dirtyRoleIds = useMemo(() => {
+    const dirty = new Set<string>();
+
+    for (const role of roles) {
+      const draft = drafts.get(role.id);
+
+      if (draft !== undefined && !draftsEqual(draft, draftOf(role))) {
+        dirty.add(role.id);
+      }
+    }
+
+    return dirty;
+  }, [roles, drafts]);
+
+  useEffect(() => {
+    if (dirtyRoleIds.size === 0) {
+      return () => undefined;
+    }
+
+    const guard = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", guard);
+
+    return () => {
+      window.removeEventListener("beforeunload", guard);
+    };
+  }, [dirtyRoleIds.size]);
+
+  const strings = useMemo(() => stringsFor(lang, copy), [lang, copy]);
+
+  const setDraftPatch = (roleId: string, patch: Partial<RoleDraft>): void => {
+    const role = roles.find((entry) => entry.id === roleId);
+
+    if (role === undefined) {
+      return;
+    }
+
+    setDrafts((prev) => {
+      const base = prev.get(roleId) ?? draftOf(role);
+      const next = { ...base, ...patch };
+
+      if (draftsEqual(next, draftOf(role))) {
+        if (!prev.has(roleId)) {
+          return prev;
+        }
+
+        const cleaned = new Map(prev);
+        cleaned.delete(roleId);
+
+        return cleaned;
+      }
+
+      return new Map(prev).set(roleId, next);
+    });
+    setSaveErrors(null);
+  };
+
+  const toggleGrant = (roleId: string, key: string): void => {
+    const role = roles.find((entry) => entry.id === roleId);
+    const draft = drafts.get(roleId) ?? (role === undefined ? null : draftOf(role));
+
+    if (role === undefined || draft === null) {
+      return;
+    }
+
+    const next = draft.permissions.includes(key)
+      ? draft.permissions.filter((entry) => entry !== key)
+      : [...draft.permissions, key];
+
+    setDraftPatch(roleId, { permissions: next });
+  };
+
+  const saveRole = async (roleId: string): Promise<boolean> => {
+    const role = roles.find((entry) => entry.id === roleId);
+    const draft = drafts.get(roleId);
+
+    if (role === undefined || draft === undefined) {
+      return true;
+    }
+
+    if (draftsEqual(draft, draftOf(role))) {
+      return true;
+    }
+
+    const errors = validateDraft(draft, strings.editor);
+
+    if (errors.name !== undefined || errors.color !== undefined) {
+      setSaveErrors(errors);
+      setNotice({ variant: "error", ...strings.notices.validation });
+
+      return false;
+    }
+
+    const original = draftOf(role);
+
+    const metaDirty =
+      draft.name !== original.name ||
+      draft.description !== original.description ||
+      draft.color.toLowerCase() !== original.color.toLowerCase() ||
+      draft.position !== original.position;
+
+    const grantsDirty =
+      draft.permissions.length !== original.permissions.length ||
+      draft.permissions.some((permission) => !original.permissions.includes(permission));
+
+    setSavingId(roleId);
+
+    try {
+      if (metaDirty) {
+        const updated = await adminUpdateRoleFn({
+          data: {
+            role_id: roleId,
+            slug: role.slug,
+            name: draft.name.trim(),
+            description: draft.description,
+            color: draft.color.trim(),
+            position: Number.parseInt(draft.position, 10) || 0,
+          },
+        });
+
+        setRoles((prev) =>
+          prev.map((entry) => (entry.id === roleId ? { ...entry, ...updated } : entry)),
+        );
+      }
+
+      if (grantsDirty) {
+        try {
+          await adminSetRoleGrantsFn({
+            data: { role_id: roleId, permissions: [...draft.permissions] },
+          });
+        } catch {
+          setPartialFailures((prev) => new Set(prev).add(roleId));
+          setNotice({ variant: "warning", ...strings.notices.partial });
+
+          return false;
+        }
+      }
+
+      setRoles((prev) =>
+        prev.map((entry) =>
+          entry.id === roleId
+            ? {
+                ...entry,
+                name: draft.name.trim(),
+                description: draft.description,
+                color: draft.color.trim(),
+                position: Number.parseInt(draft.position, 10) || 0,
+                permissions: [...draft.permissions],
+              }
+            : entry,
+        ),
+      );
+      setDrafts((prev) => {
+        const next = new Map(prev);
+        next.delete(roleId);
+
+        return next;
+      });
+      setPartialFailures((prev) => {
+        if (!prev.has(roleId)) {
+          return prev;
+        }
+
+        const next = new Set(prev);
+        next.delete(roleId);
+
+        return next;
+      });
+      setSaveErrors(null);
+      setNotice({ variant: "success", ...strings.notices.saved(draft.name.trim()) });
+
+      return true;
+    } catch {
+      setNotice({ variant: "error", ...strings.notices.saveFailed });
+
+      return false;
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const selectRole = (roleId: string): void => {
+    if (savingId !== null || roleId === activeRoleId) {
+      if (roleId === activeRoleId) {
+        setMobileEditing(true);
+      }
+
+      return;
+    }
+
+    if (activeDirty) {
+      setPendingSwitch(roleId);
+
+      return;
+    }
+
+    setSaveErrors(null);
+    setActiveRoleId(roleId);
+    setMobileEditing(true);
+  };
+
+  const resolveSwitch = (target: string | null): void => {
+    setPendingSwitch(null);
+
+    if (target === null) {
+      return;
+    }
+
+    setSaveErrors(null);
+
+    if (target === "back") {
+      setMobileEditing(false);
+
+      return;
+    }
+
+    setActiveRoleId(target);
+    setMobileEditing(true);
+  };
+
+  const saveAndSwitch = (): void => {
+    if (activeRoleId === null) {
+      resolveSwitch(pendingSwitch);
+
+      return;
+    }
+
+    const target = pendingSwitch;
+
+    void saveRole(activeRoleId).then((saved) => {
+      if (saved) {
+        resolveSwitch(target);
+      } else {
+        setPendingSwitch(null);
+      }
+    });
+  };
+
+  const discardAndSwitch = (): void => {
+    setSaveErrors(null);
+
+    if (activeRoleId !== null) {
+      setDrafts((prev) => {
+        if (!prev.has(activeRoleId)) {
+          return prev;
+        }
+
+        const next = new Map(prev);
+        next.delete(activeRoleId);
+
+        return next;
+      });
+      setPartialFailures((prev) => {
+        if (!prev.has(activeRoleId)) {
+          return prev;
+        }
+
+        const next = new Set(prev);
+        next.delete(activeRoleId);
+
+        return next;
+      });
+    }
+
+    resolveSwitch(pendingSwitch);
+  };
+
+  const createRole = async (input: {
+    readonly slug: string;
+    readonly name: string;
+  }): Promise<void> => {
+    setCreating(true);
+    setCreateFailed(false);
+
+    try {
+      const created = await adminCreateRoleFn({
         data: {
-          slug: newSlug.trim(),
-          name: newName.trim() === "" ? newSlug.trim() : newName.trim(),
+          slug: input.slug,
+          name: input.name,
           description: "",
           color: "#6b7280",
           position: 0,
         },
-      }),
-    onSuccess: () => {
-      setNewSlug("");
-      setNewName("");
-      refreshCatalog.mutate();
-    },
-  });
+      });
 
-  const updateRole = useMutation({
-    mutationFn: (input: { roleId: string; draft: RoleDraft; slug: string }) =>
-      adminUpdateRoleFn({
-        data: {
-          role_id: input.roleId,
-          slug: input.slug,
-          name: input.draft.name,
-          description: input.draft.description,
-          color: input.draft.color,
-          position: Number.parseInt(input.draft.position, 10) || 0,
-        },
-      }),
-    onSuccess: () => {
-      refreshCatalog.mutate();
-    },
-  });
+      // Reload the catalog but keep every unrelated draft intact: only the
+      // role list and member counts are replaced.
+      const [catalogResult, list] = await Promise.all([
+        adminListRolesFn(),
+        adminRoleMemberCountsFn(),
+      ]);
 
-  const setGrants = useMutation({
-    mutationFn: (input: { roleId: string; permissions: ReadonlyArray<string> }) =>
-      adminSetRoleGrantsFn({
-        data: { role_id: input.roleId, permissions: [...input.permissions] },
-      }),
-    onSuccess: () => {
-      refreshCatalog.mutate();
-    },
-  });
+      setRoles(catalogResult.roles);
+      setCounts(list);
+      setActiveRoleId(created.id);
+      setMobileEditing(true);
+      setCreateOpen(false);
+      setNotice({ variant: "success", ...strings.notices.created(input.name) });
+    } catch {
+      setCreateFailed(true);
+      setNotice({ variant: "error", ...strings.notices.createFailed });
+    } finally {
+      setCreating(false);
+    }
+  };
 
-  const deleteRole = useMutation({
-    mutationFn: (roleId: string) => adminDeleteRoleFn({ data: { role_id: roleId } }),
-    onSuccess: () => {
+  const deleteRole = async (): Promise<void> => {
+    if (deleteTarget === null) {
+      return;
+    }
+
+    const target = deleteTarget;
+    setDeleting(true);
+
+    try {
+      await adminDeleteRoleFn({ data: { role_id: target.id } });
+
+      setRoles((prev) => {
+        const remaining = prev.filter((entry) => entry.id !== target.id);
+
+        if (activeRoleId === target.id) {
+          setActiveRoleId(firstOrdered(remaining)?.id ?? null);
+          setMobileEditing(false);
+        }
+
+        return remaining;
+      });
+      setDrafts((prev) => {
+        if (!prev.has(target.id)) {
+          return prev;
+        }
+
+        const next = new Map(prev);
+        next.delete(target.id);
+
+        return next;
+      });
       setDeleteTarget(null);
-      refreshCatalog.mutate();
-    },
-  });
-
-  const updateDraft = (roleId: string, fallback: RoleDraft, patch: Partial<RoleDraft>): void => {
-    setDrafts((prev) => new Map(prev).set(roleId, { ...fallback, ...patch }));
+      setNotice({ variant: "success", ...strings.notices.deleted(target.name) });
+    } catch {
+      setNotice({ variant: "error", ...strings.notices.deleteFailed });
+    } finally {
+      setDeleting(false);
+    }
   };
 
-  const toggleGrant = (roleId: string, fallback: ReadonlyArray<string>, key: string): void => {
-    const current = grantSelections.get(roleId) ?? fallback;
-
-    const next = current.includes(key)
-      ? current.filter((entry) => entry !== key)
-      : [...current, key];
-
-    setGrantSelections((prev) => new Map(prev).set(roleId, next));
-  };
-
-  const listFailed =
-    updateRole.isError || setGrants.isError || deleteRole.isError || refreshCatalog.isError;
-
-  const deleteEntry = roles.find((role) => role.id === deleteTarget) ?? null;
+  const pendingRole = pendingSwitch === null || pendingSwitch === "back" ? null : pendingSwitch;
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-10">
-      <h1 className="font-display text-4xl tracking-wide">{copy.authRoles}</h1>
-      <section
-        aria-labelledby={`${pageId}-create-heading`}
-        className="mt-4 rounded-lg border border-border-soft bg-white p-4 shadow-sm"
-      >
-        <h2 id={`${pageId}-create-heading`} className="font-display text-2xl tracking-wide">
-          {copy.authRoleCreate}
-        </h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor={`${pageId}-new-slug`} className="block text-sm font-medium">
-              {copy.authRoleSlug}
-            </label>
-            <input
-              id={`${pageId}-new-slug`}
-              name="newSlug"
-              type="text"
-              autoComplete="off"
-              spellCheck={false}
-              value={newSlug}
-              onChange={(event) => {
-                setNewSlug(event.target.value);
-              }}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor={`${pageId}-new-name`} className="block text-sm font-medium">
-              {copy.authRoleName}
-            </label>
-            <input
-              id={`${pageId}-new-name`}
-              name="newName"
-              type="text"
-              autoComplete="off"
-              spellCheck={false}
-              value={newName}
-              onChange={(event) => {
-                setNewName(event.target.value);
-              }}
-              className={inputClass}
-            />
-          </div>
-        </div>
-        {createRole.isError ? (
-          <div
-            role="alert"
-            id={createErrorId}
-            className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            <p>{copy.adminRoleCreateFailed}</p>
-            <button
-              type="button"
-              className="mt-2 font-medium underline hover:no-underline"
-              onClick={() => {
-                createRole.reset();
-              }}
-            >
-              {copy.commonRetry}
-            </button>
-          </div>
-        ) : null}
-        <button
-          type="button"
-          disabled={createRole.isPending || newSlug.trim() === ""}
-          aria-busy={createRole.isPending}
-          aria-describedby={createRole.isError ? createErrorId : undefined}
-          onClick={() => {
-            createRole.mutate();
+    <div className="min-w-0">
+      {notice === null ? null : (
+        <GlobalNotification
+          variant={notice.variant}
+          title={notice.title}
+          description={notice.description}
+          closeLabel={copy.adminNotificationDismiss}
+          autoDismissMs={notice.variant === "error" ? undefined : 6000}
+          onClose={() => {
+            setNotice(null);
           }}
-          className="mt-3 inline-flex items-center justify-center rounded-md bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-        >
-          {copy.authCreate}
-        </button>
-      </section>
-      {listFailed ? (
-        <div
-          role="alert"
-          id={listErrorId}
-          className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          <p>{copy.adminActionFailed}</p>
-          <button
-            type="button"
-            className="mt-2 font-medium underline hover:no-underline"
-            onClick={() => {
-              updateRole.reset();
-              setGrants.reset();
-              deleteRole.reset();
-              refreshCatalog.reset();
-              refreshCatalog.mutate();
-            }}
-          >
-            {copy.adminRefresh}
-          </button>
-        </div>
-      ) : null}
-      {roles.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-border-soft bg-white p-6 text-sm text-muted shadow-sm">
-          {copy.adminNoResults}
-        </p>
-      ) : (
-        <ul className="mt-4 grid gap-4">
-          {roles.map((role) => {
-            const draft = drafts.get(role.id) ?? draftOf(role);
-            const selected = grantSelections.get(role.id) ?? role.permissions;
-
-            return (
-              <li
-                key={role.id}
-                className="min-w-0 rounded-lg border border-border-soft bg-white p-4 shadow-sm"
-              >
-                <h3 className="min-w-0 break-words font-display text-2xl tracking-wide">
-                  {role.name} <span className="text-lg text-muted">({role.slug})</span>
-                </h3>
-                <p className="mt-1 text-sm text-muted">
-                  {role.isSystem ? copy.authRoleSystem : copy.authRoleCustom}
-                  {role.isProtected ? `, ${copy.authRoleProtected}` : null} · {memberCount(role.id)}{" "}
-                  {copy.authRoleMembers} · {role.permissions.length} {copy.authRoleGrants}
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label
-                      htmlFor={`${pageId}-name-${role.id}`}
-                      className="block text-sm font-medium"
-                    >
-                      {copy.authRoleName}
-                    </label>
-                    <input
-                      id={`${pageId}-name-${role.id}`}
-                      name={`roleName-${role.slug}`}
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={draft.name}
-                      onChange={(event) => {
-                        updateDraft(role.id, draft, { name: event.target.value });
-                      }}
-                      className={inputClass}
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`${pageId}-description-${role.id}`}
-                      className="block text-sm font-medium"
-                    >
-                      {copy.authRoleDescription}
-                    </label>
-                    <input
-                      id={`${pageId}-description-${role.id}`}
-                      name={`roleDescription-${role.slug}`}
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={draft.description}
-                      onChange={(event) => {
-                        updateDraft(role.id, draft, { description: event.target.value });
-                      }}
-                      className={inputClass}
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`${pageId}-color-${role.id}`}
-                      className="block text-sm font-medium"
-                    >
-                      {copy.authRoleColor}
-                    </label>
-                    <input
-                      id={`${pageId}-color-${role.id}`}
-                      name={`roleColor-${role.slug}`}
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={draft.color}
-                      onChange={(event) => {
-                        updateDraft(role.id, draft, { color: event.target.value });
-                      }}
-                      className={inputClass}
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`${pageId}-position-${role.id}`}
-                      className="block text-sm font-medium"
-                    >
-                      {copy.authRolePosition}
-                    </label>
-                    <input
-                      id={`${pageId}-position-${role.id}`}
-                      name={`rolePosition-${role.slug}`}
-                      type="text"
-                      autoComplete="off"
-                      inputMode="numeric"
-                      value={draft.position}
-                      onChange={(event) => {
-                        updateDraft(role.id, draft, { position: event.target.value });
-                      }}
-                      className={inputClass}
-                    />
-                  </div>
-                </div>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    disabled={updateRole.isPending}
-                    aria-busy={updateRole.isPending}
-                    onClick={() => {
-                      updateRole.mutate({ roleId: role.id, draft, slug: role.slug });
-                    }}
-                    className="inline-flex items-center justify-center rounded-md bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                  >
-                    {copy.authRoleSave}
-                  </button>
-                </div>
-                {[...groups.entries()].map(([domain, keys]) => (
-                  <fieldset
-                    key={domain}
-                    className="mt-3 rounded-md border border-border-soft px-3 py-2"
-                  >
-                    <legend className="px-1 font-display text-xl tracking-wide">{domain}</legend>
-                    <div className="grid gap-1.5 py-1">
-                      {keys.map((key) => (
-                        <label key={key} className="flex min-w-0 items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={selected.includes(key)}
-                            onChange={() => {
-                              toggleGrant(role.id, role.permissions, key);
-                            }}
-                            className="mt-1 shrink-0"
-                          />
-                          <span className="min-w-0 break-words">{key}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                ))}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={setGrants.isPending}
-                    aria-busy={setGrants.isPending}
-                    onClick={() => {
-                      setGrants.mutate({ roleId: role.id, permissions: selected });
-                    }}
-                    className="inline-flex items-center justify-center rounded-md border border-border-soft bg-white px-4 py-2 text-sm font-medium hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                  >
-                    {copy.authRoleSaveGrants}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={deleteRole.isPending || role.isSystem}
-                    title={role.isSystem ? copy.authRoleDeleteForbidden : undefined}
-                    onClick={() => {
-                      setDeleteTarget(role.id);
-                    }}
-                    className="inline-flex items-center justify-center rounded-md border border-red-700 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-                  >
-                    {copy.authRoleDelete}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        />
       )}
-      {deleteEntry !== null ? (
-        <div
-          role="alert"
-          className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          <p>
-            {copy.adminDeleteRoleConfirm}{" "}
-            <span className="break-words font-medium">{deleteEntry.name}</span>
-          </p>
-          <p className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={deleteRole.isPending}
-              onClick={() => {
-                deleteRole.mutate(deleteEntry.id);
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="font-display text-4xl tracking-wide">{copy.authRoles}</h1>
+        {dirtyRoleIds.size > 0 ? (
+          <output className="text-sm font-semibold text-food-orange-dark">
+            {strings.unsavedBadge(dirtyRoleIds.size)}
+          </output>
+        ) : null}
+      </div>
+      {roles.length === 0 ? (
+        <div className="mt-4">
+          <AdminEmptyState
+            message={copy.adminNoResults}
+            action={
+              capabilities.canCreate === true ? (
+                <AdminSecondaryButton
+                  type="button"
+                  onClick={() => {
+                    setCreateFailed(false);
+                    setCreateOpen(true);
+                  }}
+                >
+                  {copy.authRoleCreate}
+                </AdminSecondaryButton>
+              ) : undefined
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-[19rem_minmax(0,1fr)]">
+          <div
+            className={`min-h-0 ${mobileEditing ? "hidden md:block" : "block"} md:h-[calc(100dvh-15rem)] md:min-h-[26rem]`}
+          >
+            <RoleNavigator
+              roles={roles}
+              counts={countMap}
+              activeRoleId={activeRoleId}
+              dirtyRoleIds={dirtyRoleIds}
+              disabled={savingId !== null}
+              capabilities={capabilities}
+              strings={strings.navigator}
+              onSelect={selectRole}
+              onCreate={() => {
+                setCreateFailed(false);
+                setCreateOpen(true);
               }}
-              className="inline-flex items-center justify-center rounded-md bg-brand-blue px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
-            >
-              {copy.commonConfirm}
-            </button>
-            <button
+            />
+          </div>
+          <div
+            className={`min-h-0 ${mobileEditing || activeRole === null ? "block" : "hidden"} md:block md:h-[calc(100dvh-15rem)] md:min-h-[26rem]`}
+          >
+            {activeRole === null || activeDraft === null ? (
+              <AdminEmptyState message={strings.editor.emptySelection} />
+            ) : (
+              <RoleEditor
+                role={activeRole}
+                draft={activeDraft}
+                catalog={catalog}
+                totalPermissions={totalPermissions}
+                dirty={activeDirty}
+                saving={savingId === activeRole.id}
+                partialFailure={partialFailures.has(activeRole.id)}
+                capabilities={capabilities}
+                fieldErrors={saveErrors ?? {}}
+                strings={strings.editor}
+                onPatch={(patch) => {
+                  setDraftPatch(activeRole.id, patch);
+                }}
+                onToggleGrant={(key) => {
+                  toggleGrant(activeRole.id, key);
+                }}
+                onSave={() => {
+                  void saveRole(activeRole.id);
+                }}
+                onDelete={() => {
+                  setDeleteTarget(activeRole);
+                }}
+                onBack={() => {
+                  if (activeDirty) {
+                    setPendingSwitch("back");
+
+                    return;
+                  }
+
+                  setMobileEditing(false);
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {createOpen ? (
+        <CreateRoleDialog
+          open
+          pending={creating}
+          failed={createFailed}
+          strings={strings.createDialog}
+          onClose={() => {
+            setCreateOpen(false);
+          }}
+          onCreate={(input) => {
+            void createRole(input);
+          }}
+        />
+      ) : null}
+
+      <AdminConfirmDialog
+        open={deleteTarget !== null}
+        title={strings.deleteDialog.title(deleteTarget?.name ?? "")}
+        description={strings.deleteDialog.description}
+        confirmLabel={copy.authRoleDelete}
+        cancelLabel={copy.commonCancel}
+        dangerous
+        pending={deleting}
+        onConfirm={() => {
+          void deleteRole();
+        }}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+          }
+        }}
+      />
+
+      <AdminDialog
+        open={pendingSwitch !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingSwitch(null);
+          }
+        }}
+        title={strings.switchDialog.title}
+        description={
+          pendingRole === null
+            ? strings.switchDialog.descriptionBack
+            : strings.switchDialog.description(pendingTargetName(roles, pendingRole))
+        }
+        closeLabel={copy.commonCancel}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <AdminGhostButton
               type="button"
               onClick={() => {
-                setDeleteTarget(null);
+                setPendingSwitch(null);
               }}
-              className="inline-flex items-center justify-center rounded-md border border-border-soft bg-white px-3 py-1.5 text-sm font-medium hover:bg-cream motion-safe:transition-colors"
             >
               {copy.commonCancel}
-            </button>
-          </p>
-        </div>
-      ) : null}
+            </AdminGhostButton>
+            <AdminGhostButton type="button" onClick={discardAndSwitch}>
+              {strings.switchDialog.discard}
+            </AdminGhostButton>
+            <AdminSecondaryButton type="button" onClick={saveAndSwitch}>
+              {strings.switchDialog.save}
+            </AdminSecondaryButton>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted">{strings.switchDialog.body}</p>
+      </AdminDialog>
     </div>
   );
 }
+
+const pendingTargetName = (roles: ReadonlyArray<RoleEntry>, roleId: string): string =>
+  roles.find((role) => role.id === roleId)?.name ?? roleId;
+
+interface RoleStrings {
+  readonly navigator: RoleNavigatorStrings;
+  readonly editor: RoleEditorStrings;
+  readonly createDialog: CreateRoleDialogStrings;
+  readonly unsavedBadge: (count: number) => string;
+  readonly switchDialog: {
+    readonly title: string;
+    readonly description: (name: string) => string;
+    readonly descriptionBack: string;
+    readonly body: string;
+    readonly discard: string;
+    readonly save: string;
+  };
+  readonly deleteDialog: {
+    readonly title: (name: string) => string;
+    readonly description: string;
+  };
+  readonly notices: {
+    readonly saved: (name: string) => { readonly title: string; readonly description: string };
+    readonly created: (name: string) => { readonly title: string; readonly description: string };
+    readonly deleted: (name: string) => { readonly title: string; readonly description: string };
+    readonly validation: { readonly title: string; readonly description: string };
+    readonly saveFailed: { readonly title: string; readonly description: string };
+    readonly partial: { readonly title: string; readonly description: string };
+    readonly createFailed: { readonly title: string; readonly description: string };
+    readonly deleteFailed: { readonly title: string; readonly description: string };
+  };
+}
+
+const stringsFor = (lang: Locale, copy: ReturnType<typeof messagesFor>): RoleStrings => {
+  const vi = lang === "vi";
+
+  return {
+    navigator: {
+      heading: copy.authRoles,
+      createRole: copy.authRoleCreate,
+      system: copy.authRoleSystem,
+      custom: copy.authRoleCustom,
+      protectedBadge: copy.authRoleProtected,
+      members: copy.authRoleMembers,
+      unsaved: vi ? "chưa lưu" : "unsaved changes",
+    },
+    editor: {
+      overview: vi ? "Tổng quan" : "Overview",
+      name: copy.authRoleName,
+      description: copy.authRoleDescription,
+      color: copy.authRoleColor,
+      colorHint: vi
+        ? "Mã hex, ví dụ #3b82f6. Chọn ô màu hoặc nhập tay."
+        : "Hex code, e.g. #3b82f6. Use the swatch or type it.",
+      position: copy.authRolePosition,
+      permissions: vi ? "Quyền" : "Permissions",
+      grantsCount: (granted, total) =>
+        vi ? `${granted}/${total} quyền được chọn` : `${granted} of ${total} permissions selected`,
+      sensitive: vi ? "Nhạy cảm" : "Sensitive",
+      system: copy.authRoleSystem,
+      custom: copy.authRoleCustom,
+      protectedBadge: copy.authRoleProtected,
+      protectedNote: vi
+        ? "Vai trò được bảo vệ: máy chủ có thể từ chối một số thay đổi."
+        : "Protected role: the server may refuse some changes.",
+      members: copy.authRoleMembers,
+      saveChanges: vi ? "Lưu thay đổi" : "Save changes",
+      saving: vi ? "Đang lưu…" : "Saving…",
+      partialSaved: vi
+        ? "Đã lưu thông tin vai trò, nhưng chưa lưu quyền. Kiểm tra lại rồi lưu tiếp."
+        : "Role details saved, but permissions were not. Review and save again.",
+      deleteRole: copy.authRoleDelete,
+      deleteForbidden: copy.authRoleDeleteForbidden,
+      emptySelection: vi ? "Chọn một vai trò trong danh sách." : "Select a role from the list.",
+      discardChanges: vi ? "Hủy thay đổi" : "Discard changes",
+      nameRequired: vi ? "Tên vai trò là bắt buộc." : "Role name is required.",
+      colorInvalid: vi
+        ? "Màu phải là mã hex, ví dụ #3b82f6."
+        : "Color must be a hex code, e.g. #3b82f6.",
+      backToList: vi ? "Danh sách" : "Roles",
+    },
+    createDialog: {
+      title: copy.authRoleCreate,
+      description: vi
+        ? "Vai trò mới bắt đầu với không quyền nào; hãy gán quyền sau khi tạo."
+        : "New roles start with no permissions; assign grants after creation.",
+      slug: copy.authRoleSlug,
+      slugHint: vi
+        ? "Chữ thường, số và gạch nối, ví dụ event-host."
+        : "Lowercase letters, numbers and dashes, e.g. event-host.",
+      name: copy.authRoleName,
+      nameHint: vi ? "Để trống để dùng slug." : "Leave blank to use the slug.",
+      close: copy.commonCancel,
+      create: copy.authCreate,
+      creating: vi ? "Đang tạo…" : "Creating…",
+      createFailed: copy.adminRoleCreateFailed,
+      slugRequired: vi ? "Slug là bắt buộc." : "Slug is required.",
+    },
+    unsavedBadge: (count) =>
+      vi
+        ? `${count} vai trò chưa lưu`
+        : `${count} role${count === 1 ? "" : "s"} with unsaved changes`,
+    switchDialog: {
+      title: vi ? "Thay đổi chưa lưu" : "Unsaved changes",
+      description: (name) =>
+        vi
+          ? `Bạn đang sửa vai trò này và muốn chuyển sang “${name}”?`
+          : `You have unsaved edits and want to switch to “${name}”?`,
+      descriptionBack: vi
+        ? "Bạn có thay đổi chưa lưu và muốn quay lại danh sách?"
+        : "You have unsaved edits and want to go back to the list?",
+      body: vi
+        ? "Lưu sẽ giữ mọi chỉnh sửa; hủy sẽ xóa hết thay đổi chưa lưu."
+        : "Saving keeps every edit; discarding drops all unsaved changes.",
+      discard: vi ? "Hủy thay đổi" : "Discard",
+      save: vi ? "Lưu rồi chuyển" : "Save and switch",
+    },
+    deleteDialog: {
+      title: (name) => (vi ? `Xóa vai trò “${name}”?` : `Delete role “${name}”?`),
+      description: copy.adminDeleteRoleConfirm,
+    },
+    notices: {
+      saved: (name) => ({
+        title: copy.authSaved,
+        description: vi ? `Đã lưu vai trò “${name}”.` : `Saved role “${name}”.`,
+      }),
+      created: (name) => ({
+        title: copy.authSaved,
+        description: vi ? `Đã tạo vai trò “${name}”.` : `Created role “${name}”.`,
+      }),
+      deleted: (name) => ({
+        title: copy.authSaved,
+        description: vi ? `Đã xóa vai trò “${name}”.` : `Deleted role “${name}”.`,
+      }),
+      validation: {
+        title: copy.authChangeFailed,
+        description: vi
+          ? "Kiểm tra các trường được đánh dấu rồi thử lại."
+          : "Review the highlighted fields and try again.",
+      },
+      saveFailed: { title: copy.authChangeFailed, description: copy.adminActionFailed },
+      partial: {
+        title: copy.authChangeFailed,
+        description: vi
+          ? "Đã lưu thông tin vai trò, nhưng chưa lưu quyền. Thử lưu lại."
+          : "Role details saved, but permissions were not. Save again.",
+      },
+      createFailed: { title: copy.authChangeFailed, description: copy.adminRoleCreateFailed },
+      deleteFailed: { title: copy.authChangeFailed, description: copy.adminActionFailed },
+    },
+  };
+};

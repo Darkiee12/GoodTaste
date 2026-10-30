@@ -17,6 +17,7 @@ import {
   SOURCE_REGISTRY,
   importLicenseSchema,
 } from "@/modules/food-discovery/admin.schema";
+import { formatFileSize } from "@/shared/format-file-size";
 import type { Messages } from "@/shared/i18n";
 
 const TABS = ["json", "csv", "fields"] as const;
@@ -68,15 +69,11 @@ const copyTextToClipboard = (text: string): Promise<boolean> => {
 };
 
 const limitsLine = (copy: Messages): string => {
-  const megabytes = MAX_IMPORT_FILE_BYTES / 1_000_000;
-
-  const megaLabel = Number.isInteger(megabytes)
-    ? `${megabytes} MB`
-    : `${(MAX_IMPORT_FILE_BYTES / 1024).toFixed(1)} KB`;
+  const sizeLabel = formatFileSize(MAX_IMPORT_FILE_BYTES);
 
   return copy.adminImportSchemaLimits
     .replace("{records}", String(MAX_IMPORT_RECORDS))
-    .replace("{mb}", megaLabel)
+    .replace("{mb}", sizeLabel)
     .replace("{bytes}", MAX_IMPORT_FILE_BYTES.toLocaleString());
 };
 

@@ -3,11 +3,26 @@ export interface DishCardIngredient {
   readonly role: string;
 }
 
+/**
+ * Image-led card enrichment shape. Producers (recommendations, local
+ * carousel) emit the PublishedDishImage projection: generated same-origin
+ * delivery URL + responsive srcSet, alt/attribution/focal preserved.
+ * `license` is legacy (pre-projection shape) and optional — publication
+ * licensing is enforced at the publish boundary, not re-exposed publicly.
+ * New fields are optional so older payloads still decode.
+ */
 export interface DishCardImage {
   readonly url: string;
   readonly alt: string | null;
   readonly attribution: string | null;
-  readonly license: string | null;
+  readonly license?: string | null | undefined;
+  readonly id?: string | undefined;
+  readonly dishId?: string | undefined;
+  readonly srcSet?: string | null | undefined;
+  readonly focalX?: number | null | undefined;
+  readonly focalY?: number | null | undefined;
+  readonly width?: number | null | undefined;
+  readonly height?: number | null | undefined;
 }
 
 export interface DishSummary {

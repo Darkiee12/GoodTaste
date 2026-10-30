@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { ActionFooter, StageCard } from "@/components/admin/import-wizard/chrome";
+import { ActionFooter, StageCard, StageColumns } from "@/components/admin/import-wizard/chrome";
 import { SelectField, TextAreaField, TextField } from "@/components/admin/import-wizard/fields";
 import { SOURCE_REGISTRY } from "@/modules/food-discovery/admin.schema";
 import type { ImportLicense, ImportSourceId } from "@/modules/food-discovery/admin.schema";
@@ -81,90 +81,114 @@ export function SourceStage({
 
   return (
     <StageCard label={copy.adminStageSource} title={copy.adminImportStepSource}>
-      <SelectField
-        id="import-source-registry"
-        label={copy.adminImportSourceRegistry}
-        value={sourceId}
-        onChange={selectSourceId}
-        options={SOURCE_REGISTRY.map((entry) => ({ label: entry.label, value: entry.id }))}
+      <StageColumns
+        main={
+          <div className="min-w-0">
+            <div className="max-w-prose">
+              <SelectField
+                id="import-source-registry"
+                label={copy.adminImportSourceRegistry}
+                value={sourceId}
+                onChange={selectSourceId}
+                options={SOURCE_REGISTRY.map((entry) => ({ label: entry.label, value: entry.id }))}
+              />
+
+              {selectedRegistry !== undefined ? (
+                <p className="mt-2 text-sm text-muted">
+                  {copy.adminImportReuseRule} {selectedRegistry.reuseRule}
+                </p>
+              ) : null}
+
+              <TextField
+                id="import-source-name"
+                label={copy.adminImportSourceName}
+                value={sourceName}
+                onChange={onSourceName}
+                required
+              />
+
+              <TextField
+                id="import-source-url"
+                label={copy.adminImportSourceUrlField}
+                value={sourceUrl}
+                onChange={onSourceUrl}
+                inputMode="url"
+              />
+
+              <TextField
+                id="import-source-version"
+                label={copy.adminImportSourceVersionField}
+                value={sourceVersion}
+                onChange={onSourceVersion}
+              />
+
+              <SelectField
+                id="import-license"
+                label={copy.adminLicense}
+                value={license}
+                onChange={selectLicense}
+                options={LICENSES.map((entry) => ({ label: entry, value: entry }))}
+              />
+
+              {licenseReview ? (
+                <p role="alert" className="mt-2 font-semibold text-amber-700">
+                  {copy.adminImportLicenseReview}
+                </p>
+              ) : null}
+
+              <TextField
+                id="import-attribution"
+                label={copy.adminImportAttributionField}
+                value={attribution}
+                onChange={onAttribution}
+              />
+
+              <TextAreaField
+                id="import-editorial-notes"
+                label={copy.adminImportEditorialNotesField}
+                value={editorialNotes}
+                onChange={onEditorialNotes}
+              />
+            </div>
+
+            <div className="max-w-prose">
+              <ActionFooter>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center rounded-full border border-border-soft px-5 font-bold"
+                  onClick={onBack}
+                >
+                  {copy.adminImportBack}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white disabled:opacity-50"
+                  disabled={!sourceComplete}
+                  onClick={onSubmit}
+                >
+                  {copy.adminImportRunValidation}
+                </button>
+              </ActionFooter>
+
+              {sourceComplete ? null : (
+                <p className="mt-2 text-sm">{copy.adminImportSourceRequired}</p>
+              )}
+            </div>
+          </div>
+        }
+        aside={
+          <div className="min-w-0">
+            <h3 className="font-bold">{copy.adminImportSourceRegistry}</h3>
+            <p className="mt-2 max-w-prose text-sm text-muted">{copy.adminImportSchemaLifecycle}</p>
+            <p className="mt-2 max-w-prose text-sm text-muted">{copy.adminImportReviewNotice}</p>
+            {licenseReview ? (
+              <p className="mt-2 max-w-prose text-sm font-semibold text-amber-700">
+                {copy.adminImportLicenseReview}
+              </p>
+            ) : null}
+          </div>
+        }
       />
-
-      {selectedRegistry !== undefined ? (
-        <p className="mt-2 text-sm text-muted">
-          {copy.adminImportReuseRule} {selectedRegistry.reuseRule}
-        </p>
-      ) : null}
-
-      <TextField
-        id="import-source-name"
-        label={copy.adminImportSourceName}
-        value={sourceName}
-        onChange={onSourceName}
-        required
-      />
-
-      <TextField
-        id="import-source-url"
-        label={copy.adminImportSourceUrlField}
-        value={sourceUrl}
-        onChange={onSourceUrl}
-        inputMode="url"
-      />
-
-      <TextField
-        id="import-source-version"
-        label={copy.adminImportSourceVersionField}
-        value={sourceVersion}
-        onChange={onSourceVersion}
-      />
-
-      <SelectField
-        id="import-license"
-        label={copy.adminLicense}
-        value={license}
-        onChange={selectLicense}
-        options={LICENSES.map((entry) => ({ label: entry, value: entry }))}
-      />
-
-      {licenseReview ? (
-        <p role="alert" className="mt-2 font-semibold text-amber-700">
-          {copy.adminImportLicenseReview}
-        </p>
-      ) : null}
-
-      <TextField
-        id="import-attribution"
-        label={copy.adminImportAttributionField}
-        value={attribution}
-        onChange={onAttribution}
-      />
-
-      <TextAreaField
-        id="import-editorial-notes"
-        label={copy.adminImportEditorialNotesField}
-        value={editorialNotes}
-        onChange={onEditorialNotes}
-      />
-
-      <ActionFooter>
-        <button
-          type="button"
-          className="inline-flex min-h-11 items-center rounded-full border border-border-soft px-5 font-bold"
-          onClick={onBack}
-        >
-          {copy.adminImportBack}
-        </button>
-        <button
-          type="button"
-          className="inline-flex min-h-11 items-center rounded-full bg-brand-blue px-5 font-bold text-white disabled:opacity-50"
-          disabled={!sourceComplete}
-          onClick={onSubmit}
-        >
-          {copy.adminImportRunValidation}
-        </button>
-      </ActionFooter>
-
-      {sourceComplete ? null : <p className="mt-2 text-sm">{copy.adminImportSourceRequired}</p>}
     </StageCard>
   );
 }

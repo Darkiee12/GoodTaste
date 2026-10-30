@@ -1,6 +1,6 @@
-import { ShieldAlertIcon, TriangleAlertIcon } from "lucide-react";
+import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
 
-import type { Messages } from "@/shared/i18n";
+import type { Locale, Messages } from "@/shared/i18n";
 
 /**
  * Status hierarchy for recommendation outcomes.
@@ -71,11 +71,93 @@ export function ResultWarnings({
   );
 }
 
-/** Deterministic fallback, stated honestly in one subtle line. */
-export function RankingNote({ note }: { readonly note: string | null }) {
-  if (note === null) {
-    return null;
+/**
+ * Ranking modes that carry a visible brand. Mirrors the wire outcome subset
+ * that renders dishes; the value always comes straight from `outcome.mode`
+ * (quiz-flow.tsx renderOutcome) — never inferred from config, warnings, or
+ * any other client-side signal.
+ */
+export type RecommendationModeLabel = "ai" | "deterministic";
+
+/**
+ * Server-English warning markers. The recommendation service hardcodes these
+ * English sentences regardless of UI locale, so the deterministic label can
+ * detect an AI-failure fallback honestly. Markers select the *explainer
+ * variant* only; the `mode` prop stays the single branding source of truth.
+ */
+const AI_FALLBACK_MARKER = "AI ranking was";
+
+type RankingNoteLegacyProps = {
+  readonly note: string | null;
+  readonly mode?: undefined;
+  readonly warnings?: undefined;
+  readonly copy?: undefined;
+  readonly lang?: undefined;
+};
+
+type RankingNoteModeProps = {
+  readonly note?: string | null | undefined;
+  readonly mode: RecommendationModeLabel;
+  readonly warnings: ReadonlyArray<string>;
+  readonly copy: Messages;
+  readonly lang: Locale;
+};
+
+/**
+ * Mode label rendered under the results heading. AI shows a subtle sparkles
+ * icon, the localized AI note, and a one-line explainer that credits Muse
+ * with ranking only — catalog names and descriptions stay as curated and are
+ * never presented as AI-written. Deterministic shows no icon and states the
+ * picks come from the food catalog; a degraded AI attempt (fallback warning
+ * present) says so instead of silently passing as catalog order. The legacy
+ * `note`-only shape is preserved until quiz-flow adopts the mode props.
+ *
+ * TODO(i18n-coordinator): promote the interim lang-conditional sentences to
+ * recAiExplainer / recCatalogNote / recFallbackNote in src/shared/i18n.ts.
+ * Interim copy lives here so this file stays the only writer of mode labels.
+ */
+export function RankingNote(props: RankingNoteLegacyProps | RankingNoteModeProps) {
+  if (props.mode === undefined) {
+    if (props.note === null) {
+      return null;
+    }
+
+    return <p className="mb-3 text-sm font-semibold text-muted">{props.note}</p>;
   }
 
-  return <p className="mb-3 text-sm font-semibold text-muted">{note}</p>;
+  if (props.mode === "ai") {
+    return (
+      <div className="mb-3 flex flex-col gap-1">
+        <p className="flex items-center gap-1.5 text-sm font-bold text-ink">
+          <SparklesIcon aria-hidden="true" className="size-4 flex-none text-food-orange-strong" />
+          {props.copy.recAiNote}
+        </p>
+        <p className="text-sm font-semibold text-muted">
+          {props.lang === "vi"
+            ? "Muse chỉ sắp xếp lại các món trong danh mục — tên và mô tả giữ nguyên bản biên tập."
+            : "Muse re-ranked these catalog matches — names and descriptions stay as curated."}
+        </p>
+      </div>
+    );
+  }
+
+  const degraded = props.warnings.some((warning) => warning.includes(AI_FALLBACK_MARKER));
+
+  if (degraded) {
+    return (
+      <p className="mb-3 text-sm font-semibold text-muted">
+        {props.lang === "vi"
+          ? "Xếp hạng AI không khả dụng nên danh sách này theo thứ tự danh mục — không phải do AI xếp hạng."
+          : "AI ranking was unavailable, so these follow catalog order — not AI-ranked."}
+      </p>
+    );
+  }
+
+  return (
+    <p className="mb-3 text-sm font-semibold text-muted">
+      {props.lang === "vi"
+        ? "Được chọn từ danh mục món ăn, không qua xếp hạng AI."
+        : "Selected from our food catalog without AI ranking."}
+    </p>
+  );
 }

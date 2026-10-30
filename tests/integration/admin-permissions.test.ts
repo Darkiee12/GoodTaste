@@ -176,7 +176,7 @@ describe("admin status transitions require food:publish", () => {
 
 describe("import payloads fail closed on size", () => {
   test("byte length exceeds char length for multibyte text (P2 rationale)", () => {
-    const multibyte = "é".repeat(1_100_000);
+    const multibyte = "é".repeat(9_000_000);
 
     expect(multibyte.length).toBeLessThan(MAX_IMPORT_FILE_BYTES);
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { Effect, Layer, ManagedRuntime } from "effect";
 
@@ -683,13 +683,36 @@ describe("recommendation wire mapping", () => {
   });
 });
 
+let savedPoolMax: string | undefined;
+
 beforeAll(() => {
   expect(process.env.DATABASE_URL).toBeDefined();
+  // Each test builds its own ManagedRuntime with a Database pool. Capped at
+  // 2 connections per runtime so the ~25 runtimes in this file stay far
+  // below the disposable Postgres max_connections=100 budget.
+  savedPoolMax = process.env["DATABASE_POOL_MAX"];
+  process.env["DATABASE_POOL_MAX"] = "2";
   withRankingEnv({});
 });
 
 afterAll(async () => {
   withRankingEnv({});
 
-  await Promise.all(runtimes.map((runtime) => runtime.dispose()));
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+
+  if (savedPoolMax === undefined) {
+    delete process.env["DATABASE_POOL_MAX"];
+  } else {
+    process.env["DATABASE_POOL_MAX"] = savedPoolMax;
+  }
+});
+
+// Each test builds its own ManagedRuntimes (tracked above) and must not
+// hold their database pools past the test: ~25 runtimes kept alive until
+// afterAll would stack ~50+ connections on top of the shared appRuntime
+// pools and breach the disposable Postgres max_connections=100 budget,
+// surfacing as DatabaseUnavailable in later tests. Disposing here bounds
+// live runtimes to those of the running test.
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
 });

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import postgres from "postgres";
@@ -278,36 +278,28 @@ interface FakeWorld {
   denyAll: boolean;
 }
 
-const seedRowSchema = z.array(z.object({ id: z.string() }));
+// Isolated per-file fixtures: 14 dishes owned by this file (one per
+// publication-rule test), created with a unique slug prefix and deleted in
+// afterAll. Dish rows cascade to dish_media (ON DELETE CASCADE), so no
+// TRUNCATE and no dependence on the global seed catalog. Parallel-safe
+// across files via the unique prefix; sequential within this file via the
+// rotation index.
+const FIXTURE_SLUG_PREFIX = `test-dishmedia-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}-`;
 
-const seedDishIds = async (count: number): Promise<ReadonlyArray<string>> => {
-  const sql = postgres(process.env["DATABASE_URL"] ?? "", { max: 1 });
+const FIXTURE_DISH_COUNT = 14;
 
-  try {
-    const rows = seedRowSchema.parse(
-      await sql`SELECT id::text AS id FROM feastjourney.dishes ORDER BY id LIMIT ${count}`,
-    );
+const fixtureRowSchema = z.array(z.object({ id: z.string() }));
 
-    if (rows.length < count) {
-      throw new Error("not enough seed dishes for dish-media tests");
-    }
+let fixtureDishIds: Array<string> = [];
+let fixtureDishIndex = 0;
 
-    return rows.map((row) => row.id);
-  } finally {
-    await sql.end();
-  }
-};
+const takeDishId = (): string => {
+  const dishId = fixtureDishIds[fixtureDishIndex];
 
-let allocatedDishIds: ReadonlyArray<string> = [];
-let allocatedDishIndex = 0;
-
-const nextDishId = (): string => {
-  const dishId = allocatedDishIds[allocatedDishIndex];
-
-  allocatedDishIndex += 1;
+  fixtureDishIndex += 1;
 
   if (dishId === undefined) {
-    throw new Error("out of seed dishes for dish-media tests");
+    throw new Error("out of fixture dishes for dish-media tests");
   }
 
   return dishId;
@@ -424,14 +416,45 @@ const stageValidPhoto = async (
 
 describe("dish photo publication rules", () => {
   beforeAll(async () => {
-    // The disposable database persists across runs; start each file run from
-    // an empty photo library so per-dish caps and ordering stay deterministic.
     const sql = postgres(process.env["DATABASE_URL"] ?? "", { max: 1 });
 
     try {
-      await sql`TRUNCATE feastjourney.dish_media`;
-      allocatedDishIds = await seedDishIds(16);
-      allocatedDishIndex = 0;
+      const slugs = Array.from(
+        { length: FIXTURE_DISH_COUNT },
+        (_, index) => `${FIXTURE_SLUG_PREFIX}${index}`,
+      );
+
+      const inserted = await Promise.all(
+        slugs.map(async (slug) =>
+          fixtureRowSchema.parse(
+            await sql`INSERT INTO feastjourney.dishes (slug, status)
+            VALUES (${slug}, 'draft') RETURNING id::text AS id`,
+          ),
+        ),
+      );
+
+      fixtureDishIds = inserted.map((parsed) => {
+        const first = parsed[0];
+
+        if (first === undefined) {
+          throw new Error("fixture dish insert returned no id");
+        }
+
+        return first.id;
+      });
+
+      fixtureDishIndex = 0;
+    } finally {
+      await sql.end();
+    }
+  });
+
+  afterAll(async () => {
+    const sql = postgres(process.env["DATABASE_URL"] ?? "", { max: 1 });
+
+    try {
+      // Delete only rows this file created; dish_media cascades.
+      await sql`DELETE FROM feastjourney.dishes WHERE slug LIKE ${`${FIXTURE_SLUG_PREFIX}%`}`;
     } finally {
       await sql.end();
     }
@@ -440,7 +463,7 @@ describe("dish photo publication rules", () => {
   test("review photos are unfetchable publicly but fetchable via authorized preview", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -470,7 +493,7 @@ describe("dish photo publication rules", () => {
   test("published photos are publicly fetchable with stable ETags", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -508,7 +531,7 @@ describe("dish photo publication rules", () => {
   test("stale versions never serve after rotation", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -537,7 +560,7 @@ describe("dish photo publication rules", () => {
   test("publishing is blocked without a real license, attribution, and alt text", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -570,7 +593,7 @@ describe("dish photo publication rules", () => {
   test("publish requires food:publish even when the photo is ready", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: true,
       denyAll: false,
     };
@@ -593,7 +616,7 @@ describe("dish photo publication rules", () => {
   test("staging requires an authorized member", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: true,
     };
@@ -622,7 +645,7 @@ describe("dish photo publication rules", () => {
   test("deleting a photo withdraws it from public delivery and removes objects", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -656,7 +679,7 @@ describe("dish photo publication rules", () => {
   test("primary is deterministic: lowest sort_order wins the public projection", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -699,7 +722,7 @@ describe("dish photo publication rules", () => {
   test("metadata edits never touch stored bytes", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -730,7 +753,7 @@ describe("dish photo publication rules", () => {
   test("returning a published photo to draft hides it publicly", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -767,7 +790,7 @@ describe("dish photo publication rules", () => {
   test("published photos never re-enter review directly", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -794,7 +817,7 @@ describe("dish photo publication rules", () => {
   test("publishing a photo on an unpublished dish still works: statuses stay independent", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -817,7 +840,7 @@ describe("dish photo publication rules", () => {
   test("reorder rejects sets that drop or duplicate photos", async () => {
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
@@ -839,7 +862,7 @@ describe("dish photo publication rules", () => {
 
     const world: FakeWorld = {
       objects: new Map(),
-      dishId: nextDishId(),
+      dishId: takeDishId(),
       denyPublish: false,
       denyAll: false,
     };
