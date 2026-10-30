@@ -1,22 +1,143 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute, getRouteApi, redirect, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { useCallback } from "react";
+import { z } from "zod";
 
+import { DishIngredients, DishPlaces, DishTaxonomy } from "@/components/admin/dish/DishDetailsGrid";
+import { DishHeader } from "@/components/admin/dish/DishHeader";
+import { DishIdentity } from "@/components/admin/dish/DishIdentity";
+import { DishNotes, type DishNoteItem } from "@/components/admin/dish/DishNotes";
+import { DishProvenance } from "@/components/admin/dish/DishProvenance";
+import { DishStatusEditor } from "@/components/admin/dish/DishStatusEditor";
 import {
-  adminDishDetailFn,
+  RevisionTimeline,
+  type RevisionTimelineItem,
+  type RevisionTimelinePage,
+} from "@/components/admin/dish/RevisionTimeline";
+import { dishDetailReturnSchema, resolveDishesBackSearch } from "@/components/admin/page-header";
+import { AdminRouteError } from "@/components/admin/ui";
+import {
   adminPublicationCheckFn,
-  adminSurfaceFn,
   adminUpdateDishStatusFn,
 } from "@/modules/food-discovery/admin.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
+import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
 import { formatAdminDate } from "@/shared/format";
 import { localeSearchSchema, messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
+const revisionHistoryQuerySchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().max(500).nullable().default(null),
+});
+
+const loadHistoryServer = async () => {
+  const [effects, server, dashboard, authorization, session, actor, currentActor, runtime] =
+    await Promise.all([
+      import("effect"),
+      import("@tanstack/react-start/server"),
+      import("@/modules/food-discovery/server/operations/admin-dashboard-service"),
+      import("@/modules/user/server/operations/authorization"),
+      import("@/server/auth/session"),
+      import("@/server/auth/actor"),
+      import("@/server/auth/current-actor"),
+      import("@/server/runtime"),
+    ]);
+
+  return {
+    effects,
+    server,
+    dashboard,
+    authorization,
+    session,
+    actor,
+    currentActor,
+    runtime,
+  };
+};
+
+const SURFACE_CHECKS = [
+  { resource: "admin", actions: ["access"] },
+  { resource: "food", actions: ["import"] },
+  { resource: "moderation", actions: ["read"] },
+] as const;
+
+/**
+ * Dish-detail history endpoint. The initial detail loader carries the dish
+ * and notes only; revision history pages load separately through this
+ * function so long timelines never block the first paint. Every call
+ * rechecks `food:read` against current database grants at the server
+ * boundary, and the keyset cursor is validated before it reaches SQL.
+ */
+export const adminDishRevisionHistoryFn = createServerFn({ method: "GET" })
+  .validator(revisionHistoryQuerySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadHistoryServer();
+
+    const {
+      effects,
+      server,
+      dashboard: { AdminDashboardService },
+      authorization,
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await runtime.runApp(
+      effects.Effect.flatMap(session.requireAuthenticatedActor(headers), (trusted) => {
+        const member = actor.Actor.Member({ userId: trusted.userId });
+
+        return effects.Effect.flatMap(
+          effects.Effect.forEach(SURFACE_CHECKS, (check) =>
+            effects.Effect.flatMap(authorization.Authorization, (authz) =>
+              authz.has(member, check),
+            ),
+          ),
+          (results) =>
+            results.some(Boolean)
+              ? effects.Effect.succeed(trusted)
+              : effects.Effect.fail(new Error("administration requires access grants")),
+        );
+      }),
+      "fn/admin/dish-revision-history",
+      15000,
+      requestId,
+    );
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["read"] }),
+      "fn/admin/dish-revision-history",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(AdminDashboardService, (service) =>
+          service.dishRevisionHistory(data.dishId, { limit: data.limit, cursor: data.cursor }),
+        ),
+      ),
+      "fn/admin/dish-revision-history",
+      15000,
+      requestId,
+    );
+  });
+
 export const Route = createFileRoute("/admin/dishes/$dishId")({
-  validateSearch: localeSearchSchema,
+  // Optional return destination for the breadcrumb back-link: the dishes
+  // list passes its active filter + cursor so back-navigation restores the
+  // caller's context. Deep links omit them and fall back to the canonical
+  // parent (review/0).
+  validateSearch: localeSearchSchema.extend(dishDetailReturnSchema.shape),
   loaderDeps: ({ search }) => ({ locale: search.lang }),
   beforeLoad: async ({ search }) => {
     const session = await getSessionFn();
@@ -28,7 +149,9 @@ export const Route = createFileRoute("/admin/dishes/$dishId")({
       });
     }
 
-    const { allowed } = await adminSurfaceFn();
+    const { allowed } = await authorizeFn({
+      data: { checks: [{ resource: "food", actions: ["read"] }] },
+    });
 
     if (!allowed) {
       throw redirect({ to: "/", search: { lang: search.lang } });
@@ -37,31 +160,158 @@ export const Route = createFileRoute("/admin/dishes/$dishId")({
     return {};
   },
   loader: async ({ params, deps }): Promise<DishDetailData> =>
-    adminDishDetailFn({ data: { dishId: params.dishId, locale: deps.locale } }),
+    adminDishDetailLoader({ dishId: params.dishId, locale: deps.locale }),
   component: AdminDishDetail,
+  errorComponent: AdminRouteError,
 });
 
-interface DishNote {
-  readonly id: string;
-  readonly author: string;
-  readonly noteKind: string;
-  readonly note: string;
-  readonly createdAt: DisplayTimestamp;
-}
+const dishNoteSchema = z.object({
+  id: z.string(),
+  author: z.string(),
+  authorDisplayName: z.string().nullable(),
+  importJobId: z.string().nullable(),
+  appliedByDisplayName: z.string().nullable(),
+  noteKind: z.string(),
+  note: z.string(),
+  createdAt: z.union([z.string(), z.date()]),
+});
 
-interface DishRevision {
-  readonly id: string;
-  readonly actor: string;
-  readonly operation: string;
-  readonly summary: string;
-  readonly createdAt: DisplayTimestamp;
-}
+const dishNameSchema = z.object({
+  languageTag: z.string(),
+  name: z.string(),
+});
+
+const dishIngredientSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable().optional(),
+  role: z.string(),
+});
+
+const dishPlaceSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable().optional(),
+  association: z.string(),
+  isDisputed: z.boolean(),
+});
+
+const dishTaxonomySchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string().nullable().optional(),
+});
+
+const dishCategorySchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  slug: z.string(),
+  name: z.string().nullable().optional(),
+});
+
+const dishSourceSchema = z.object({
+  recordId: z.string(),
+  provider: z.string(),
+  externalId: z.string(),
+  canonicalUrl: z.string().nullable(),
+  license: z.string().nullable(),
+  attribution: z.string().nullable(),
+});
+
+const dishProfileSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string().nullable().optional(),
+  englishName: z.string().nullable().optional(),
+  status: z.string(),
+  description: z.string().nullable(),
+  descriptionLanguage: z.string().nullable(),
+  nativeNames: z.array(dishNameSchema),
+  ingredients: z.array(dishIngredientSchema),
+  places: z.array(dishPlaceSchema),
+  cuisines: z.array(dishTaxonomySchema),
+  categories: z.array(dishCategorySchema),
+  sources: z.array(dishSourceSchema),
+  lastUpdate: z.number(),
+  parent: z.object({ id: z.string(), slug: z.string() }).nullable(),
+});
+
+const dishDetailSchema = z.object({
+  dish: dishProfileSchema,
+  notes: z.array(dishNoteSchema),
+});
 
 interface DishDetailData {
   readonly dish: DishProfile;
-  readonly notes: ReadonlyArray<DishNote>;
-  readonly revisions: ReadonlyArray<DishRevision>;
+  readonly notes: ReadonlyArray<DishNoteItem>;
 }
+
+const adminDishDetailLoader = async (input: {
+  readonly dishId: string;
+  readonly locale: Locale;
+}): Promise<DishDetailData> => {
+  const { adminDishDetailFn } = await import("@/modules/food-discovery/admin.functions");
+
+  const parsed = dishDetailSchema.parse(
+    await adminDishDetailFn({ data: { dishId: input.dishId, locale: input.locale } }),
+  );
+
+  const dish: DishProfile = {
+    id: parsed.dish.id,
+    slug: parsed.dish.slug,
+    name: parsed.dish.name ?? undefined,
+    englishName: parsed.dish.englishName ?? undefined,
+    nativeNames: parsed.dish.nativeNames,
+    description: parsed.dish.description,
+    descriptionLanguage: parsed.dish.descriptionLanguage,
+    status: parsed.dish.status,
+    parent: parsed.dish.parent,
+    ingredients: parsed.dish.ingredients.map((entry) => ({
+      id: entry.id,
+      name: entry.name ?? undefined,
+      role: entry.role,
+    })),
+    places: parsed.dish.places.map((entry) => ({
+      id: entry.id,
+      name: entry.name ?? undefined,
+      association: entry.association,
+      isDisputed: entry.isDisputed,
+      kind: "",
+      iso3166: null,
+      displayLatitude: null,
+      displayLongitude: null,
+    })),
+    cuisines: parsed.dish.cuisines.map((entry) => ({
+      id: entry.id,
+      slug: entry.slug,
+      name: entry.name ?? undefined,
+    })),
+    categories: parsed.dish.categories.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      slug: entry.slug,
+      name: entry.name ?? undefined,
+    })),
+    sources: parsed.dish.sources,
+    lastUpdate: parsed.dish.lastUpdate,
+  };
+
+  return { dish, notes: parsed.notes };
+};
+
+const revisionItemSchema = z.object({
+  id: z.string(),
+  actor: z.string(),
+  actorDisplayName: z.string().nullable(),
+  importJobId: z.string().nullable(),
+  appliedByDisplayName: z.string().nullable(),
+  operation: z.string(),
+  summary: z.string(),
+  createdAt: z.union([z.string(), z.date()]),
+});
+
+const revisionPageSchema = z.object({
+  revisions: z.array(revisionItemSchema),
+  nextCursor: z.string().nullable(),
+});
 
 const statusLabel = (status: string, copy: Messages): string => {
   if (status === "published") {
@@ -83,372 +333,104 @@ const statusLabel = (status: string, copy: Messages): string => {
   return status;
 };
 
-type DisplayTimestamp = Date | string;
+const dishSummary = (dish: DishProfile, lang: Locale): string => {
+  // Status lives in the header badge and the status editor — the summary
+  // carries only the one-line counts so the three never repeat each other.
+  const parts = [
+    lang === "vi"
+      ? `${dish.ingredients.length} nguyên liệu`
+      : `${dish.ingredients.length} ingredients`,
+    lang === "vi" ? `${dish.places.length} địa điểm` : `${dish.places.length} places`,
+  ];
 
-const DISH_STATUSES = ["draft", "review", "published", "archived"] as const;
-
-const formatDate = (value: DisplayTimestamp, lang: Locale): string => formatAdminDate(value, lang);
-
-function DishStatusEditor({
-  dishId,
-  initialStatus,
-}: {
-  readonly dishId: string;
-  readonly initialStatus: string;
-}) {
-  const { lang } = rootRoute.useSearch();
-  const copy = messagesFor(lang);
-  const router = useRouter();
-  const [selected, setSelected] = useState(initialStatus);
-  const [applied, setApplied] = useState(initialStatus);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const publication = useQuery({
-    queryKey: ["admin", "publication-check", dishId],
-    queryFn: () => adminPublicationCheckFn({ data: { dishId } }),
-    staleTime: 30_000,
-  });
-
-  const save = useMutation({
-    mutationFn: (next: string) => {
-      const status = DISH_STATUSES.find((entry) => entry === next) ?? "draft";
-
-      return adminUpdateDishStatusFn({ data: { dishId, status } });
-    },
-    onSuccess: (result) => {
-      setApplied(result.status);
-      setSaved(true);
-      setSaveError(null);
-      void router.invalidate();
-    },
-    onError: (error) => {
-      setSaved(false);
-      setSaveError(error instanceof Error ? error.message : copy.adminStatusUpdateFailed);
-    },
-  });
-
-  const check = publication.data ?? null;
-  const publishBlocked = selected === "published" && check !== null && !check.publishable;
-  const checkingPublish = selected === "published" && publication.isPending;
-  const saveDisabled = save.isPending || publishBlocked || checkingPublish;
-
-  const handleSave = (): void => {
-    if (selected === "published" && applied !== "published") {
-      const confirmed = window.confirm(copy.adminPublishConfirm);
-
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    setSaved(false);
-    setSaveError(null);
-    save.mutate(selected);
-  };
-
-  return (
-    <section
-      aria-labelledby="admin-dish-status"
-      className="rounded-2xl border border-border-soft bg-white p-4"
-    >
-      <h2 id="admin-dish-status" className="text-lg font-bold">
-        {copy.adminStatus}
-      </h2>
-
-      <div className="mt-2 flex flex-col gap-2">
-        <label htmlFor="admin-dish-status-select" className="text-sm font-semibold">
-          {copy.adminStatus}
-        </label>
-
-        <select
-          id="admin-dish-status-select"
-          value={selected}
-          onChange={(event) => {
-            const next = DISH_STATUSES.find((entry) => entry === event.target.value);
-
-            if (next !== undefined) {
-              setSelected(next);
-            }
-          }}
-          className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm"
-        >
-          {DISH_STATUSES.map((entry) => (
-            <option key={entry} value={entry}>
-              {statusLabel(entry, copy)}
-            </option>
-          ))}
-        </select>
-
-        {selected === "published" ? (
-          <div className="rounded-lg bg-cream px-3 py-2 text-sm" aria-live="polite">
-            <p className="font-semibold">{copy.adminPublicationChecklist}</p>
-
-            {publication.isPending ? <p>{copy.adminCheckingPublication}</p> : null}
-
-            {publication.isError ? (
-              <div>
-                <p role="alert">{copy.adminLoadFailed}</p>
-
-                <p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void publication.refetch();
-                    }}
-                    className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-border-soft bg-white px-4 py-2 text-sm font-semibold hover:bg-cream"
-                  >
-                    {copy.adminRetryChecklist}
-                  </button>
-                </p>
-              </div>
-            ) : null}
-
-            {check !== null && check.publishable ? <p>{copy.adminPublicationReady}</p> : null}
-
-            {check !== null && !check.publishable ? (
-              <div>
-                <p>{copy.adminPublishBlocked}</p>
-
-                <ul className="mt-1 list-disc pl-5">
-                  {check.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={saveDisabled}
-            aria-busy={save.isPending}
-            onClick={handleSave}
-            className="inline-flex min-h-11 cursor-pointer items-center rounded-lg bg-brand-blue px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-          >
-            {copy.authSave}
-          </button>
-        </div>
-
-        <div aria-live="polite">
-          {saved ? <p className="text-sm font-semibold">{copy.authSaved}</p> : null}
-
-          {saveError !== null ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
-            >
-              {saveError}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  );
-}
+  return parts.join(" · ");
+};
 
 function AdminDishDetail() {
   const { lang } = rootRoute.useSearch();
+  const { fromCursor, fromStatus } = Route.useSearch();
   const copy = messagesFor(lang);
   const detail = Route.useLoaderData();
-  const { dish, notes, revisions } = detail;
+  const { dish, notes } = detail;
   const title = dish.englishName ?? dish.name ?? dish.slug;
+  const backSearch = resolveDishesBackSearch({ lang, fromStatus, fromCursor });
+
+  const fetchPage = useCallback(
+    async (input: {
+      readonly dishId: string;
+      readonly limit: number;
+      readonly cursor: string | null;
+    }): Promise<RevisionTimelinePage> => {
+      const page = revisionPageSchema.parse(
+        await adminDishRevisionHistoryFn({
+          data: { dishId: input.dishId, limit: input.limit, cursor: input.cursor },
+        }),
+      );
+
+      const revisions: ReadonlyArray<RevisionTimelineItem> = page.revisions.map((entry) => ({
+        id: entry.id,
+        actor: entry.actor,
+        actorDisplayName: entry.actorDisplayName,
+        importJobId: entry.importJobId,
+        appliedByDisplayName: entry.appliedByDisplayName,
+        operation: entry.operation,
+        summary: entry.summary,
+        createdAt: entry.createdAt,
+      }));
+
+      return { revisions, nextCursor: page.nextCursor };
+    },
+    [],
+  );
 
   return (
-    <div className="flex flex-col gap-4">
-      <Link
-        to="/admin/dishes"
-        search={{ lang, status: "review", cursor: "0" }}
-        className="inline-flex min-h-11 w-fit items-center rounded-lg px-2 py-2 text-sm font-semibold text-brand-blue underline"
-      >
-        ← {copy.adminBackToDishes}
-      </Link>
+    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4">
+      <DishHeader
+        lang={lang}
+        labLabel={copy.adminWorkspace}
+        dishesLabel={copy.adminDishesHeading}
+        backSearch={backSearch}
+        title={title}
+        summary={dishSummary(dish, lang)}
+        statusBadge={
+          <p className="rounded-full bg-cream px-3 py-1 text-sm font-bold text-food-orange-dark">
+            {copy.adminStatus}: {statusLabel(dish.status, copy)}
+          </p>
+        }
+      />
 
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="font-display text-4xl tracking-wide">{title}</h1>
-        <p className="rounded-full bg-cream px-3 py-1 text-sm font-bold text-food-orange-dark">
-          {copy.adminStatus}: {statusLabel(dish.status, copy)}
-        </p>
+      <DishStatusEditor
+        key={dish.id}
+        dishId={dish.id}
+        initialStatus={dish.status}
+        lang={lang}
+        copy={copy}
+        publicationCheck={(id) => adminPublicationCheckFn({ data: { dishId: id } })}
+        saveStatus={(id, status) => adminUpdateDishStatusFn({ data: { dishId: id, status } })}
+      />
+
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <DishIdentity dish={dish} lang={lang} copy={copy} />
+        <DishIngredients dish={dish} lang={lang} copy={copy} />
       </div>
 
-      <DishStatusEditor key={dish.id} dishId={dish.id} initialStatus={dish.status} />
+      <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <DishPlaces dish={dish} lang={lang} copy={copy} />
+        <DishTaxonomy dish={dish} lang={lang} copy={copy} />
+        <DishProvenance dish={dish} lang={lang} copy={copy} />
+      </div>
 
-      <section
-        aria-labelledby="admin-dish-names"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-names" className="text-lg font-bold">
-          {copy.adminNames}
-        </h2>
-        <ul className="mt-2 flex flex-col gap-1 text-sm">
-          {dish.nativeNames.map((entry) => (
-            <li key={`${entry.languageTag}:${entry.name}`}>
-              <span className="font-semibold">{entry.languageTag}</span>: {entry.name}
-            </li>
-          ))}
-          {dish.nativeNames.length === 0 ? <li>{copy.adminNoResults}</li> : null}
-        </ul>
-        {dish.description !== null ? (
-          <>
-            <h3 className="mt-3 text-sm font-bold">{copy.adminDescriptions}</h3>
-            <p className="mt-1 text-sm">{dish.description}</p>
-          </>
-        ) : null}
-      </section>
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <DishNotes notes={notes} lang={lang} copy={copy} />
+        <RevisionTimeline dishId={dish.id} lang={lang} copy={copy} fetchPage={fetchPage} />
+      </div>
 
-      <section
-        aria-labelledby="admin-dish-ingredients"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-ingredients" className="text-lg font-bold">
-          {copy.adminIngredients}
-        </h2>
-        {dish.ingredients.length === 0 ? (
-          <p className="mt-2 text-sm">{copy.adminNoResults}</p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-1 text-sm">
-            {dish.ingredients.map((entry) => (
-              <li key={entry.id}>
-                {entry.name ?? entry.id} <span className="text-muted">· {entry.role}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section
-        aria-labelledby="admin-dish-places"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-places" className="text-lg font-bold">
-          {copy.adminPlaces}
-        </h2>
-        {dish.places.length === 0 ? (
-          <p className="mt-2 text-sm">{copy.adminNoResults}</p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-1 text-sm">
-            {dish.places.map((entry) => (
-              <li key={entry.id}>
-                {entry.name ?? entry.id}{" "}
-                <span className="text-muted">
-                  · {entry.association}
-                  {entry.isDisputed ? " · disputed" : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section
-        aria-labelledby="admin-dish-taxonomy"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-taxonomy" className="text-lg font-bold">
-          {copy.adminCuisines} · {copy.adminCategories}
-        </h2>
-        <ul className="mt-2 flex flex-col gap-1 text-sm">
-          {dish.cuisines.map((entry) => (
-            <li key={entry.id}>
-              {copy.adminCuisines}: {entry.name ?? entry.slug}
-            </li>
-          ))}
-          {dish.categories.map((entry) => (
-            <li key={entry.id}>
-              {copy.adminCategories}: {entry.name ?? entry.slug}
-            </li>
-          ))}
-          {dish.cuisines.length === 0 && dish.categories.length === 0 ? (
-            <li>{copy.adminNoResults}</li>
-          ) : null}
-        </ul>
-      </section>
-
-      <section
-        aria-labelledby="admin-dish-provenance"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-provenance" className="text-lg font-bold">
-          {copy.adminProvenance}
-        </h2>
-        {dish.sources.length === 0 ? (
-          <p className="mt-2 text-sm">{copy.adminNoResults}</p>
-        ) : (
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[28rem] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-border-soft">
-                  <th scope="col" className="px-2 py-2 font-semibold">
-                    {copy.adminSource}
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-semibold">
-                    {copy.adminLicense}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {dish.sources.map((entry) => (
-                  <tr key={entry.recordId} className="border-b border-border-soft last:border-0">
-                    <td className="px-2 py-2">
-                      {entry.provider} · {entry.externalId}
-                      {entry.attribution !== null ? <span> · {entry.attribution}</span> : null}
-                    </td>
-                    <td className="px-2 py-2">{entry.license ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section
-        aria-labelledby="admin-dish-notes"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-notes" className="text-lg font-bold">
-          {copy.adminNotes}
-        </h2>
-        {notes.length === 0 ? (
-          <p className="mt-2 text-sm">{copy.adminNoResults}</p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-2">
-            {notes.map((entry) => (
-              <li key={entry.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
-                <p className="font-semibold">
-                  {entry.author} · {entry.noteKind} · {formatDate(entry.createdAt, lang)}
-                </p>
-                <p className="mt-1">{entry.note}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section
-        aria-labelledby="admin-dish-revisions"
-        className="rounded-2xl border border-border-soft bg-white p-4"
-      >
-        <h2 id="admin-dish-revisions" className="text-lg font-bold">
-          {copy.adminRevisions}
-        </h2>
-        {revisions.length === 0 ? (
-          <p className="mt-2 text-sm">{copy.adminNoResults}</p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-2">
-            {revisions.map((entry) => (
-              <li key={entry.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
-                <p className="font-semibold">
-                  {entry.actor} · {entry.operation} · {formatDate(entry.createdAt, lang)}
-                </p>
-                <p className="mt-1">{entry.summary}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <p className="text-xs text-muted">
+        {lang === "vi" ? "Cập nhật" : "Updated"}{" "}
+        <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>
+          {formatAdminDate(new Date(dish.lastUpdate * 1000), lang)}
+        </time>
+      </p>
     </div>
   );
 }

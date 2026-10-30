@@ -3,6 +3,7 @@ import { createFileRoute, getRouteApi, Link, redirect } from "@tanstack/react-ro
 import { useState } from "react";
 import { z } from "zod";
 
+import { PersonalNav } from "@/components/personal-nav";
 import { getDishSummariesFn } from "@/modules/food-discovery/food.functions";
 import {
   favoriteIdsQueryKey,
@@ -139,6 +140,9 @@ function SavedDishes() {
         <h1 className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance">
           {copy.savedTitle}
         </h1>
+        <div className="mt-4">
+          <PersonalNav />
+        </div>
         <p role="note" className="mt-4 max-w-[60ch] text-base font-semibold text-ink">
           {copy.savedUnavailableNote}
         </p>
@@ -295,6 +299,9 @@ function SavedPages({
       <h1 className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance">
         {copy.savedTitle}
       </h1>
+      <div className="mt-4">
+        <PersonalNav />
+      </div>
 
       {pagesPending && dishIds.length === 0 ? (
         <output className="mt-4 block text-base text-muted">{copy.savedLoading}</output>

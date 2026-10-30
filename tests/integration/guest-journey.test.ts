@@ -212,13 +212,12 @@ describe("guest journey: public catalog discovery", () => {
 });
 
 describe("guest journey: surprise keeps restrictions", () => {
-  test("surprise payload preserves avoid, allergies, cuisine, and country", () => {
+  test("surprise payload preserves avoid, allergies, and country", () => {
     const draft = {
       ...EMPTY_DRAFT,
       avoidRaw: "cilantro, mushrooms",
       allergiesRaw: "peanuts",
       regionMode: "country" as const,
-      cuisine: "",
       country: "vn",
       remember: false,
     };
@@ -237,12 +236,11 @@ describe("guest journey: surprise keeps restrictions", () => {
     expect(payload.meal).toBe("dinner");
   });
 
-  test("surprise payload preserves the catalog cuisine lane", () => {
+  test("surprise payload preserves the restored country lane", () => {
     const draft = {
       ...EMPTY_DRAFT,
-      regionMode: "cuisine" as const,
-      cuisine: "vietnamese",
-      country: "",
+      regionMode: "country" as const,
+      country: "JP",
     };
 
     const payload = buildSurprisePayload({
@@ -251,14 +249,13 @@ describe("guest journey: surprise keeps restrictions", () => {
       mood: "surprise",
       locale: "vi",
       surpriseSeed: 1,
-      cuisineSlugs: ["vietnamese", "japanese"],
     });
 
-    expect(payload.cuisine).toBe("vietnamese");
+    expect(payload.country).toBe("JP");
     expect(payload.locale).toBe("vi");
   });
 
-  test("saved prefs restore only exclusions and region, never meal or mood", () => {
+  test("saved prefs restore only dislikes and destination, never allergies, meal, or mood", () => {
     const saved = readSavedPrefs(() =>
       JSON.stringify({
         remember: true,
@@ -271,7 +268,7 @@ describe("guest journey: surprise keeps restrictions", () => {
     const draft = draftFromSavedPrefs(saved);
 
     expect(draft.avoidRaw).toBe("cilantro");
-    expect(draft.allergiesRaw).toBe("shrimp");
+    expect(draft.allergiesRaw).toBe("");
     expect(draft.regionMode).toBe("country");
   });
 });

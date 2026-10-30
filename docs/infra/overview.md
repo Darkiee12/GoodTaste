@@ -4,7 +4,7 @@
 
 - **Local:** a TanStack Start app process, PostgreSQL 18 + PostGIS 3.6 (AMD64-compatible host required), one-shot Flyway migrator, and single-node Garage for S3-compatible development storage. AI/Places integrations run behind server-only adapters.
 - **Preview / CI:** disposable Postgres 18 initialized through the same Flyway history; synthetic fixtures; isolated object-store test bucket or fake. Once Reylo SQL imports exist, CI must typecheck against the migrated live schema.
-- **Production:** app release behind HTTPS, separately orchestrated **one-shot Flyway deployment job**, managed/backed-up PostgreSQL with restricted app credentials, and a maintained S3-compatible object service. The local single-node Garage configuration is not a production topology.
+- **Production:** app release behind HTTPS, separately orchestrated **one-shot Flyway deployment job**, managed/backed-up PostgreSQL with restricted app credentials, and a maintained S3-compatible object service. The local single-node Garage configuration is not a production topology. The Azure VM + Dokploy + GHCR + Cloudflare Tunnel production contract (image, pipeline, Postgres roles, migration gate, tunnel, Access-gated staging deploys) is specified in [deployment on Dokploy + Azure](deployment-dokploy-azure.md); production environment placeholders live in `infra/.env.production.example`.
 
 ## Ownership
 

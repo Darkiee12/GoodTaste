@@ -132,6 +132,47 @@ export interface SearchDishesOutput {
   readonly nextCursor: string | null;
 }
 
+export interface LocalCarouselInput {
+  readonly latitude?: number | undefined;
+  readonly longitude?: number | undefined;
+  readonly country?: string | undefined;
+  readonly worldwide?: boolean | undefined;
+  readonly locale?: string | undefined;
+  readonly limit?: number | undefined;
+}
+
+export interface CarouselIngredient {
+  readonly name: string | undefined;
+  readonly role: string;
+}
+
+export interface CarouselImage {
+  readonly url: string;
+  readonly alt: string | null;
+  readonly attribution: string | null;
+  readonly license: string | null;
+  readonly focalX: number | null;
+  readonly focalY: number | null;
+}
+
+export interface CarouselCard {
+  readonly id: string;
+  readonly slug: string;
+  readonly name: string | undefined;
+  readonly englishName: string | undefined;
+  readonly nativeName: string | undefined;
+  readonly nativeLanguageTag: string | undefined;
+  readonly description: string | null;
+  readonly descriptionLanguage: string | null;
+  readonly ingredients: ReadonlyArray<CarouselIngredient>;
+  readonly regionNames: ReadonlyArray<string>;
+  readonly image: CarouselImage | null;
+}
+
+export interface LocalCarouselOutput {
+  readonly items: ReadonlyArray<CarouselCard>;
+}
+
 export class DishService extends Context.Service<
   DishService,
   {
@@ -151,6 +192,16 @@ export class DishService extends Context.Service<
     readonly searchDishes: (
       input: SearchDishesInput,
     ) => Effect.Effect<SearchDishesOutput, DishServiceError, Database>;
+    /**
+     * Batch carousel projection for the homepage local discovery: one
+     * round of batched reads per relation (no per-card fetch), resolving
+     * dishes by visitor coordinate (nearest associated places first) or by
+     * country filter. Coordinates never invent dishes — every card is a
+     * real published catalog association.
+     */
+    readonly getLocalCarousel: (
+      input: LocalCarouselInput,
+    ) => Effect.Effect<LocalCarouselOutput, DishServiceError, Database>;
     readonly getRelated: (
       idOrSlug: string,
       locale: string,
@@ -169,6 +220,36 @@ export class DishService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<DishSummary>, DishServiceError, Database>;
   }
 >()("feastjourney/food-discovery/DishService") {}
+
+const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
+
+/**
+ * Places farther than this never count as nearby, no matter how sparse the
+ * catalog is. Keeps a mid-ocean visitor from being shown another
+ * continent's dishes as local; genuinely uncovered regions fall through to
+ * the explicit worldwide browse instead.
+ */
+const NEARBY_MAX_KM = 1000;
+
+/** Great-circle distance in kilometers between two coordinates. */
+const haversineKm = (
+  fromLatitude: number,
+  fromLongitude: number,
+  toLatitude: number,
+  toLongitude: number,
+): number => {
+  const deltaLat = toRadians(toLatitude - fromLatitude);
+  const deltaLon = toRadians(toLongitude - fromLongitude);
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(toRadians(fromLatitude)) *
+      Math.cos(toRadians(toLatitude)) *
+      Math.sin(deltaLon / 2) *
+      Math.sin(deltaLon / 2);
+
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+};
 
 const toSummaries = (
   records: ReadonlyMap<string, DishRecord>,
@@ -806,6 +887,245 @@ export const DishServiceLive = Layer.effect(
         return { items, nextCursor };
       });
 
+    const getLocalCarousel = (
+      input: LocalCarouselInput,
+    ): Effect.Effect<LocalCarouselOutput, DishServiceError, Database> =>
+      Effect.gen(function* () {
+        const locale = yield* checkLocale(input.locale ?? "en");
+        const limit = clampLimit(input.limit, 5);
+        const ordered: Array<bigint> = [];
+
+        if (input.latitude !== undefined || input.longitude !== undefined) {
+          const latitude = input.latitude;
+          const longitude = input.longitude;
+
+          if (
+            latitude === undefined ||
+            longitude === undefined ||
+            !Number.isFinite(latitude) ||
+            latitude < -90 ||
+            latitude > 90 ||
+            !Number.isFinite(longitude) ||
+            longitude < -180 ||
+            longitude > 180
+          ) {
+            return yield* new InvalidSearchFilter({
+              reason: "latitude must be between -90 and 90 and longitude between -180 and 180",
+            });
+          }
+
+          const rows = yield* places.coordsAll();
+
+          const nearest = rows
+            .flatMap((row) => {
+              if (row.display_latitude === null || row.display_longitude === null) {
+                return [];
+              }
+
+              return [
+                {
+                  distanceKm: haversineKm(
+                    latitude,
+                    longitude,
+                    row.display_latitude,
+                    row.display_longitude,
+                  ),
+                  id: row.id,
+                },
+              ];
+            })
+            .toSorted((a, b) => a.distanceKm - b.distanceKm)
+            .filter((place) => place.distanceKm <= NEARBY_MAX_KM)
+            .slice(0, 8);
+
+          const seen = new Set<string>();
+
+          for (const place of nearest) {
+            if (ordered.length >= limit) {
+              break;
+            }
+
+            const dishIds = yield* places.dishIdsByPlace({
+              association: null,
+              limit,
+              placeId: place.id,
+              status: "published",
+            });
+
+            for (const dishId of dishIds) {
+              const key = dishId.toString();
+
+              if (!seen.has(key)) {
+                seen.add(key);
+                ordered.push(dishId);
+
+                if (ordered.length >= limit) {
+                  break;
+                }
+              }
+            }
+          }
+        } else if (input.country !== undefined) {
+          if (!/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/.test(input.country)) {
+            return yield* new InvalidSearchFilter({
+              reason: "country must be an ISO 3166 code",
+            });
+          }
+
+          const place = yield* places.findByIso(input.country);
+
+          if (place === null) {
+            return yield* new PlaceNotFound({ placeId: input.country });
+          }
+
+          const placeIds = yield* places.descendantIds(place.id);
+
+          const ids = yield* relations.filterIds({
+            association: null,
+            categoryIds: [],
+            categoryMode: "any",
+            cuisine: null,
+            cursor: BigInt(0),
+            ingredientIds: [],
+            ingredientMode: "any",
+            limit: limit + 1,
+            placeIds: placeIds.map((id) => id),
+            status: "published",
+          });
+
+          for (const id of ids.slice(0, limit)) {
+            ordered.push(id);
+          }
+        } else if (input.worldwide === true) {
+          const ids = yield* dishes.browseIds({
+            cursor: BigInt(0),
+            limit: limit + 1,
+            status: "published",
+            updated: FAR_FUTURE,
+          });
+
+          for (const id of ids.slice(0, limit)) {
+            ordered.push(id);
+          }
+        } else {
+          return { items: [] };
+        }
+
+        if (ordered.length === 0) {
+          return { items: [] };
+        }
+
+        const records = yield* recordsByIds(ordered);
+        const summaryRelations = yield* fetchSummaryRelations(ordered);
+
+        const namesById = groupByDish(
+          yield* relations.namesByDishIds(ordered),
+          (row) => row.dish_id,
+        );
+
+        const dishDescriptions = groupByDish(
+          yield* relations.descriptionsByDishIds(ordered),
+          (row) => row.dish_id,
+        );
+
+        const dishIngredients = groupByDish(
+          yield* relations.ingredientsByDishIds(ordered),
+          (row) => row.dish_id,
+        );
+
+        const mediaById = groupByDish(
+          yield* relations.mediaByDishIds(ordered),
+          (row) => row.dish_id,
+        );
+
+        const ingredientIds = [
+          ...new Set(
+            [...dishIngredients.values()].flatMap((rows) => rows.map((row) => row.ingredient_id)),
+          ),
+        ];
+
+        const namesByIngredient = groupByDish(
+          yield* ingredients.namesByIngredientIds(ingredientIds),
+          (row) => row.ingredient_id,
+        );
+
+        const items: Array<CarouselCard> = [];
+
+        for (const id of ordered) {
+          const key = id.toString();
+          const record = records.get(key);
+
+          if (record === undefined) {
+            continue;
+          }
+
+          const names = namesById.get(key) ?? [];
+          const display = displayNameOf(names, locale);
+
+          const native = names.find((entry) => entry.name_kind === "native");
+
+          const descriptionRows = dishDescriptions.get(key) ?? [];
+
+          const description =
+            descriptionRows.find((entry) => entry.language_tag === locale) ??
+            descriptionRows.find((entry) => entry.language_tag === "en") ??
+            descriptionRows[0];
+
+          const ingredientRows = (dishIngredients.get(key) ?? []).slice(0, 6);
+          const dishPlaces = summaryRelations.placesByDish.get(key) ?? [];
+          const regionNames: Array<string> = [];
+
+          for (const place of dishPlaces) {
+            const labels = summaryRelations.placeNamesByPlace.get(place.place_id.toString()) ?? [];
+            const picked = pickDisplayName(labels.map(asLocalizedName), locale);
+
+            if (picked !== undefined && !regionNames.includes(picked.name)) {
+              regionNames.push(picked.name);
+            }
+          }
+
+          const media = (mediaById.get(key) ?? [])[0];
+          const imageUrl = media?.public_url ?? null;
+
+          items.push({
+            description: description?.description ?? description?.summary ?? null,
+            descriptionLanguage: description?.language_tag ?? null,
+            englishName: englishNameOf(names),
+            id: record.id.toString(),
+            image:
+              imageUrl === null || !imageUrl.startsWith("https://")
+                ? null
+                : {
+                    alt: media?.alt_text ?? display.name ?? record.slug,
+                    attribution: media?.attribution ?? null,
+                    focalX: media?.focal_x ?? null,
+                    focalY: media?.focal_y ?? null,
+                    license: media?.license ?? null,
+                    url: imageUrl,
+                  },
+            ingredients: ingredientRows.map((entry) => {
+              const labels = namesByIngredient.get(entry.ingredient_id.toString()) ?? [];
+
+              return {
+                name: pickDisplayName(labels.map(asLocalizedName), locale)?.name,
+                role: entry.role,
+              };
+            }),
+            name: display.name,
+            nativeLanguageTag:
+              native !== undefined && native.name !== display.name
+                ? native.language_tag
+                : undefined,
+            nativeName:
+              native !== undefined && native.name !== display.name ? native.name : undefined,
+            regionNames,
+            slug: record.slug,
+          });
+        }
+
+        return { items };
+      });
+
     const getRelated = (
       idOrSlug: string,
       locale: string,
@@ -858,6 +1178,7 @@ export const DishServiceLive = Layer.effect(
       getDish,
       getDishForCuration,
       searchDishes,
+      getLocalCarousel,
       getRelated,
       getDishSummaries,
     });

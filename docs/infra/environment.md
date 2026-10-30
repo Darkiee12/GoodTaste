@@ -40,7 +40,7 @@ fast when a required value is missing; see `.env.example` for the full list):
   `RATE_LIMIT_*`, `REQUEST_TIMEOUT_MS`, `HOST`, `PORT`,
   `RECOMMENDATION_PROVIDER`, `MODEL_API_KEY`, `MODEL_MODEL_ID`,
   `MODEL_BASE_URL`, `MODEL_TIMEOUT_MS`, `MODEL_CANDIDATE_LIMIT`,
-  `MODEL_OUTPUT_LIMIT`. `DATABASE_DIRECT_URL` is declared in server config
+  `MODEL_OUTPUT_LIMIT`, `OWNER_EMAIL`. `DATABASE_DIRECT_URL` is declared in server config
   but not consumed by any application path yet.
 
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
@@ -54,6 +54,14 @@ fast when a required value is missing; see `.env.example` for the full list):
 ## Map frontend configuration (when the UI lands)
 
 `VITE_MAP_STYLE_URL` is a **public browser-visible** MapLibre vector-style URL; a MapTiler-hosted style is the initial recommendation. Domain/referrer-restrict the map provider key and monitor API usage. **Never** use this browser variable for private database, AI, or S3 credentials. Provider terms and pricing must be reviewed before production.
+
+## Production and staging configuration
+
+Staging and production share variable NAMES with local dev but never values:
+copy nothing from `infra/.env.example`. The full production template is
+`infra/.env.production.example` (placeholders only — real values live in
+Dokploy secrets and the GitHub `staging` environment); the provisioning
+contract is [deployment on Dokploy + Azure](deployment-dokploy-azure.md).
 
 ## Secret handling rules
 

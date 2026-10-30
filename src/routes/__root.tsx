@@ -5,15 +5,25 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  redirect,
   stripSearchParams,
+  useMatches,
   useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AccountMenu } from "@/components/account-menu";
+import { adminNavEntries, isAdminRouteMatch } from "@/components/admin/ui";
 import { LanguageMenu } from "@/components/language-menu";
-import { authorizeFn } from "@/modules/user/admin.functions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { resolveInitialLocaleFn } from "@/modules/food-discovery/quiz.functions";
+import { adminCapabilitiesFn, NO_ADMIN_CAPABILITIES } from "@/modules/user/admin.functions";
 import { getSessionStateFn } from "@/modules/user/session.functions";
 import {
   bcp47TagFor,
@@ -29,17 +39,29 @@ export const Route = createRootRoute({
   validateSearch: localeSearchSchema,
   search: { middlewares: [stripSearchParams({ lang: "en" })] },
   beforeLoad: async () => {
+    // Server-side initial locale (first load only): resolve saved > trusted
+    // geo > browser > default inside the server function and redirect once,
+    // so the first paint already speaks the right language. All
+    // `@tanstack/react-start/server` access stays inside that function's
+    // handler — this route never imports the server module, keeping the
+    // client bundle clean. An explicit `?lang` never redirects.
+    if (typeof window === "undefined") {
+      const { href } = await resolveInitialLocaleFn();
+
+      if (href !== null) {
+        throw redirect({ href });
+      }
+    }
+
     const session = await getSessionStateFn();
 
     if (session.status !== "signed-in") {
-      return { session, isAdmin: false as const };
+      return { session, isAdmin: false as const, capabilities: NO_ADMIN_CAPABILITIES };
     }
 
-    const { allowed } = await authorizeFn({
-      data: { checks: [{ resource: "admin", actions: ["access"] }] },
-    });
+    const { capabilities } = await adminCapabilitiesFn();
 
-    return { session, isAdmin: allowed };
+    return { session, isAdmin: capabilities.admin, capabilities };
   },
   head: ({ match }) => ({
     meta: [
@@ -84,10 +106,36 @@ function Document({ children }: { children: ReactNode }) {
 
 function AppLayout() {
   const { lang } = Route.useSearch();
-  const { session } = Route.useRouteContext();
+  const { session, capabilities } = Route.useRouteContext();
   const copy = messagesFor(lang);
   const navigate = useNavigate();
   const [queryClient] = useState(() => new QueryClient());
+
+  // Feast Lab mode: derived from TanStack Router's matched route ids, not
+  // from pathname parsing, so locale search params can never fool it. The
+  // entries themselves come from the single shared source of truth in
+  // components/admin/ui (same list the admin shell renders), gated by the
+  // server-verified capabilities already in route context.
+  const routeIds = useMatches().map((match) => match.routeId);
+  const adminMode = isAdminRouteMatch(routeIds);
+  const adminEntries = adminMode ? adminNavEntries(capabilities, copy) : [];
+
+  const currentAdminEntry = adminEntries
+    .toReversed()
+    .find((entry) =>
+      entry.exact
+        ? routeIds.includes(entry.to) && !routeIds.some((routeId) => routeId.startsWith("/admin/"))
+        : routeIds.some((routeId) => routeId === entry.to || routeId.startsWith(`${entry.to}/`)),
+    );
+
+  const hasAdminSurface =
+    capabilities.admin ||
+    capabilities.overview ||
+    capabilities.dishes ||
+    capabilities.imports ||
+    capabilities.reviews ||
+    capabilities.members ||
+    capabilities.roles;
 
   // First visit only: default to the browser's language when it is a fully
   // translated UI locale. Manual picks are remembered and never overridden;
@@ -127,72 +175,144 @@ function AppLayout() {
         {copy.skipContent}
       </a>
 
-      <header className="site-header sticky top-0 z-50 border-b border-white/10 bg-space-deep">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 sm:px-6">
-          <Link
-            to="/"
-            search={{ lang }}
-            aria-label={copy.homeLabel}
-            className="font-display mr-auto flex items-center gap-3 text-2xl leading-none tracking-wide text-white no-underline md:text-3xl"
-          >
-            <img
-              src="/applogo.png"
-              alt=""
-              width={64}
-              height={64}
-              fetchPriority="high"
-              className="block h-8 w-auto object-contain md:h-10"
-            />
-            FeastJourney
-          </Link>
-
-          <nav aria-label="FeastJourney" className="flex flex-wrap items-center gap-1">
+      <div className="flex min-h-dvh flex-col">
+        <header className="site-header sticky top-0 z-50 border-b border-white/10 bg-space-deep">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 sm:px-6">
             <Link
               to="/"
               search={{ lang }}
-              hash="discover"
-              resetScroll={false}
-              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+              aria-label={copy.homeLabel}
+              className="font-display mr-auto flex items-center gap-3 text-2xl leading-none tracking-wide text-white no-underline md:text-3xl"
             >
-              {copy.navDiscover}
+              <img
+                src="/applogo.png"
+                alt=""
+                width={64}
+                height={64}
+                fetchPriority="high"
+                className="block h-8 w-auto object-contain md:h-10"
+              />
+              FeastJourney
             </Link>
-            <Link
-              to="/"
-              search={{ lang }}
-              hash="recommend"
-              resetScroll={false}
-              className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
-            >
-              {copy.ctaRecommend}
-            </Link>
-          </nav>
 
-          <div className="flex items-center gap-1">
-            <AccountMenu />
-            <LanguageMenu />
+            <nav
+              aria-label={adminMode ? copy.adminNavSectionsLabel : "FeastJourney"}
+              className="flex flex-wrap items-center gap-1"
+            >
+              {adminMode ? (
+                <>
+                  <ul className="hidden items-center gap-1 md:flex">
+                    {adminEntries.map((entry) => (
+                      <li key={entry.to} className="shrink-0">
+                        <Link
+                          to={entry.to}
+                          search={{ lang }}
+                          activeOptions={{ exact: entry.exact }}
+                          activeProps={{ "aria-current": "page" }}
+                          className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white aria-[current=page]:bg-white/10 aria-[current=page]:text-white"
+                        >
+                          {entry.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      aria-label={copy.adminNavSectionsLabel}
+                      className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white md:hidden"
+                    >
+                      {currentAdminEntry?.label ?? copy.adminWorkspace}
+                      <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4">
+                        <path
+                          d="M4 6l4 4 4-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {adminEntries.map((entry) => (
+                        <DropdownMenuItem key={entry.to} asChild>
+                          <Link
+                            to={entry.to}
+                            search={{ lang }}
+                            activeOptions={{ exact: entry.exact }}
+                            activeProps={{ "aria-current": "page" }}
+                          >
+                            {entry.label}
+                            {currentAdminEntry?.to === entry.to ? (
+                              <span className="sr-only">{copy.adminNavCurrent}</span>
+                            ) : null}
+                          </Link>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/"
+                    search={{ lang }}
+                    hash="discover"
+                    resetScroll={false}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.navDiscover}
+                  </Link>
+                  <Link
+                    to="/"
+                    search={{ lang }}
+                    hash="recommend"
+                    resetScroll={false}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.ctaRecommend}
+                  </Link>
+                  {hasAdminSurface ? (
+                    <Link
+                      to="/admin"
+                      search={{ lang }}
+                      activeOptions={{ exact: false }}
+                      className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-mango no-underline hover:bg-white/10 hover:text-white aria-[current=page]:bg-white/10 aria-[current=page]:text-white"
+                    >
+                      {copy.adminWorkspace}
+                    </Link>
+                  ) : null}
+                </>
+              )}
+            </nav>
+
+            <div className="flex items-center gap-1">
+              <AccountMenu />
+              <LanguageMenu />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {session.status === "unavailable" ? (
-        <p
-          role="note"
-          className="border-b border-mango/40 bg-cream px-4 py-2 text-center text-sm font-semibold text-ink"
-        >
-          {copy.saveDishPaused}
-        </p>
-      ) : null}
+        {session.status === "unavailable" ? (
+          <p
+            role="note"
+            className="border-b border-mango/40 bg-cream px-4 py-2 text-center text-sm font-semibold text-ink"
+          >
+            {copy.saveDishPaused}
+          </p>
+        ) : null}
 
-      <main id="main" tabIndex={-1}>
-        <Outlet />
-      </main>
+        <main id="main" tabIndex={-1} className="flex-1">
+          <Outlet />
+        </main>
 
-      <footer className="site-footer bg-space-deep text-muted-on-dark">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-5 text-sm">
-          <span>{copy.footerTagline}</span>
-          <span>{copy.footerAdvice}</span>
-        </div>
-      </footer>
+        <footer className="site-footer bg-space-deep text-muted-on-dark">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-5 text-sm">
+            <span>{copy.footerTagline}</span>
+            <span>{copy.footerAdvice}</span>
+          </div>
+        </footer>
+      </div>
     </QueryClientProvider>
   );
 }

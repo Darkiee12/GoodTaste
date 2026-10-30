@@ -54,6 +54,19 @@ export class UserAdminService extends Context.Service<
       AdminFailure,
       Database | RoleRepository | Authorization
     >;
+    /**
+     * Exact normalized-email member lookup for the admin member search.
+     * Returns null when nobody registered with that address — callers must
+     * say so instead of inventing an invitation.
+     */
+    readonly findUserByEmail: (
+      actor: Actor,
+      email: string,
+    ) => Effect.Effect<
+      AdminUserSummary | null,
+      AdminFailure,
+      Database | RoleRepository | Authorization
+    >;
     readonly banUser: (
       actor: Actor,
       userId: UserId,
@@ -103,6 +116,29 @@ export const UserAdminServiceLive = Layer.succeed(UserAdminService, {
         createdAt: row.createdAt,
         roles: row.role_ids.filter((id): id is string => id !== null),
       }));
+    }),
+
+  findUserByEmail: (actor, email) =>
+    Effect.gen(function* () {
+      const authorization = yield* Authorization;
+      const repository = yield* RoleRepository;
+
+      yield* authorization.require(actor, { resource: "user", actions: ["list"] });
+
+      const row = yield* repository.findUserByEmail(email);
+
+      if (row === null) {
+        return null;
+      }
+
+      return {
+        id: row.id,
+        email: row.email,
+        name: row.name,
+        banned: row.banned ?? false,
+        createdAt: row.createdAt,
+        roles: row.role_ids.filter((id): id is string => id !== null),
+      };
     }),
 
   banUser: (actor, userId, reason, audit) =>

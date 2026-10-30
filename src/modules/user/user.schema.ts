@@ -49,6 +49,10 @@ export const adminUserQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+export const adminUserEmailSchema = z.object({
+  email: z.string().trim().min(3).max(254),
+});
+
 const roleSlugSchema = z
   .string()
   .trim()

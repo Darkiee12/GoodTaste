@@ -27,6 +27,7 @@
 
   --animate-popup-enter: popup-enter 450ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
   --animate-popup-exit: popup-exit 380ms ease-in forwards;
+  --animate-rec-step-enter: rec-step-enter 240ms ease-out;
 
   @keyframes popup-enter {
     from {
@@ -47,6 +48,17 @@
     to {
       opacity: 0;
       transform: translateY(8px) scale(0.92);
+    }
+  }
+
+  @keyframes rec-step-enter {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 }
@@ -77,7 +89,14 @@
     max-width: 72rem;
     margin-inline: auto;
     padding: 3rem 1.5rem 4rem;
-    min-height: 70vh;
+    /* Flex-column page layout (see __root): main must fill the container
+       cross axis and grow vertically. margin-inline:auto alone would size
+       main to its content on narrow screens (auto cross margins cancel the
+       flex stretch and min-width:auto floors at min-content), overflowing
+       the viewport. width:100% + min-width:0 keeps it exactly the
+       container width; max-width + auto margins still center on desktop. */
+    width: 100%;
+    min-width: 0;
   }
 
   main:has(> .home) {
@@ -135,10 +154,10 @@
   }
 
   /* Static cropped-planet art for SSR, reduced motion, and WebGL failures.
-     Geometry mirrors computeGlobeLayout: full-bleed on narrow screens
-     (104% of hero width, bounded by 125% of hero height), and on desktop a
-     130%-of-width globe (bounded by twice the hero height) pushed right so
-     the left stays open universe. The bottom 20% crops below the frame. */
+     Geometry mirrors computeGlobeLayout: the diameter is the smaller of
+     125% of the hero height and the hero width minus side margins, centered
+     on narrow screens and right-anchored on desktop, with the bottom 20%
+     cropped below the frame. */
   .fallback-frame {
     container-type: size;
   }
@@ -147,7 +166,7 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    width: min(104cqw, 125cqh);
+    width: min(125cqh, calc(100cqw - 32px));
     aspect-ratio: 1 / 1;
     transform: translate(-50%, 20%);
     border-radius: 50%;
@@ -201,8 +220,32 @@
 
   @media (min-width: 48rem) {
     .fallback-planet {
-      left: 76%;
-      width: min(130cqw, 200cqh);
+      right: 48px;
+      left: auto;
+      width: min(125cqh, calc(100cqw - 96px));
+      transform: translateY(20%);
+    }
+  }
+
+  /* Local-discovery carousel: one featured slide at a time, sliding with
+     a restrained transform transition. Autoplay is driven by React state;
+     hover/focus pauses and reduced motion are handled alongside. */
+  .discover-carousel-viewport {
+    overflow: hidden;
+  }
+
+  .discover-carousel-track {
+    display: flex;
+    transition: transform 550ms ease;
+  }
+
+  .discover-carousel-track > article {
+    min-height: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .discover-carousel-track {
+      transition: none;
     }
   }
 }
