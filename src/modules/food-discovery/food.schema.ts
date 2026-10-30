@@ -101,19 +101,56 @@ const mealSchema = z.enum(MEAL_OCCASIONS).default("anything");
 
 const recommendationMoodSchema = z.enum(RECOMMENDATION_MOODS).default("any");
 
-export const recommendationQuerySchema = z.object({
-  meal: mealSchema,
-  avoid: z.array(z.string().max(100)).max(20).default([]),
-  allergies: z.array(z.string().max(100)).max(20).default([]),
-  cuisine: z.string().max(80).optional(),
-  country: z
-    .string()
-    .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
-    .optional(),
-  mood: recommendationMoodSchema,
-  locale: localeSchema,
-  surpriseSeed: z.number().int().min(0).max(2147483647).default(0),
-});
+const isoCountrySchema = z
+  .string()
+  .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code");
+
+/**
+ * Where the recommendation should look. The four variants are mutually
+ * exclusive by construction: an approximate network-region country, precise
+ * visitor coordinates, an explicitly chosen destination country, or the whole
+ * world. Coordinates stay ephemeral on the client and are never persisted;
+ * the server never logs them and never forwards them to the ranking model.
+ * Accuracy is meters as reported by the geolocation API (null when unknown).
+ */
+export const recommendationLocationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("approx"), country: isoCountrySchema }),
+  z.object({
+    kind: z.literal("precise"),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+    accuracy: z.number().finite().positive().max(100_000).nullish(),
+  }),
+  z.object({ kind: z.literal("destination"), country: isoCountrySchema }),
+  z.object({ kind: z.literal("worldwide") }),
+]);
+
+export type RecommendationLocation = z.infer<typeof recommendationLocationSchema>;
+
+export const recommendationQuerySchema = z
+  .object({
+    meal: mealSchema,
+    avoid: z.array(z.string().max(100)).max(20).default([]),
+    allergies: z.array(z.string().max(100)).max(20).default([]),
+    cuisine: z.string().max(80).optional(),
+    country: z
+      .string()
+      .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
+      .optional(),
+    location: recommendationLocationSchema.optional(),
+    mood: recommendationMoodSchema,
+    locale: localeSchema,
+    surpriseSeed: z.number().int().min(0).max(2147483647).default(0),
+  })
+  .superRefine((value, context) => {
+    if (value.location !== undefined && value.country !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "country and location are mutually exclusive; send one scope only",
+        path: ["location"],
+      });
+    }
+  });
 
 export type RecommendationQuery = z.infer<typeof recommendationQuerySchema>;
 

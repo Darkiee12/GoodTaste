@@ -37,6 +37,7 @@ import { DishRepository } from "@/modules/food-discovery/server/repository/dish-
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import type { PlaceNameRow } from "@/modules/food-discovery/server/repository/place-repository";
 import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
+import dishRecommendationCandidatesNearby from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates-nearby.sql";
 import { TaxonomyRepository } from "@/modules/food-discovery/server/repository/taxonomy-repository";
 import type { Database } from "@/server/database/client";
 import type {
@@ -46,6 +47,7 @@ import type {
   TransactionConflict,
 } from "@/server/database/errors";
 import type { DatabaseError } from "@/server/database/query";
+import { runQuery } from "@/server/database/query";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -250,6 +252,98 @@ const haversineKm = (
 
   return 2 * 6371 * Math.asin(Math.sqrt(a));
 };
+
+/**
+ * Precise-location candidate selection for recommendations: dishes whose
+ * curated place associations fall inside a bounded PostGIS geography radius
+ * around the visitor. Progressive expansion starts metro-scale and stops at
+ * the documented cap — sparse regions fall through to an honest empty
+ * outcome instead of an unbounded worldwide scan.
+ *
+ * No spatial index backs this: places carry display latitude/longitude
+ * columns (no geometry column, and adding one is a migration outside this
+ * change), so each attempt is a sequential scan with an ST_DWithin
+ * geography predicate. The places table holds hundreds of rows, which keeps
+ * this cheaper than a second round-trip; revisit if it grows past easy
+ * sequential-scan size.
+ */
+export const NEARBY_START_M = 50_000;
+
+export const NEARBY_MAX_M = 500_000;
+
+const NEARBY_GROWTH_FACTOR = 4;
+
+/** Bounded expansion schedule: 50 km, 200 km, then the 500 km cap. */
+export const nearbyRadiiM = (): ReadonlyArray<number> => {
+  const radii: Array<number> = [NEARBY_START_M];
+  let radius = NEARBY_START_M;
+
+  while (radius < NEARBY_MAX_M) {
+    radius = Math.min(radius * NEARBY_GROWTH_FACTOR, NEARBY_MAX_M);
+    radii.push(radius);
+  }
+
+  return radii;
+};
+
+export type NearbyRecommendationCandidateRow =
+  (typeof dishRecommendationCandidatesNearby)["~reylo"]["element"];
+
+export interface NearbyCandidateInput {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly cuisine: string | null;
+  readonly excludedIds: ReadonlyArray<bigint>;
+  readonly locale: string;
+  readonly meal: string;
+  readonly limit: number;
+}
+
+export interface NearbyCandidates {
+  readonly rows: ReadonlyArray<NearbyRecommendationCandidateRow>;
+  /** Largest radius attempted, meters — the documented bound actually searched. */
+  readonly searchedM: number;
+}
+
+/**
+ * Bounded progressive candidate selection for precise locations: dishes
+ * whose curated place associations fall inside a PostGIS geography radius
+ * around the visitor. Metro first, then regional, then the documented cap;
+ * the first non-empty radius wins and an empty cap resolves to no rows, so
+ * sparse regions fall through to an honest empty outcome instead of a silent
+ * worldwide scan. Coordinates arrive validated (finite, range-checked) from
+ * the request schema; this function only reads published dishes through
+ * curated associations and never invents venues.
+ */
+export const findNearbyDishCandidates = (
+  input: NearbyCandidateInput,
+): Effect.Effect<NearbyCandidates, DatabaseError, Database> =>
+  Effect.gen(function* () {
+    let searchedM = NEARBY_MAX_M;
+
+    for (const radiusM of nearbyRadiiM()) {
+      searchedM = radiusM;
+
+      const rows = yield* runQuery("dish/recommendation-candidates-nearby", (sql) =>
+        dishRecommendationCandidatesNearby.run(sql, {
+          cuisine: input.cuisine,
+          excluded_ids: [...input.excludedIds],
+          latitude: input.latitude,
+          limit: input.limit,
+          locale: input.locale,
+          longitude: input.longitude,
+          meal: input.meal,
+          radius_m: radiusM,
+        }),
+      );
+
+      if (rows.length > 0) {
+        return { rows, searchedM };
+      }
+    }
+
+    return { rows: [], searchedM };
+  });
 
 const toSummaries = (
   records: ReadonlyMap<string, DishRecord>,

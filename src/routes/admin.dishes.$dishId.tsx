@@ -9,6 +9,7 @@ import { DishIdentity } from "@/components/admin/dish/DishIdentity";
 import { DishNotes, type DishNoteItem } from "@/components/admin/dish/DishNotes";
 import { DishProvenance } from "@/components/admin/dish/DishProvenance";
 import { DishStatusEditor } from "@/components/admin/dish/DishStatusEditor";
+import { DishPhotosPanel } from "@/components/admin/dish/photo-panel";
 import {
   RevisionTimeline,
   type RevisionTimelineItem,
@@ -408,6 +409,8 @@ function AdminDishDetail() {
         publicationCheck={(id) => adminPublicationCheckFn({ data: { dishId: id } })}
         saveStatus={(id, status) => adminUpdateDishStatusFn({ data: { dishId: id, status } })}
       />
+
+      <DishPhotosPanel dishId={dish.id} lang={lang} />
 
       <div className="grid min-w-0 gap-4 md:grid-cols-2">
         <DishIdentity dish={dish} lang={lang} copy={copy} />

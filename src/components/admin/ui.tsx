@@ -486,9 +486,10 @@ export function AdminField({ id, label, error, ...rest }: AdminFieldProps): Reac
 /**
  * @deprecated Prefer the canonical Radix primitive
  * (`@/components/admin/select` AdminSelect/AdminSelectField) for every
- * standard single-value select. This native `<select>` stays working for
- * any remaining consumers but is no longer used by the import wizard.
- * Do not extend it — report if it becomes fully unused so it can be removed.
+ * standard single-value select. This native `<select>` has no remaining
+ * consumers (the imports toolbar was the last one; it now uses
+ * `AdminSelectField`) and is kept only so external imports keep compiling.
+ * Do not extend it — remove it once deletion is approved.
  *
  * One consistent select presentation for every Feast Lab surface (import
  * toolbar, wizard stages). A styled native `<select>` with

@@ -7,8 +7,10 @@ import {
   buildRecommendPayload,
   buildSurprisePayload,
   clearJourneySnapshot,
+  draftLocation,
   EMPTY_DRAFT,
   formatTemplate,
+  isExplicitRegionChoice,
   persistPrefs,
   readInitialDraft,
   readJourneySnapshot,
@@ -16,6 +18,8 @@ import {
   removeSavedPrefs,
   sanitizeCountryCode,
   termLengthError,
+  toCoarseSnapshot,
+  toTransportPayload,
   validateRegion,
   writeJourneySnapshot,
   type JourneySnapshot,
@@ -36,6 +40,7 @@ import {
 } from "@/components/home/recommend/quiz-status";
 import { QuizSummary, RememberPrefs } from "@/components/home/recommend/quiz-summary";
 import { ResultCard, ResultCardSkeleton } from "@/components/home/recommend/result-card";
+import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
 import type {
@@ -91,9 +96,30 @@ export function RecommendSection() {
 
   const [journey] = useState<JourneySnapshot | null>(readJourneySnapshot);
 
+  const [initial] = useState(() => {
+    if (journey?.draft === undefined) {
+      const fresh = readInitialDraft();
+
+      return { draft: fresh, explicit: isExplicitRegionChoice(fresh) };
+    }
+
+    const restored: QuizDraft = { ...EMPTY_DRAFT, ...journey.draft, precise: null };
+
+    return { draft: restored, explicit: isExplicitRegionChoice(restored) };
+  });
+
   const [stepIndex, setStepIndex] = useState<number>(journey?.stepIndex ?? 0);
   const [showResults, setShowResults] = useState<boolean>(journey?.showResults ?? false);
-  const [draft, setDraft] = useState<QuizDraft>(journey?.draft ?? readInitialDraft());
+  const [draft, setDraft] = useState<QuizDraft>(initial.draft);
+  const explicitRegionRef = useRef(initial.explicit);
+  const precise = usePreciseLocation();
+
+  /** Region edits are always explicit and must never be clobbered by async detection. */
+  const updateRegionDraft = (next: QuizDraft): void => {
+    explicitRegionRef.current = true;
+    setDraft(next);
+  };
+
   const [meal, setMeal] = useState<MealOccasion>(journey?.meal ?? "anything");
   const [mood, setMood] = useState<RecommendationMood>(journey?.mood ?? "any");
   const [stepError, setStepError] = useState<string | null>(null);
@@ -167,18 +193,12 @@ export function RecommendSection() {
 
   // Persist the in-progress journey in memory so dish detail visits (back
   // navigation remounts this route) restore form, step, and results context.
+  // Coordinates never enter the cache: toCoarseSnapshot strips precise fixes
+  // and precise results before writing.
   useEffect(() => {
-    const snapshot: JourneySnapshot = {
-      meal,
-      mood,
-      draft,
-      stepIndex,
-      submitted,
-      showResults,
-      surpriseSeed,
-    };
-
-    writeJourneySnapshot(snapshot);
+    writeJourneySnapshot(
+      toCoarseSnapshot({ meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed }),
+    );
   }, [meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed]);
 
   // On remount with a restored results flag, re-run the submitted search once
@@ -191,7 +211,7 @@ export function RecommendSection() {
     restoredRef.current = true;
 
     if (journey?.showResults === true && journey.submitted !== null) {
-      recommend.mutate(journey.submitted);
+      recommend.mutate(toTransportPayload(journey.submitted));
     }
     // Mount-only restore: the mutation object is stable for this purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,10 +231,70 @@ export function RecommendSection() {
     if (submitted !== null && showResults) {
       const relocalized: RecommendPayload = { ...submitted, locale: lang };
       setSubmitted(relocalized);
-      recommend.mutate(relocalized);
+      recommend.mutate(toTransportPayload(relocalized));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, submitted, showResults]);
+
+  // Trusted approximate region: applies only while the visitor has made no
+  // explicit region choice (no saved preference, no journey choice, no manual
+  // edit). The functional update double-guards so async detection can never
+  // overwrite a manual selection, and it never advances the step.
+  useEffect(() => {
+    if (explicitRegionRef.current) {
+      return;
+    }
+
+    const trusted = sanitizeCountryCode(regionQuery.data?.country ?? "");
+
+    if (trusted === null) {
+      return;
+    }
+
+    setDraft((previous) => {
+      if (
+        isExplicitRegionChoice(previous) ||
+        previous.regionMode !== "anywhere" ||
+        previous.country !== ""
+      ) {
+        return previous;
+      }
+
+      return { ...previous, regionMode: "country", country: trusted, countrySource: "detected" };
+    });
+  }, [regionQuery.data]);
+
+  // Precise fixes land only on an explicitly chosen precise lane; a fix that
+  // arrives after the visitor moved on is dropped, never written over the
+  // new selection.
+  useEffect(() => {
+    if (precise.status !== "success" || precise.fix === null) {
+      return;
+    }
+
+    const fix = precise.fix;
+
+    setDraft((previous) => {
+      if (previous.regionMode !== "precise") {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        precise: { accuracy: fix.accuracy, latitude: fix.latitude, longitude: fix.longitude },
+      };
+    });
+  }, [precise.status, precise.fix]);
+
+  // Leaving the precise lane clears the locator so a return starts idle;
+  // re-locating is always one explicit tap.
+  useEffect(() => {
+    if (draft.regionMode !== "precise" && precise.status !== "idle") {
+      precise.reset();
+    }
+    // `precise.reset` is a stable callback; `precise.status` covers the read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.regionMode, precise.status]);
 
   // Predictable focus: each step and the results heading receive focus on
   // entry (without scrolling), so keyboard and screen-reader users land on
@@ -230,12 +310,13 @@ export function RecommendSection() {
   }, [stepIndex, showResults]);
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
-    persistPrefs(remember, payload.avoid, payload.country);
+    const transport = toTransportPayload(payload);
+    persistPrefs(remember, transport.avoid, transport.country);
     setHasSaved(remember);
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
-    recommend.mutate(payload);
+    recommend.mutate(transport);
   };
 
   const currentPayload = (seed: number): RecommendPayload =>
@@ -255,7 +336,7 @@ export function RecommendSection() {
    */
   const tryAdvance = (): void => {
     if (stepIndex === 0) {
-      const regionError = validateRegion(draft.regionMode, draft.country, copy);
+      const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
 
       if (regionError !== null) {
         setStepError(regionError);
@@ -282,7 +363,7 @@ export function RecommendSection() {
       return;
     }
 
-    const regionError = validateRegion(draft.regionMode, draft.country, copy);
+    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -296,7 +377,7 @@ export function RecommendSection() {
   };
 
   const skipExclusions = (): void => {
-    const regionError = validateRegion(draft.regionMode, draft.country, copy);
+    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -312,11 +393,30 @@ export function RecommendSection() {
         avoid: [],
         allergies: [],
         country: draft.regionMode === "country" ? draft.country.trim().toUpperCase() : undefined,
+        location: draftLocation(draft),
         mood,
         locale: lang,
         surpriseSeed: 0,
       }),
       draft.remember,
+    );
+  };
+
+  /** Empty-state fallback for sparse precise coverage: search worldwide instead. */
+  const searchWorldwide = (): void => {
+    const next: QuizDraft = {
+      ...draft,
+      regionMode: "anywhere",
+      country: "",
+      countrySource: null,
+      precise: null,
+    };
+
+    explicitRegionRef.current = true;
+    setDraft(next);
+    startSearch(
+      buildSurprisePayload({ draft: next, meal, mood, locale: lang, surpriseSeed: 0 }),
+      next.remember,
     );
   };
 
@@ -334,7 +434,7 @@ export function RecommendSection() {
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
-    recommend.mutate(payload);
+    recommend.mutate(toTransportPayload(payload));
   };
 
   /** Wipe saved preferences and reset the whole form; storage first. */
@@ -363,7 +463,7 @@ export function RecommendSection() {
       return;
     }
 
-    recommend.mutate(submitted);
+    recommend.mutate(toTransportPayload(submitted));
   };
 
   const backToQuiz = (): void => {
@@ -521,9 +621,14 @@ export function RecommendSection() {
                       detected={{ country: detectedCountry, locating: regionQuery.isPending }}
                       draft={draft}
                       onAdvance={tryAdvance}
-                      onDraft={setDraft}
+                      onDraft={updateRegionDraft}
                       onRetryCountries={() => {
                         void countries.refetch();
+                      }}
+                      precise={{
+                        fix: precise.fix,
+                        request: precise.request,
+                        status: precise.status,
                       }}
                     />
                   ) : null}
@@ -638,6 +743,25 @@ export function RecommendSection() {
           {outcome.mode === "empty" ? (
             <p className="mt-3 text-sm font-semibold text-muted">{copyMessages.recEmptySuggest}</p>
           ) : null}
+          {outcome.mode === "empty" && submitted?.location?.kind === "precise" ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => editStep(0)}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+              >
+                {copyMessages.recWhereAnother}
+              </button>
+              <button
+                type="button"
+                onClick={searchWorldwide}
+                disabled={recommend.isPending}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70"
+              >
+                {copyMessages.recWhereAnywhere}
+              </button>
+            </div>
+          ) : null}
           {hasAllergies ? (
             <div className="mt-4">
               <AllergyNotice copy={copyMessages} />
@@ -655,11 +779,11 @@ export function RecommendSection() {
             avoid={submitted.avoid}
             copy={copyMessages}
             countryOptions={countryOptions}
-            detectedName={detectedName}
             meal={submitted.meal}
             mood={submitted.mood}
             onEditStep={editStep}
             submittedCountry={submitted.country}
+            submittedLocation={submitted.location}
           />
         ) : null}
         <div className="mt-4">

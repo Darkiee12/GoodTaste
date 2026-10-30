@@ -4,7 +4,6 @@ import {
   dishDetailReturnSchema,
   dishReturnStatusSchema,
   resolveDishesBackSearch,
-  shortJobId,
 } from "@/components/admin/page-header";
 
 /**
@@ -65,15 +64,5 @@ describe("resolveDishesBackSearch", () => {
       status: "draft",
       cursor: "0",
     });
-  });
-});
-
-describe("shortJobId", () => {
-  test("truncates a job id to its first 8 characters", () => {
-    expect(shortJobId("12345678-90ab-cdef")).toBe("12345678");
-  });
-
-  test("leaves short ids untouched", () => {
-    expect(shortJobId("abc")).toBe("abc");
   });
 });

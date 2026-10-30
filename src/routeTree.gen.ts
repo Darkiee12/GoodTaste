@@ -57,6 +57,7 @@ import { Route as ApiV1AdminDishesIdNotesRouteImport } from './routes/api/v1/adm
 import { Route as ApiV1AdminDishesIdPlacesRouteImport } from './routes/api/v1/admin.dishes.$id.places'
 import { Route as ApiV1AdminDishesIdRevisionsRouteImport } from './routes/api/v1/admin.dishes.$id.revisions'
 import { Route as ApiV1AdminDishesIdStatusRouteImport } from './routes/api/v1/admin.dishes.$id.status'
+import { Route as ApiV1DishImagesMediaIdVersionWidthRouteImport } from './routes/api/v1/dish-images.$mediaId.$version.$width'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -306,6 +307,12 @@ const ApiV1AdminDishesIdStatusRoute =
     path: '/status',
     getParentRoute: () => ApiV1AdminDishesIdRoute,
   } as any)
+const ApiV1DishImagesMediaIdVersionWidthRoute =
+  ApiV1DishImagesMediaIdVersionWidthRouteImport.update({
+    id: '/api/v1/dish-images/$mediaId/$version/$width',
+    path: '/api/v1/dish-images/$mediaId/$version/$width',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -356,6 +363,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -405,6 +413,7 @@ export interface FileRoutesByTo {
   '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -456,6 +465,7 @@ export interface FileRoutesById {
   '/api/v1/admin/dishes/$id/places': typeof ApiV1AdminDishesIdPlacesRoute
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
+  '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -508,6 +518,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/places'
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -557,6 +568,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/places'
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
   id:
     | '__root__'
     | '/'
@@ -607,6 +619,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/places'
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
+    | '/api/v1/dish-images/$mediaId/$version/$width'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -634,6 +647,7 @@ export interface RootRouteChildren {
   ApiV1AdminReviewQueueRoute: typeof ApiV1AdminReviewQueueRoute
   ApiV1AdminImportsApplyRoute: typeof ApiV1AdminImportsApplyRoute
   ApiV1AdminImportsValidateRoute: typeof ApiV1AdminImportsValidateRoute
+  ApiV1DishImagesMediaIdVersionWidthRoute: typeof ApiV1DishImagesMediaIdVersionWidthRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -974,6 +988,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1AdminDishesIdStatusRouteImport
       parentRoute: typeof ApiV1AdminDishesIdRoute
     }
+    '/api/v1/dish-images/$mediaId/$version/$width': {
+      id: '/api/v1/dish-images/$mediaId/$version/$width'
+      path: '/api/v1/dish-images/$mediaId/$version/$width'
+      fullPath: '/api/v1/dish-images/$mediaId/$version/$width'
+      preLoaderRoute: typeof ApiV1DishImagesMediaIdVersionWidthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1145,6 +1166,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1AdminReviewQueueRoute: ApiV1AdminReviewQueueRoute,
   ApiV1AdminImportsApplyRoute: ApiV1AdminImportsApplyRoute,
   ApiV1AdminImportsValidateRoute: ApiV1AdminImportsValidateRoute,
+  ApiV1DishImagesMediaIdVersionWidthRoute:
+    ApiV1DishImagesMediaIdVersionWidthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

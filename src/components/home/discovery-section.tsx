@@ -3,7 +3,17 @@ import { getRouteApi, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
-import { getLocalCarouselFn, getVisitorRegionFn } from "@/modules/food-discovery/food.functions";
+import { sanitizeCountryCode } from "@/components/home/recommend/quiz-model";
+import {
+  fallbackOptionsFor,
+  usePreciseLocation,
+} from "@/components/home/recommend/use-precise-location";
+import {
+  getLocalCarouselFn,
+  getVisitorRegionFn,
+  listCountriesFn,
+} from "@/modules/food-discovery/food.functions";
+import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
 import {
   SaveDishButton,
   statusForDish,
@@ -16,13 +26,6 @@ const rootRoute = getRouteApi("__root__");
 
 const CAROUSEL_LIMIT = 5;
 const AUTOPLAY_MS = 6000;
-
-type GeoState =
-  | { status: "locating" }
-  | { status: "ready"; latitude: number; longitude: number }
-  | { status: "unavailable" };
-
-const roundCoord = (value: number): number => Math.round(value * 100) / 100;
 
 function locationLabel(region: VisitorRegion | null): string | null {
   if (region === null) {
@@ -48,11 +51,11 @@ function locationLabel(region: VisitorRegion | null): string | null {
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
   const { session } = rootRoute.useRouteContext();
 
-  const [geo, setGeo] = useState<GeoState>(() =>
-    typeof navigator !== "undefined" && "geolocation" in navigator
-      ? { status: "locating" }
-      : { status: "unavailable" },
-  );
+  // Precise location is explicit-only: the shared locator never prompts on
+  // mount or on render. The carousel starts from the trusted approximate
+  // region and upgrades to coordinates only after the visitor taps the
+  // precise action below.
+  const precise = usePreciseLocation();
 
   const [worldwide, setWorldwide] = useState(false);
   const [index, setIndex] = useState(0);
@@ -63,34 +66,6 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
   const [announcement, setAnnouncement] = useState("");
   const sectionRef = useRef<HTMLElement | null>(null);
   const reducedMotion = usePrefersReducedMotion();
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          if (!cancelled) {
-            setGeo({
-              latitude: roundCoord(position.coords.latitude),
-              longitude: roundCoord(position.coords.longitude),
-              status: "ready",
-            });
-          }
-        },
-        () => {
-          if (!cancelled) {
-            setGeo({ status: "unavailable" });
-          }
-        },
-        { maximumAge: 600_000, timeout: 8000 },
-      );
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     const node = sectionRef.current;
@@ -149,22 +124,53 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-  const region = regionQuery.data ?? null;
-  const country = worldwide ? null : (region?.country ?? null);
-  const where = worldwide ? null : locationLabel(region);
-  const located = worldwide || geo.status === "ready" || country !== null;
+  // Trusted approximate country shared with the quiz cache key, so the
+  // homepage issues one region request, not two. The carousel filters by
+  // this country first and falls back to the header-derived visitor region.
+  const quizRegionQuery = useQuery({
+    queryKey: ["geo", "quiz-region"],
+    queryFn: () => getQuizRegionFn(),
+    retry: 1,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
-  let geoKey = country ?? "none";
+  const trustedCountry = sanitizeCountryCode(quizRegionQuery.data?.country ?? "");
+
+  const countriesQuery = useQuery({
+    queryKey: ["catalog", "countries", lang],
+    queryFn: () => listCountriesFn({ data: { locale: lang } }),
+    retry: 1,
+    staleTime: 5 * 60_000,
+  });
+
+  const trustedName =
+    trustedCountry === null
+      ? null
+      : ((countriesQuery.data ?? []).find((entry) => entry.iso3166 === trustedCountry)
+          ?.displayName ?? trustedCountry);
+
+  const region = regionQuery.data ?? null;
+  const country = worldwide ? null : (trustedCountry ?? region?.country ?? null);
+  const where = worldwide ? null : (locationLabel(region) ?? trustedName);
+  const preciseFix = precise.status === "success" ? precise.fix : null;
+  const located = worldwide || preciseFix !== null || country !== null;
+
+  // Coordinates never enter the query key: the precise scope is the
+  // locator's success counter, so re-locating refetches without persisting
+  // visitor coordinates in the cache.
+  let scopeKey: string | null = null;
 
   if (worldwide) {
-    geoKey = "world";
-  } else if (geo.status === "ready") {
-    geoKey = `${geo.latitude},${geo.longitude}`;
+    scopeKey = "world";
+  } else if (preciseFix !== null) {
+    scopeKey = `nearby-${precise.successCount.toString()}`;
+  } else if (country !== null) {
+    scopeKey = `country-${country}`;
   }
 
   const carouselQuery = useQuery({
-    enabled: geo.status !== "locating" && (worldwide || geo.status === "ready" || country !== null),
-    queryKey: ["catalog", "local-carousel", lang, geoKey],
+    enabled: scopeKey !== null,
+    queryKey: ["catalog", "local-carousel", lang, scopeKey ?? "none"],
     queryFn: () => {
       if (worldwide) {
         return getLocalCarouselFn({
@@ -172,13 +178,13 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
         });
       }
 
-      if (geo.status === "ready") {
+      if (preciseFix !== null) {
         return getLocalCarouselFn({
           data: {
-            latitude: geo.latitude,
+            latitude: preciseFix.latitude,
             limit: CAROUSEL_LIMIT,
             locale: lang,
-            longitude: geo.longitude,
+            longitude: preciseFix.longitude,
           },
         });
       }
@@ -232,14 +238,29 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
 
   if (worldwide) {
     locationLine = copy.carouselWorldwide;
-  } else if (geo.status === "ready") {
+  } else if (preciseFix !== null) {
     locationLine = copy.discoverLocalNearYou;
   } else if (where !== null) {
     locationLine = `${copy.discoverLocalNear}: ${where}`;
   }
 
-  const loading = geo.status === "locating" || carouselQuery.isPending;
+  const loading =
+    regionQuery.isPending ||
+    quizRegionQuery.isPending ||
+    (scopeKey !== null && carouselQuery.isPending);
+
   const failed = carouselQuery.isError || regionQuery.isError;
+
+  const preciseFailed =
+    precise.status === "denied" ||
+    precise.status === "timeout" ||
+    precise.status === "unavailable" ||
+    precise.status === "unsupported" ||
+    precise.status === "insecure";
+
+  const preciseRetryable = fallbackOptionsFor(precise.status, null).some(
+    (option) => option.retryPrecise,
+  );
 
   return (
     <section
@@ -259,6 +280,39 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
         <p className="mb-2 max-w-[60ch] text-lg font-bold text-ink">{locationLine}</p>
 
         <p className="mb-8 max-w-[60ch] text-lg text-muted">{copy.discoverLocalSub}</p>
+
+        {!worldwide && precise.status !== "success" ? (
+          <div className="mb-8 flex flex-wrap items-center gap-3">
+            {precise.status === "locating" ? (
+              <output className="text-sm font-bold text-muted">{copy.discoverLocalLoading}</output>
+            ) : (
+              <button
+                type="button"
+                onClick={precise.request}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+              >
+                {copy.recWhereNearYou}
+              </button>
+            )}
+            {preciseFailed ? (
+              <p
+                role="alert"
+                className="rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+              >
+                {copy.recError}
+              </p>
+            ) : null}
+            {preciseFailed && preciseRetryable ? (
+              <button
+                type="button"
+                onClick={precise.request}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+              >
+                {copy.recRetry}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {loading ? (
           <output className="block text-base font-semibold text-muted">

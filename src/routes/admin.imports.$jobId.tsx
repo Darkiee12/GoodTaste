@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import { AdminPageHeader, shortJobId } from "@/components/admin/page-header";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { ImportStatusBadge } from "@/components/admin/ui";
 import { adminImportJobDetailFn } from "@/modules/food-discovery/admin.functions";
 import { importJobStatusSchema } from "@/modules/food-discovery/admin.schema";
@@ -256,7 +256,7 @@ function ImportJobHeader({
       breadcrumbs={[
         { label: copy.adminWorkspace, to: "/admin", search: { lang } },
         { label: copy.adminImports, to: "/admin/imports", search: { lang } },
-        { label: `${copy.adminImportsJob} ${shortJobId(jobId)}` },
+        { label: `${copy.adminImportsJob} ${jobId.slice(0, 8)}` },
       ]}
       title={`${copy.adminImportsJob} ${jobId}`}
       badge={badge}

@@ -234,6 +234,43 @@ tokens in the image or logs, never let this job run on PRs.
   single-node Garage topology is local-only by design) and revisit this
   section.
 
+### 9a. Dish photography: object storage and delivery (landed, local-only)
+
+First-party dish photos (upload → review → publish) now exist and run
+against the **local** Garage dev service only. Production still has no
+object store until an operator provisions one.
+
+- Object layout (bucket-configurable, default `feastjourney-private`):
+  `dish-media/dishes/{dishId}/{mediaId}/{version}/{width}.webp`
+  (opaque, versioned, immutable; 400/800/1600 WebP ~q80, originals never
+  stored). Postgres `dish_media` holds only metadata (dims, format,
+  checksum, license, attribution, review/publish timestamps).
+- Delivery is same-origin streaming, not a public bucket:
+  `GET /api/v1/dish-images/{mediaId}/{version}/{width}` serves
+  published + ready derivatives only (`image/webp`, `Cache-Control:
+  public, max-age=3153600, immutable`, ETag + 304). Drafts, review
+  items, failed processing, stale versions, and bad widths all resolve
+  to 404 without distinguishing; `?preview=1` serves ready rows to a
+  signed-in `food:read` member (`private, no-store`). Place behind
+  Cloudflare with edge caching when a production origin exists; the
+  route needs no per-request re-encode and only one indexed row lookup
+  per cache miss.
+- New server env (shared names, never shared values; production values
+  come from the secret store when an S3-compatible bucket is chosen):
+  `S3_ENDPOINT_INTERNAL` (Compose network `http://garage:3900`; host
+  loopback only for local debugging), `S3_REGION` (`garage` locally),
+  `S3_BUCKET_MEDIA` (defaults to `S3_BUCKET_PRIVATE`), plus the existing
+  `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`. The app never exposes
+  these to the browser; presigned browser upload URLs are not used.
+- Local-only operator note (2026-10-30): `infra/.env` S3 secrets were
+  regenerated after the Garage bootstrap, so the stored default key no
+  longer authenticated (`No such key`). A new local key
+  (`feastjourney-app-local`, RW on `feastjourney-private`) was created
+  via `garage key create` + `garage bucket allow`, and the ignored
+  `infra/.env` was rotated to it (verified PUT/GET/DELETE round-trip).
+  If local S3 auth breaks again, reissue the key administration-side —
+  never paste secrets into logs, chat, or commits.
+
 ## 10. Admin bootstrap
 
 `scripts/create-admin.ts` review (read-only finding): takes
