@@ -47,6 +47,23 @@ Versioned, immutable schema history for the `feastjourney` app schema:
   `license`, `attribution`, `editorial_notes`) so the import studio keeps
   source metadata with the job; widens the `format` check to `json`/`csv`
   (staged payloads stay validated JSON records).
+- `V20261028_012__import_job_approvals.sql` — server-enforced approval
+  columns for atomic import apply.
+- `V20261028_013__import_apply_claim_and_providers.sql` — atomic apply
+  claim plus source-record provenance writes.
+- `V20261029_004__dish_media.sql` — dish photography storage, review, and
+  delivery.
+- `V20261030_001__dish_revision_history_index.sql` — revision history
+  index.
+- `V20261030_002__dish_media_photo_metadata.sql` — photo metadata for
+  dish media.
+- `V20261030_003__import_batching_progress.sql` — batched import
+  progress tracking.
+- `V20261030_004__country_registry.sql` — full ISO country registry with
+  formal, short, and Vietnamese labels.
+- `V20261031_001__country_short_names_preferred.sql` — prefer short
+  English country names in choosers and cards where a formal/short pair
+  exists (e.g. "United States", not "United States of America").
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

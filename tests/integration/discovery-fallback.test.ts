@@ -574,14 +574,17 @@ describe("discovery fallback scope matrix", () => {
     expect(output.fallback).toBe(false);
     expect(output.supplemented).toBe(true);
     expect(output.items).toHaveLength(5);
+    // Nearby relevance keeps its order: the locality dish leads.
     expect(output.items[0]?.slug).toBe(localitySlug);
 
     const ids = output.items.map((item) => item.id);
 
     expect(new Set(ids).size).toBe(ids.length);
 
+    // Topped up from the country pool (seeded rotation decides WHICH pool
+    // dishes fill the window, so assert pool membership, not one slug).
     const slugs = output.items.map((item) => item.slug);
 
-    expect(slugs).toContain(`${PREFIX}pool-0`);
+    expect(slugs.filter((slug) => slug.startsWith(`${PREFIX}pool-`)).length).toBe(4);
   });
 });

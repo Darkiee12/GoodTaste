@@ -25,9 +25,7 @@ describe("museRankInput", () => {
 
     expect(input).toHaveLength(MUSE_RANK_INPUT_LIMIT);
     expect(MUSE_RANK_INPUT_LIMIT).toBe(10);
-    expect(input.map((row) => row.id)).toEqual(
-      rows(MUSE_RANK_INPUT_LIMIT).map((row) => row.id),
-    );
+    expect(input.map((row) => row.id)).toEqual(rows(MUSE_RANK_INPUT_LIMIT).map((row) => row.id));
   });
 
   test("empty pool stays empty", () => {

@@ -549,9 +549,14 @@ describe("discovery carousel", () => {
 
     expect(home).toContain(`${PREFIX}seven-0`);
 
-    const away = await carouselSlugs({ country: emptyIso, limit: 20 });
+    // An empty country falls back to the worldwide pool honestly labeled —
+    // absence of the home dish cannot be asserted from a worldwide window
+    // (pool-size dependent), so pin the served scope and fallback instead.
+    const away = await carouselScopes({ country: emptyIso, limit: 20 });
 
-    expect(away).not.toContain(`${PREFIX}seven-0`);
+    expect(away.scope).toBe("worldwide");
+    expect(away.fallback).toBe(true);
+    expect(away.slugs.length).toBeGreaterThan(0);
   });
 
   test("boundary coordinates are accepted, out-of-range rejected", async () => {
