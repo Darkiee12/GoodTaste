@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
-import { Option } from "effect";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -80,23 +79,23 @@ const freshJobSchema = z.object({
 /**
  * Stored issue error lists are JSON-encoded string arrays; raw text is a
  * corrupt-envelope fallback, never a silent drop. Module scope: captures
- * nothing from the component closure. Uses Effect's documented safe-parse
- * idiom (Option.liftThrowable over JSON.parse) instead of try/catch.
+ * nothing from the component closure. Plain try/catch JSON parse plus a
+ * zod decode, matching the repo's established cursor.ts idiom.
  */
-const safeJsonParse = Option.liftThrowable(JSON.parse);
-
 const errorsOf = (raw: string | null): Array<string> => {
   if (raw === null || raw === "") {
     return [];
   }
 
-  const parsed = safeJsonParse(raw);
+  let parsed: unknown;
 
-  if (Option.isNone(parsed)) {
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
     return [raw];
   }
 
-  const checked = z.array(z.string()).safeParse(parsed.value);
+  const checked = z.array(z.string()).safeParse(parsed);
 
   return checked.success ? checked.data : [raw];
 };

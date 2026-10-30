@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
@@ -121,7 +121,6 @@ function AdminRoles() {
   const [creating, setCreating] = useState(false);
   const [createFailed, setCreateFailed] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RoleEntry | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [partialFailures, setPartialFailures] = useState<ReadonlySet<string>>(new Set());
   const [saveErrors, setSaveErrors] = useState<DraftFieldErrors | null>(null);
@@ -475,27 +474,20 @@ function AdminRoles() {
     }
   };
 
-  const deleteRole = async (): Promise<void> => {
-    if (deleteTarget === null) {
-      return;
-    }
+  // Delete runs through TanStack Query so the failure is a value
+  // (mutation error state), never a thrown rejection: no try/catch needed.
+  const deleteMutation = useMutation({
+    mutationFn: (target: { readonly id: string; readonly name: string }) =>
+      adminDeleteRoleFn({ data: { role_id: target.id } }),
+    onSuccess: (_, target) => {
+      const remaining = roles.filter((entry) => entry.id !== target.id);
 
-    const target = deleteTarget;
-    setDeleting(true);
+      if (activeRoleId === target.id) {
+        setActiveRoleId(firstOrdered(remaining)?.id ?? null);
+        setMobileEditing(false);
+      }
 
-    try {
-      await adminDeleteRoleFn({ data: { role_id: target.id } });
-
-      setRoles((prev) => {
-        const remaining = prev.filter((entry) => entry.id !== target.id);
-
-        if (activeRoleId === target.id) {
-          setActiveRoleId(firstOrdered(remaining)?.id ?? null);
-          setMobileEditing(false);
-        }
-
-        return remaining;
-      });
+      setRoles(remaining);
       setDrafts((prev) => {
         if (!prev.has(target.id)) {
           return prev;
@@ -508,11 +500,14 @@ function AdminRoles() {
       });
       setDeleteTarget(null);
       setNotice({ variant: "success", ...strings.notices.deleted(target.name) });
-    } catch {
+    },
+    onError: () => {
       setNotice({ variant: "error", ...strings.notices.deleteFailed });
-    } finally {
-      setDeleting(false);
-    }
+    },
+  });
+
+  const deleteRole = (target: RoleEntry): void => {
+    deleteMutation.mutate({ id: target.id, name: target.name });
   };
 
   const pendingRole = pendingSwitch === null || pendingSwitch === "back" ? null : pendingSwitch;
@@ -644,12 +639,14 @@ function AdminRoles() {
         confirmLabel={copy.authRoleDelete}
         cancelLabel={copy.commonCancel}
         dangerous
-        pending={deleting}
+        pending={deleteMutation.isPending}
         onConfirm={() => {
-          void deleteRole();
+          if (deleteTarget !== null) {
+            deleteRole(deleteTarget);
+          }
         }}
         onCancel={() => {
-          if (!deleting) {
+          if (!deleteMutation.isPending) {
             setDeleteTarget(null);
           }
         }}
