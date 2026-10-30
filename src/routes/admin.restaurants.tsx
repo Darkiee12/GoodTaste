@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { z } from "zod";
 
+import { ContributionReview } from "@/modules/restaurant-discovery/components/contribution-review";
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
 import {
   importMenuFn,
@@ -358,6 +359,7 @@ function RestaurantAdmin() {
           </button>
         </form>
       </section>
+      <ContributionReview canReview={canReview} />
       <section>
         <h2>Observation review and history</h2>
         <form

@@ -52,11 +52,16 @@ export function clientFailure(cause: unknown): ClientFailure {
   )
     retryAfterSeconds = cause.retryAfterSeconds;
 
+  const retryable =
+    Predicate.hasProperty(cause, "retryable") && Predicate.isBoolean(cause.retryable)
+      ? cause.retryable
+      : mapping.status === 429 || mapping.status === 503;
+
   return {
     _tag: tag,
     ...mapping,
     message,
-    retryable: mapping.status === 429 || mapping.status === 503,
+    retryable,
     retryAfterSeconds,
   };
 }

@@ -1,0 +1,17 @@
+{
+  "truncated": {
+    "choices": [
+      {
+        "finish_reason": "length",
+        "message": {
+          "content": "{\"items\":["
+        }
+      }
+    ]
+  },
+  "foreignAssetId": "00000000-0000-4000-8000-999999999999",
+  "unsupportedCurrency": "XYZ",
+  "numericAmount": 6.0,
+  "invalidDecimal": "1,25",
+  "unexpectedExecutableOutput": "<script>alert(1)</script>"
+}

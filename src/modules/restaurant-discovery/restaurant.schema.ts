@@ -111,6 +111,7 @@ export const menuImportSchema = z
     venueId: z.uuid(),
     menuId: z.uuid().optional(),
     menuName: z.string().trim().min(1).max(300),
+    sourceLanguage: z.enum(["en", "vi", "ja", "zh", "ko", "fr", "es"]).nullable().optional(),
     source: z.object({
       category: z.enum(["official_menu", "menu_photo", "receipt", "authorized_provider"]),
       url: z
@@ -130,6 +131,14 @@ export const menuImportSchema = z
           itemId: z.uuid().optional(),
           name: z.string().trim().min(1).max(300),
           description: z.string().max(3000).default(""),
+          translation: z
+            .object({
+              language: z.enum(["en", "vi", "ja", "zh", "ko", "fr", "es"]),
+              name: z.string().min(1).max(300).nullable(),
+              description: z.string().min(1).max(3000).nullable(),
+              explanation: z.string().min(1).max(3000).nullable(),
+            })
+            .optional(),
           dishId: z
             .string()
             .regex(/^[1-9][0-9]{0,18}$/)
@@ -141,9 +150,16 @@ export const menuImportSchema = z
                 variantId: z.uuid().optional(),
                 name: z.string().trim().min(1).max(200).default("As listed"),
                 comparisonKey: portionSchema.optional(),
+                translation: z
+                  .object({
+                    language: z.enum(["en", "vi", "ja", "zh", "ko", "fr", "es"]),
+                    label: z.string().min(1).max(300).nullable(),
+                  })
+                  .optional(),
                 price: z
                   .object({
                     amount: amountSchema,
+                    rawText: z.string().max(200).optional(),
                     currency: currencySchema,
                     kind: z.enum(["listed", "paid_unit"]),
                     channel: channelSchema,

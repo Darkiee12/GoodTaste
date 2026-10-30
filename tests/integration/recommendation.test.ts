@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { Effect, Layer, ManagedRuntime } from "effect";
 
@@ -686,6 +686,10 @@ describe("recommendation wire mapping", () => {
 beforeAll(() => {
   expect(process.env.DATABASE_URL).toBeDefined();
   withRankingEnv({});
+});
+
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
 });
 
 afterAll(async () => {

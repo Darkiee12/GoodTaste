@@ -329,4 +329,71 @@ describe("deterministic menu presentation", () => {
     expect(menuCopy("vi").show).toBe("Đưa phiếu cho nhân viên xem");
     expect(menuCopy("unsupported").show).toBe(menuCopy("en").show);
   });
+
+  test("the shared renderer distinguishes printed and inferred ingredients", () => {
+    const scan = document();
+    scan.items = scan.items.map((item) => ({
+      ...item,
+      ingredients: [
+        { originalText: "Bò", translatedText: "Beef", evidence: "printed" },
+        { originalText: "Nước mắm", translatedText: "Fish sauce", evidence: "inferred" },
+      ],
+    }));
+
+    const html = renderToStaticMarkup(
+      <InteractiveMenuView menu={presentScan(scan, null)} locale="en" />,
+    );
+
+    expect(html).toContain("Ingredients printed on the menu");
+    expect(html).toContain("Interpreted ingredients");
+    expect(html).toContain("not allergy or dietary assurances");
+    expect(html).toContain("Fish sauce");
+  });
+
+  test("the shared renderer keeps exact originals alongside dated approximate conversion", () => {
+    const rates = new Map([
+      [
+        "VND",
+        {
+          base: "VND",
+          quote: "USD",
+          rate: "0.00004",
+          effectiveDate: "2026-10-29",
+          provider: "Synthetic fixture",
+        },
+      ],
+    ]);
+
+    const html = renderToStaticMarkup(
+      <InteractiveMenuView menu={presentScan(document(), null)} locale="en" rates={rates} />,
+    );
+
+    expect(html).toContain("65,000");
+    expect(html).toContain("2.60");
+    expect(html).toContain("≈");
+    expect(html).toContain("Rate dated 2026-10-29");
+  });
+
+  test("reviewed source and canonical dish links remain in the shared renderer", () => {
+    const menu = presentScan(document(), null);
+
+    const linked: InteractiveMenu = {
+      ...menu,
+      provenance: "reviewed",
+      items: menu.items.map((item) => {
+        const variants = item.variants.map((variant) =>
+          Object.assign({}, variant, {
+            sourceUrl: "https://example.com/menu-evidence",
+          }),
+        );
+
+        return Object.assign({}, item, { dishId: "42", variants });
+      }),
+    };
+
+    const html = renderToStaticMarkup(<InteractiveMenuView menu={linked} locale="vi" />);
+    expect(html).toContain("/dishes/42?lang=vi");
+    expect(html).toContain("https://example.com/menu-evidence");
+    expect(html).toContain("Khám phá món này");
+  });
 });

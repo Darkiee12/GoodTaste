@@ -143,8 +143,6 @@ describe("isFacingCamera", () => {
   });
 });
 
-const COASTAL_DISH_IDS = new Set(["pizza-napoletana", "ceviche", "paella"]);
-
 function isCoastal(grid: Uint8Array, longitude: number, latitude: number): boolean {
   for (let dLat = -1; dLat <= 1; dLat += 1) {
     for (let dLon = -1; dLon <= 1; dLon += 1) {
@@ -158,17 +156,27 @@ function isCoastal(grid: Uint8Array, longitude: number, latitude: number): boole
 }
 
 describe("land grid", () => {
-  test("marks curated dish cities as land and mid-ocean points as sea", () => {
+  test("recognizes continental cities, coastal neighborhoods and mid-ocean cells", () => {
     const grid = decodeLandGrid();
 
     expect(grid.length).toBe(720 * 360);
 
-    for (const dish of FOOD_LOCATIONS) {
-      if (COASTAL_DISH_IDS.has(dish.id)) {
-        expect(isCoastal(grid, dish.longitude, dish.latitude)).toBe(true);
-      } else {
-        expect(isLandCell(grid, dish.longitude, dish.latitude)).toBe(true);
-      }
+    // The coarse land mask omits small islands, so it cannot validate every
+    // real city in the expanded worldwide catalog.
+    for (const [longitude, latitude] of [
+      [105.8542, 21.0285],
+      [13.405, 52.52],
+      [77.209, 28.614],
+    ] as const) {
+      expect(isLandCell(grid, Longitude(longitude), Latitude(latitude))).toBe(true);
+    }
+
+    for (const [longitude, latitude] of [
+      [14.2681, 40.8518],
+      [-77.0428, -12.0464],
+      [-0.3763, 39.4699],
+    ] as const) {
+      expect(isCoastal(grid, longitude, latitude)).toBe(true);
     }
 
     expect(isLandCell(grid, Longitude(-150), Latitude(0))).toBe(false);
@@ -421,8 +429,19 @@ describe("west-to-east spin drift", () => {
 });
 
 describe("food locations", () => {
-  test("ships five cities for each of sixteen dishes", () => {
-    expect(FOOD_LOCATIONS).toHaveLength(16 * 5);
+  test("provides five anchors per country across the worldwide catalog", () => {
+    const countryCounts = new Map<string, number>();
+
+    for (const location of FOOD_LOCATIONS) {
+      const country = location.country.get("en");
+
+      if (country === undefined) throw new Error("Country name is missing");
+      countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
+    }
+
+    expect(countryCounts.size).toBeGreaterThanOrEqual(190);
+
+    for (const count of countryCounts.values()) expect(count).toBe(5);
   });
 
   test("keeps anchor ids distinct across all cities", () => {

@@ -758,6 +758,16 @@ describe("PR4 remediation regressions", () => {
       await run(
         withActor(actor, setOfferingStatus({ kind: "item", id: item.itemId, status: "published" })),
       );
+      await Promise.all(
+        imported.offeringIds.map((offering) =>
+          run(
+            withActor(
+              actor,
+              setOfferingStatus({ kind: "variant", id: offering.variantId, status: "published" }),
+            ),
+          ),
+        ),
+      );
       const menu = await run(getRestaurant(venue, "dine_in"));
       expect(menu.offerings).toHaveLength(2);
       expect(

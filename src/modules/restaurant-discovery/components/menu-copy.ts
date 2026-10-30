@@ -5,6 +5,12 @@ const english = {
     "Private, unverified scan. Check names, portions and prices against the photograph.",
   reviewedNotice: "Reviewed observations. Confirm current availability and prices with the venue.",
   variant: "Portion / variant",
+  asListed: "As listed",
+  priceSource: "Inspect price source",
+  exploreDish: "Explore this dish",
+  ingredients: "Ingredient information",
+  ingredientNotice:
+    "Printed ingredients may be incomplete. Inferred ingredients are interpretations, not allergy or dietary assurances.",
   add: "Add one",
   remove: "Remove one",
   quantity: "Quantity",
@@ -55,6 +61,11 @@ const english = {
   valid: "Corrections are valid. Save a revision to keep them.",
   printedIngredients: "Ingredients printed on the menu",
   inferredIngredients: "Interpreted ingredients — confirm with the waiter",
+  addDish: "Add a dish the scan missed",
+  removeDish: "Remove this dish",
+  addVariant: "Add a missing portion",
+  removeVariant: "Remove this portion",
+  customerAdded: "Added by you, not extracted from the photograph",
 };
 
 const vietnamese: typeof english = {
@@ -63,6 +74,12 @@ const vietnamese: typeof english = {
   privateNotice: "Bản quét riêng tư, chưa xác minh. Đối chiếu tên món, khẩu phần và giá với ảnh.",
   reviewedNotice: "Thông tin đã được duyệt. Hãy xác nhận món còn phục vụ và giá hiện tại.",
   variant: "Khẩu phần / lựa chọn",
+  asListed: "Theo thực đơn",
+  priceSource: "Xem nguồn giá",
+  exploreDish: "Khám phá món này",
+  ingredients: "Thông tin thành phần",
+  ingredientNotice:
+    "Thành phần in trên thực đơn có thể chưa đầy đủ. Thành phần suy luận là diễn giải, không bảo đảm an toàn dị ứng hay chế độ ăn.",
   add: "Thêm một phần",
   remove: "Bớt một phần",
   quantity: "Số lượng",
@@ -113,6 +130,11 @@ const vietnamese: typeof english = {
   valid: "Thông tin sửa hợp lệ. Lưu phiên bản để giữ thay đổi.",
   printedIngredients: "Thành phần in trên thực đơn",
   inferredIngredients: "Thành phần diễn giải — cần hỏi nhân viên",
+  addDish: "Thêm món mà bản quét bỏ sót",
+  removeDish: "Xóa món này",
+  addVariant: "Thêm khẩu phần còn thiếu",
+  removeVariant: "Xóa khẩu phần này",
+  customerAdded: "Do bạn thêm, không trích xuất từ ảnh",
 };
 
 const menuTranslations: ReadonlyMap<string, typeof english> = new Map([

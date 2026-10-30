@@ -13,6 +13,7 @@ import {
   menuScanDocumentSchema,
 } from "@/modules/restaurant-discovery/menu-scan.schema";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
+import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 
 const english = {
   title: "Read the menu. Choose your meal.",
@@ -28,6 +29,8 @@ const english = {
   branch: "Restaurant branch ID (optional)",
   branchHelp:
     "Use an existing FeastJourney branch ID if known. Leave empty for an unknown restaurant.",
+  branchCheck: "Check branch",
+  branchUnknown: "No published branch uses this ID. Leave empty to scan an unknown restaurant.",
   pages: "Menu pages",
   earlier: "Move earlier",
   later: "Move later",
@@ -54,7 +57,7 @@ const english = {
   processing: "This scan is being processed. Reload its status before starting another analysis.",
   contributeTitle: "Help the next traveler",
   contributeHelp:
-    "You can send this saved revision and its private photographs to FeastJourney curators. They may reuse approved menu facts for the selected branch. Evidence is kept for up to 30 days for review; approval does not publish your photograph. Personal use works without contributing.",
+    "You can send this saved revision and its private photographs to FeastJourney curators. Photos and scan drafts are kept for up to 30 days, including after approval. Reviewed menu facts and audit records may remain after those private files are deleted. Your photograph is never published. Personal use works without contributing.",
   consent:
     "I agree to submit this exact saved revision and private evidence for curator review under menu-facts-v1.",
   contribute: "Contribute saved menu",
@@ -82,6 +85,9 @@ const vietnamese: typeof english = {
   language: "Dịch sang",
   branch: "Mã chi nhánh nhà hàng (không bắt buộc)",
   branchHelp: "Dùng mã chi nhánh FeastJourney có sẵn nếu biết. Để trống nếu chưa rõ nhà hàng.",
+  branchCheck: "Kiểm tra chi nhánh",
+  branchUnknown:
+    "Không có chi nhánh đã công bố nào dùng mã này. Để trống để quét thực đơn chưa rõ.",
   pages: "Các trang thực đơn",
   earlier: "Chuyển lên trước",
   later: "Chuyển ra sau",
@@ -107,7 +113,7 @@ const vietnamese: typeof english = {
   processing: "Bản quét đang được xử lý. Tải lại trạng thái trước khi phân tích lần nữa.",
   contributeTitle: "Giúp người du lịch tiếp theo",
   contributeHelp:
-    "Bạn có thể gửi đúng phiên bản đã lưu và ảnh riêng tư cho người duyệt FeastJourney. Thông tin được duyệt có thể được dùng lại cho chi nhánh đã chọn. Bằng chứng được giữ tối đa 30 ngày để xem xét; duyệt không công khai ảnh. Không cần đóng góp để dùng cá nhân.",
+    "Bạn có thể gửi đúng phiên bản đã lưu và ảnh riêng tư cho người duyệt FeastJourney. Ảnh và bản quét được giữ tối đa 30 ngày, kể cả sau khi duyệt. Thông tin thực đơn đã duyệt và hồ sơ kiểm tra có thể được giữ sau khi xóa tệp riêng tư. Ảnh không bao giờ được công khai. Không cần đóng góp để dùng cá nhân.",
   consent:
     "Tôi đồng ý gửi đúng phiên bản đã lưu và bằng chứng riêng tư này để xem xét theo menu-facts-v1.",
   contribute: "Đóng góp thực đơn đã lưu",
@@ -125,7 +131,71 @@ const vietnamese: typeof english = {
 type SelectedPhoto = { readonly id: string; readonly file: File; readonly previewUrl: string };
 
 const storageOwner = "feastjourney:menu-scan-owner:v1";
+
 const storageScan = "feastjourney:menu-scan:v1";
+
+/** Branch IDs are backend concepts: confirm the typed ID against the published venue before use. */
+function BranchField({
+  id,
+  value,
+  onChange,
+  disabled,
+  copy,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly disabled: boolean;
+  readonly copy: typeof english;
+}) {
+  const [lookup, setLookup] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  return (
+    <>
+      <label htmlFor={id}>{copy.branch}</label>
+      <input
+        id={id}
+        value={value}
+        disabled={disabled}
+        maxLength={36}
+        aria-describedby={`${id}-help`}
+        onChange={(event) => {
+          setLookup(null);
+          onChange(event.target.value);
+        }}
+      />
+      <button
+        type="button"
+        disabled={disabled || checking || value === ""}
+        onClick={() => {
+          const parsed = z.uuid().safeParse(value);
+
+          if (!parsed.success) {
+            setLookup(copy.branchUnknown);
+
+            return;
+          }
+
+          setChecking(true);
+          setLookup(null);
+          void getRestaurantFn({ data: { venueId: parsed.data, channel: "dine_in" } })
+            .then(
+              (detail) => setLookup(detail.venue.name),
+              () => setLookup(copy.branchUnknown),
+            )
+            .finally(() => setChecking(false));
+        }}
+      >
+        {copy.branchCheck}
+      </button>
+      <p id={`${id}-help`}>{copy.branchHelp}</p>
+      {lookup !== null && (
+        <output aria-live="polite">{lookup === copy.branchUnknown ? lookup : `✓ ${lookup}`}</output>
+      )}
+    </>
+  );
+}
 
 export function MenuScanPage({
   locale,
@@ -168,12 +238,23 @@ export function MenuScanPage({
     setConsent(false);
   }, []);
 
-  const failureMessage = copy.failure;
+  const failureMessage = useRef(copy.failure);
+
+  useEffect(() => {
+    failureMessage.current = copy.failure;
+  }, [copy.failure]);
+
+  useEffect(() => {
+    const urls = previewUrls.current;
+
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, []);
 
   useEffect(() => {
     const abort = new AbortController();
     controller.current = abort;
-    const urls = previewUrls.current;
 
     const restore = async (): Promise<void> => {
       try {
@@ -195,7 +276,7 @@ export function MenuScanPage({
         if (abort.signal.aborted) return;
         adoptView(next);
       } catch {
-        if (!abort.signal.aborted) setError(failureMessage);
+        if (!abort.signal.aborted) setError(failureMessage.current);
       } finally {
         if (!abort.signal.aborted) setStatus(null);
       }
@@ -204,11 +285,12 @@ export function MenuScanPage({
     void restore();
 
     return () => {
+      // Cancel whatever this page started: the restore above or a task
+      // installed in controller.current by runTask.
       abort.abort();
-
-      for (const url of urls) URL.revokeObjectURL(url);
+      controller.current?.abort();
     };
-  }, [owner, failureMessage, adoptView]);
+  }, [owner, adoptView]);
 
   const runTask = async (
     label: string,
@@ -414,16 +496,13 @@ export function MenuScanPage({
               </option>
             ))}
           </select>
-          <label htmlFor="scan-branch">{copy.branch}</label>
-          <input
+          <BranchField
             id="scan-branch"
             value={branchId}
+            onChange={setBranchId}
             disabled={busy}
-            maxLength={36}
-            aria-describedby="scan-branch-help"
-            onChange={(event) => setBranchId(event.target.value)}
+            copy={copy}
           />
-          <p id="scan-branch-help">{copy.branchHelp}</p>
           <ol className="scan-photo-list">
             {photos.map((photo, index) => (
               <li key={photo.id}>
@@ -537,6 +616,7 @@ export function MenuScanPage({
                   ...document,
                   sourceLanguage:
                     event.target.value === "" ? null : menuLanguageSchema.parse(event.target.value),
+                  orderIntroduction: { original: null, translated: null },
                 });
                 setDirty(true);
                 setConsent(false);
@@ -564,21 +644,31 @@ export function MenuScanPage({
           </details>
           <section className="scan-contribution">
             <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
-            {view.contribution !== null ? (
+            {view.contribution !== null && (
               <p>
                 {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
                 {view.contribution.revision}
               </p>
-            ) : (
+            )}
+            {view.contribution?.status === "rejected" && (
+              <p>
+                {locale === "vi"
+                  ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
+                  : "You can correct the menu, save a new revision, then choose whether to contribute again."}
+              </p>
+            )}
+            {(view.contribution === null ||
+              (view.contribution.status === "rejected" &&
+                view.scan.current_revision !== null &&
+                view.scan.current_revision > view.contribution.revision)) && (
               <>
                 <p>{copy.contributeHelp}</p>
-                <label htmlFor="scan-contribution-branch">{copy.branch}</label>
-                <input
+                <BranchField
                   id="scan-contribution-branch"
                   value={branchId}
-                  maxLength={36}
+                  onChange={setBranchId}
                   disabled={busy}
-                  onChange={(event) => setBranchId(event.target.value)}
+                  copy={copy}
                 />
                 <label className="scan-consent">
                   <input

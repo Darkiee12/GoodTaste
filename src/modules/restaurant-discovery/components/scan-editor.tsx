@@ -26,12 +26,12 @@ function VariantEditor({
 
   return (
     <div className="scan-editor-variant">
+      {variant.customerAdded === true && <p>{copy.customerAdded}</p>}
       <label htmlFor={`edit-variant-${variant.id}`}>{copy.originalVariant}</label>
       <input
         id={`edit-variant-${variant.id}`}
         lang={sourceLanguage}
-        required
-        maxLength={300}
+        maxLength={200}
         value={variant.originalLabel}
         onChange={(event) => onChange({ ...variant, originalLabel: event.target.value })}
       />
@@ -219,8 +219,96 @@ export function ScanEditor({
               }
             />
           ))}
+          <div className="scan-editor-actions">
+            <button
+              type="button"
+              onClick={() =>
+                updateItem({
+                  ...item,
+                  variants: [
+                    ...item.variants,
+                    {
+                      id: crypto.randomUUID(),
+                      customerAdded: true,
+                      originalLabel: "",
+                      translatedLabel: null,
+                      price: null,
+                    },
+                  ],
+                })
+              }
+            >
+              {copy.addVariant}
+            </button>
+            {item.variants.length > 1 &&
+              item.variants.map((entry) => (
+                <button
+                  key={`remove-${entry.id}`}
+                  type="button"
+                  aria-label={`${copy.removeVariant}: ${entry.originalLabel}`}
+                  onClick={() =>
+                    updateItem({
+                      ...item,
+                      variants: item.variants.filter((variant) => variant.id !== entry.id),
+                    })
+                  }
+                >
+                  {copy.removeVariant}: {entry.originalLabel || entry.id.slice(0, 8)}
+                </button>
+              ))}
+          </div>
+          {item.customerAdded === true && <p>{copy.customerAdded}</p>}
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...document,
+                items: document.items.filter((entry) => entry.id !== item.id),
+              })
+            }
+          >
+            {copy.removeDish}
+          </button>
         </details>
       ))}
+      <button
+        type="button"
+        onClick={() => {
+          const page = document.pages[0];
+
+          if (page === undefined) return;
+
+          onChange({
+            ...document,
+            items: [
+              ...document.items,
+              {
+                id: crypto.randomUUID(),
+                customerAdded: true,
+                originalName: "",
+                translatedName: null,
+                originalDescription: null,
+                translatedDescription: null,
+                explanatorySummary: null,
+                ingredients: null,
+                sourceReferences: [{ assetId: page.assetId, region: null }],
+                uncertainties: [],
+                variants: [
+                  {
+                    id: crypto.randomUUID(),
+                    customerAdded: true,
+                    originalLabel: "",
+                    translatedLabel: null,
+                    price: null,
+                  },
+                ],
+              },
+            ],
+          });
+        }}
+      >
+        {copy.addDish}
+      </button>
     </section>
   );
 }

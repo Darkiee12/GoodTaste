@@ -137,8 +137,27 @@ export function RestaurantSearchPage() {
           exact or variant matches
         </p>
       )}
+      {/*
+        Remount only when a filter-relevant field changes: the inputs below are
+        uncontrolled (defaultValue), so external navigation (clear-filters link,
+        dish pick, language switch) must resync them. Volatile fields such as
+        map bounds or geolocation must not destroy local search input.
+      */}
       <RestaurantFilters
-        key={JSON.stringify(search)}
+        key={[
+          search.q,
+          search.area,
+          search.cuisine,
+          search.channel,
+          search.portion ?? "",
+          search.budget ?? "",
+          search.currency ?? "",
+          search.sort,
+          search.radius,
+          search.limit,
+          search.lang,
+          search.dish ?? "",
+        ].join("|")}
         search={search}
         areas={data.areas}
         cuisines={data.cuisines}

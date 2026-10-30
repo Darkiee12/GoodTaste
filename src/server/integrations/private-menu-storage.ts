@@ -97,67 +97,107 @@ export class PrivateMenuStorage extends Context.Service<
   }
 >()("feastjourney/integrations/PrivateMenuStorage") {}
 
-function storageOperation<A>(
-  run: (client: S3Client, bucket: string, signal: AbortSignal) => Promise<A>,
-) {
-  return Effect.tryPromise({
-    try: async (signal) => {
-      const config = storageConfigSchema.parse(process.env);
-
-      const client = new S3Client({
-        endpoint: config.S3_ENDPOINT_INTERNAL,
-        region: config.S3_REGION,
-        forcePathStyle: true,
-        credentials: {
-          accessKeyId: config.S3_ACCESS_KEY_ID,
-          secretAccessKey: config.S3_SECRET_ACCESS_KEY,
-        },
-        maxAttempts: 2,
-      });
-
-      try {
-        return await run(
-          client,
-          config.S3_BUCKET_PRIVATE,
-          AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-        );
-      } finally {
-        client.destroy();
-      }
-    },
-    catch: () => new StorageUnavailable(),
-  });
+interface StorageClient {
+  readonly client: S3Client;
+  readonly bucket: string;
 }
 
-export const PrivateMenuStorageLive = Layer.succeed(PrivateMenuStorage, {
-  put: (key, bytes) =>
-    storageOperation(async (client, bucket, signal) => {
-      await client.send(
-        new PutObjectCommand({ Bucket: bucket, Key: key, Body: bytes, ContentType: "image/jpeg" }),
-        { abortSignal: signal },
-      );
-    }),
-  read: (key) =>
-    storageOperation(async (client, bucket, signal) => {
-      const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
-        abortSignal: signal,
+/** The Layer owns the lazily created client and releases its connections at shutdown. */
+export const PrivateMenuStorageLive = Layer.effect(
+  PrivateMenuStorage,
+  Effect.gen(function* () {
+    let storage: StorageClient | undefined;
+    yield* Effect.addFinalizer(() => Effect.sync(() => storage?.client.destroy()));
+
+    const run = <A>(task: (client: S3Client, bucket: string, signal: AbortSignal) => Promise<A>) =>
+      Effect.tryPromise({
+        try: async (signal) => {
+          if (storage === undefined) {
+            const config = storageConfigSchema.parse(process.env);
+            storage = {
+              client: new S3Client({
+                endpoint: config.S3_ENDPOINT_INTERNAL,
+                region: config.S3_REGION,
+                forcePathStyle: true,
+                credentials: {
+                  accessKeyId: config.S3_ACCESS_KEY_ID,
+                  secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+                },
+                maxAttempts: 2,
+              }),
+              bucket: config.S3_BUCKET_PRIVATE,
+            };
+          }
+
+          return task(
+            storage.client,
+            storage.bucket,
+            AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+          );
+        },
+        catch: () => new StorageUnavailable(),
       });
 
-      if (object.Body === undefined) throw new StorageUnavailable();
-      const bytes = await object.Body.transformToByteArray();
+    return PrivateMenuStorage.of({
+      put: (key, bytes) =>
+        run(async (client, bucket, signal) => {
+          await client.send(
+            new PutObjectCommand({
+              Bucket: bucket,
+              Key: key,
+              Body: bytes,
+              ContentType: "image/jpeg",
+            }),
+            { abortSignal: signal },
+          );
+        }),
+      read: (key) =>
+        run(async (client, bucket, signal) => {
+          const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
+            abortSignal: signal,
+          });
 
-      if (object.ContentLength !== undefined && bytes.byteLength !== object.ContentLength)
-        throw new StorageUnavailable();
+          if (
+            object.Body === undefined ||
+            (object.ContentLength !== undefined && object.ContentLength > MAX_IMAGE_BYTES)
+          )
+            throw new StorageUnavailable();
+          const reader = object.Body.transformToWebStream().getReader();
+          const chunks: Array<Uint8Array> = [];
+          let length = 0;
 
-      if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES)
-        throw new StorageUnavailable();
+          try {
+            for (;;) {
+              // oxlint-disable-next-line no-await-in-loop -- A stream must be consumed in order and bounded before allocating.
+              const part = await reader.read();
 
-      return bytes;
-    }),
-  remove: (key) =>
-    storageOperation(async (client, bucket, signal) => {
-      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {
-        abortSignal: signal,
-      });
-    }),
-});
+              if (part.done) break;
+              const chunk: unknown = part.value;
+
+              if (!(chunk instanceof Uint8Array)) throw new StorageUnavailable();
+              length += chunk.byteLength;
+
+              if (length > MAX_IMAGE_BYTES) throw new StorageUnavailable();
+              chunks.push(chunk);
+            }
+          } finally {
+            await reader.cancel();
+          }
+
+          if (
+            length === 0 ||
+            (object.ContentLength !== undefined && length !== object.ContentLength)
+          )
+            throw new StorageUnavailable();
+
+          return Buffer.concat(chunks);
+        }),
+      remove: (key) =>
+        run(async (client, bucket, signal) => {
+          await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {
+            abortSignal: signal,
+          });
+        }),
+    });
+  }),
+);

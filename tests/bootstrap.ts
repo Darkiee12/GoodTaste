@@ -19,6 +19,14 @@ const TEST_ENV_DEFAULTS = {
   RATE_LIMIT_PUBLIC: "1000",
   RATE_LIMIT_SEARCH: "1000",
   RATE_LIMIT_ADMIN: "1000",
+  // Disposable Garage S3. CI starts the compose garage service with matching
+  // test-only keys (see .github/workflows/quality.yml); local runs can point
+  // S3_ENDPOINT_INTERNAL at any loopback Garage with the same test bucket.
+  S3_ENDPOINT_INTERNAL: "http://127.0.0.1:3900",
+  S3_REGION: "garage",
+  S3_BUCKET_PRIVATE: "feastjourney-private",
+  S3_ACCESS_KEY_ID: "GKaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  S3_SECRET_ACCESS_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   BETTER_AUTH_URL: "http://localhost:3000",
   BETTER_AUTH_SECRET: "test-secret-with-at-least-32-characters",
   GOOGLE_CLIENT_ID: "test-google-id",
@@ -58,10 +66,12 @@ export const isDisposableTestDatabase = (url: string | undefined): boolean => {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.replace(/^\[(.*)\]$/, "$1");
+    const database = parsed.pathname.replace(/^\//, "").split("/")[0];
+    const isTaskDatabase = database === "feastjourney_pr4_v2" && parsed.port === "55434";
 
     return (
       (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1") &&
-      parsed.pathname.replace(/^\//, "").split("/")[0] === "feastjourney"
+      (database === "feastjourney" || isTaskDatabase)
     );
   } catch {
     return false;

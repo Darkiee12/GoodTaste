@@ -17,6 +17,7 @@ import {
 import { dishDetailReturnSchema, resolveDishesBackSearch } from "@/components/admin/page-header";
 import { AdminRouteError } from "@/components/admin/ui";
 import {
+  adminDishDetailFn,
   adminPublicationCheckFn,
   adminUpdateDishStatusFn,
 } from "@/modules/food-discovery/admin.functions";
@@ -248,8 +249,6 @@ const adminDishDetailLoader = async (input: {
   readonly dishId: string;
   readonly locale: Locale;
 }): Promise<DishDetailData> => {
-  const { adminDishDetailFn } = await import("@/modules/food-discovery/admin.functions");
-
   const parsed = dishDetailSchema.parse(
     await adminDishDetailFn({ data: { dishId: input.dishId, locale: input.locale } }),
   );
