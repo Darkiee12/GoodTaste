@@ -1,0 +1,14 @@
+# Keep the dev image free of secrets, caches, and host build output.
+# Runtime configuration comes from env_file, never from baked files.
+node_modules/
+.codegraph/
+.local/
+repos/
+.output/
+.git/
+.env
+infra/.env
+coverage/
+.playwright-cli/
+*.log
+.DS_Store

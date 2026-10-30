@@ -135,9 +135,10 @@
   }
 
   /* Static cropped-planet art for SSR, reduced motion, and WebGL failures.
-     Geometry mirrors computeGlobeLayout exactly via container units: the
-     diameter (104% mobile, min(180%, 320% of hero height) desktop) and the
-     visible cap (70%/32% of diameter, clamped to 50% of hero height). */
+     Geometry mirrors computeGlobeLayout: full-bleed on narrow screens
+     (104% of hero width, bounded by 125% of hero height), and on desktop a
+     130%-of-width globe (bounded by twice the hero height) pushed right so
+     the left stays open universe. The bottom 20% crops below the frame. */
   .fallback-frame {
     container-type: size;
   }
@@ -146,9 +147,9 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    width: 104cqw;
+    width: min(104cqw, 125cqh);
     aspect-ratio: 1 / 1;
-    transform: translate(-50%, max(30%, calc(100% - 50cqh)));
+    transform: translate(-50%, 20%);
     border-radius: 50%;
     background: radial-gradient(
       circle at 50% 26%,
@@ -157,9 +158,13 @@
       #1e5fc4 62%,
       #173f86 100%
     );
+    /* Thin dashed orbit ring: the outline follows the circular
+       border-radius and sits just outside the planet. */
+    outline: 1px dashed rgb(125 211 252 / 0.55);
+    outline-offset: 2px;
     box-shadow:
-      0 0 72px rgb(125 211 252 / 0.35),
-      inset -18px -30px 80px rgb(3 10 30 / 0.45);
+      inset -18px -30px 80px rgb(3 10 30 / 0.45),
+      0 0 42px rgb(125 211 252 / 0.16);
     overflow: hidden;
   }
 
@@ -196,8 +201,8 @@
 
   @media (min-width: 48rem) {
     .fallback-planet {
-      width: min(180cqw, 320cqh);
-      transform: translate(-50%, max(68%, calc(100% - 50cqh)));
+      left: 76%;
+      width: min(130cqw, 200cqh);
     }
   }
 }

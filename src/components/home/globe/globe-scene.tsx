@@ -20,7 +20,8 @@ import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-red
 import type { Locale, Messages } from "@/shared/i18n";
 
 const DOT_SIZE_PX = 9;
-const ATMOSPHERE_SCALE = 1.12;
+const RING_SCALE = 1.002;
+const GLOW_SCALE = 1.16;
 
 function DishAnchor({
   dish,
@@ -112,7 +113,9 @@ function GlobeWorld({
   onActiveDish: (id: string | null) => void;
   onReady: () => void;
 }) {
-  const { layout, halfWidth, initialSpin, texture, atmosphere, dotPositions } = useGlobeAssets();
+  const { layout, halfWidth, initialSpin, texture, atmosphere, atmosphereGlow, dotPositions } =
+    useGlobeAssets();
+
   const spinRef = useRef<THREE.Group | null>(null);
   const anchorsRef = useRef<Map<string, THREE.Object3D | null>>(new Map());
 
@@ -132,7 +135,7 @@ function GlobeWorld({
       <hemisphereLight args={["#bfd9ff", "#0a1633", 0.9]} />
       <directionalLight position={[-4, 3, 6]} intensity={2.2} color="#fff5e6" />
 
-      <group position={[0, layout.centerY, 0]}>
+      <group position={[layout.centerX, layout.centerY, 0]}>
         <group rotation-x={AXIAL_TILT_RADIANS}>
           <group rotation-z={SPIN_ROLL_RADIANS}>
             <group ref={spinRef} rotation-y={initialSpin}>
@@ -162,7 +165,11 @@ function GlobeWorld({
           </group>
         </group>
 
-        <mesh scale={ATMOSPHERE_SCALE} material={atmosphere}>
+        <mesh scale={GLOW_SCALE} material={atmosphereGlow}>
+          <sphereGeometry args={[GLOBE_RADIUS, 48, 48]} />
+        </mesh>
+
+        <mesh scale={RING_SCALE} material={atmosphere}>
           <sphereGeometry args={[GLOBE_RADIUS, 48, 48]} />
         </mesh>
       </group>
