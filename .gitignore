@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 infra/.env
+infra/.env.production
+!infra/.env.production.example
 *.local
 node_modules/
 .output/
