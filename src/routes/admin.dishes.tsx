@@ -141,7 +141,7 @@ function AdminDishes() {
 
 function DishRows({ initial }: { readonly initial: ReadonlyArray<DishListItem> }) {
   const { lang } = rootRoute.useSearch();
-  const { status } = Route.useSearch();
+  const { status, cursor } = Route.useSearch();
   const copy = messagesFor(lang);
   const [extra, setExtra] = useState<ReadonlyArray<DishListItem>>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -201,7 +201,7 @@ function DishRows({ initial }: { readonly initial: ReadonlyArray<DishListItem> }
                     <Link
                       to="/admin/dishes/$dishId"
                       params={{ dishId: dish.id }}
-                      search={{ lang }}
+                      search={{ lang, fromStatus: status, fromCursor: cursor }}
                       className="inline-flex min-h-11 items-center font-medium text-brand-blue underline"
                     >
                       {dish.display_name ?? dish.slug}

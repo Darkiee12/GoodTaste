@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
+import { AdminSelect } from "@/components/admin/select";
 import { AdminConfirmDialog } from "@/components/admin/ui";
 import { messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
@@ -172,23 +173,18 @@ export function MemberRoles({
           </p>
         ) : (
           <div className="mt-1.5 flex min-w-0 gap-2">
-            <select
+            <AdminSelect
               id={selectId}
-              value={selectedRoleId}
+              value={selectedRoleId === "" ? undefined : selectedRoleId}
+              onValueChange={setSelectedRoleId}
+              options={options.map((role) => ({
+                label: `${role.name}${privilegedSuffix(role, lang)}`,
+                value: role.id,
+              }))}
+              placeholder={copy.authAssignRole}
               disabled={assignPending}
-              onChange={(event) => {
-                setSelectedRoleId(event.target.value);
-              }}
-              className="min-h-11 min-w-0 flex-1 rounded-md border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:border-brand-blue"
-            >
-              <option value="">{copy.authAssignRole}</option>
-              {options.map((role) => (
-                <option key={role.id} value={role.id}>
-                  {role.name}
-                  {privilegedSuffix(role, lang)}
-                </option>
-              ))}
-            </select>
+              triggerClassName="min-w-0 flex-1"
+            />
             <button
               type="button"
               disabled={assignPending || selectedRoleId === ""}

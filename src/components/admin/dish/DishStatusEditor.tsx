@@ -2,12 +2,19 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { AdminSelect } from "@/components/admin/select";
 import { AdminConfirmDialog, AdminErrorState, AdminPrimaryButton } from "@/components/admin/ui";
 import type { Locale, Messages } from "@/shared/i18n";
 
 const DISH_STATUSES = ["draft", "review", "published", "archived"] as const;
 
 type DishStatus = (typeof DISH_STATUSES)[number];
+
+export const isDishStatusValue = (value: string): value is DishStatus =>
+  DISH_STATUSES.some((entry) => entry === value);
+
+export const isPublishBlocked = (selected: string, publishable: boolean | null): boolean =>
+  selected === "published" && publishable === false;
 
 const statusLabel = (status: string, copy: Messages): string => {
   if (status === "published") {
@@ -28,6 +35,11 @@ const statusLabel = (status: string, copy: Messages): string => {
 
   return status;
 };
+
+const statusOptions = (
+  copy: Messages,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> =>
+  DISH_STATUSES.map((entry) => ({ label: statusLabel(entry, copy), value: entry }));
 
 export function DishStatusEditor({
   dishId,
@@ -61,11 +73,7 @@ export function DishStatusEditor({
   });
 
   const save = useMutation({
-    mutationFn: (next: string) => {
-      const status = DISH_STATUSES.find((entry) => entry === next) ?? "draft";
-
-      return saveStatus(dishId, status);
-    },
+    mutationFn: (next: DishStatus) => saveStatus(dishId, next),
     onSuccess: (result) => {
       setApplied(result.status);
       setSaved(true);
@@ -79,10 +87,13 @@ export function DishStatusEditor({
   });
 
   const check = publication.data ?? null;
+  const knownSelected = isDishStatusValue(selected) ? selected : null;
   const unchanged = selected === applied;
-  const publishBlocked = selected === "published" && check !== null && !check.publishable;
+  const publishBlocked = isPublishBlocked(selected, check?.publishable ?? null);
   const checkingPublish = selected === "published" && publication.isPending;
-  const saveDisabled = save.isPending || unchanged || publishBlocked || checkingPublish;
+
+  const saveDisabled =
+    save.isPending || knownSelected === null || unchanged || publishBlocked || checkingPublish;
 
   const publishDescription =
     lang === "vi"
@@ -90,9 +101,13 @@ export function DishStatusEditor({
       : "This dish will become publicly visible. Only continue when every detail is verified.";
 
   const persistStatus = (): void => {
+    if (knownSelected === null) {
+      return;
+    }
+
     setSaved(false);
     setSaveError(null);
-    save.mutate(selected);
+    save.mutate(knownSelected);
   };
 
   const handleSave = (): void => {
@@ -123,86 +138,85 @@ export function DishStatusEditor({
       aria-labelledby="dish-status-heading"
       className="min-w-0 rounded-2xl border border-border-soft bg-white p-4"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 id="dish-status-heading" className="text-lg font-bold">
-          {copy.adminStatus}
+          {copy.adminPublicationStatus}
         </h2>
-        <p className="rounded-full bg-cream px-3 py-1 text-sm font-bold text-food-orange-dark">
+        <p
+          aria-live="polite"
+          className="rounded-full bg-cream px-3 py-1 text-sm font-bold text-food-orange-dark"
+        >
           {statusLabel(applied, copy)}
         </p>
       </div>
-      <div className="mt-3 flex flex-col gap-2">
-        <label htmlFor="admin-dish-status-select" className="text-sm font-semibold">
-          {copy.adminStatus}
-        </label>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            id="admin-dish-status-select"
-            value={selected}
-            onChange={(event) => {
-              const next = DISH_STATUSES.find((entry) => entry === event.target.value);
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <AdminSelect
+          ariaLabel={copy.adminStatus}
+          value={knownSelected ?? undefined}
+          onValueChange={setSelected}
+          options={statusOptions(copy)}
+          placeholder={copy.adminStatus}
+          invalid={knownSelected === null}
+          describedBy={knownSelected === null ? "admin-dish-status-error" : undefined}
+          triggerClassName="w-48"
+        />
+        <AdminPrimaryButton
+          type="button"
+          disabled={saveDisabled}
+          aria-busy={save.isPending}
+          onClick={handleSave}
+        >
+          {copy.authSave}
+        </AdminPrimaryButton>
+      </div>
+      {knownSelected === null ? (
+        <p
+          id="admin-dish-status-error"
+          role="alert"
+          className="mt-2 text-sm font-semibold text-red-800"
+        >
+          {copy.adminStatusInvalid}
+        </p>
+      ) : null}
 
-              if (next !== undefined) {
-                setSelected(next);
-              }
-            }}
-            className="min-h-11 w-48 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm"
-          >
-            {DISH_STATUSES.map((entry) => (
-              <option key={entry} value={entry}>
-                {statusLabel(entry, copy)}
-              </option>
-            ))}
-          </select>
-          <AdminPrimaryButton
-            type="button"
-            disabled={saveDisabled}
-            aria-busy={save.isPending}
-            onClick={handleSave}
-          >
-            {copy.authSave}
-          </AdminPrimaryButton>
-        </div>
-
-        {selected === "published" ? (
-          <div className="rounded-lg bg-cream px-3 py-2 text-sm" aria-live="polite">
-            <p className="font-semibold">{copy.adminPublicationChecklist}</p>
-            {publication.isPending ? <p>{copy.adminCheckingPublication}</p> : null}
-            {publication.isError ? (
-              <div className="mt-2">
-                <AdminErrorState
-                  message={copy.adminLoadFailed}
-                  retryLabel={copy.adminRetryChecklist}
-                  onRetry={handleRetryChecklist}
-                  pending={publication.isPending}
-                />
-              </div>
-            ) : null}
-            {check !== null && check.publishable ? <p>{copy.adminPublicationReady}</p> : null}
-            {check !== null && !check.publishable ? (
-              <div>
-                <p>{copy.adminPublishBlocked}</p>
-                <ul className="mt-1 list-disc pl-5">
-                  {check.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div aria-live="polite">
-          {saved ? <p className="text-sm font-semibold">{copy.authSaved}</p> : null}
-          {saveError !== null ? (
-            <AdminErrorState
-              message={saveError}
-              retryLabel={copy.commonRetry}
-              onRetry={persistStatus}
-              pending={save.isPending}
-            />
+      {selected === "published" ? (
+        <div className="mt-2 rounded-lg bg-cream px-3 py-2 text-sm" aria-live="polite">
+          <p className="font-semibold">{copy.adminPublicationChecklist}</p>
+          {publication.isPending ? <p>{copy.adminCheckingPublication}</p> : null}
+          {publication.isError ? (
+            <div className="mt-2">
+              <AdminErrorState
+                message={copy.adminLoadFailed}
+                retryLabel={copy.adminRetryChecklist}
+                onRetry={handleRetryChecklist}
+                pending={publication.isPending}
+              />
+            </div>
+          ) : null}
+          {check !== null && check.publishable ? <p>{copy.adminPublicationReady}</p> : null}
+          {check !== null && !check.publishable ? (
+            <div>
+              <p>{copy.adminPublishBlocked}</p>
+              <ul className="mt-1 list-disc pl-5">
+                {check.reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
+      ) : null}
+
+      <div aria-live="polite">
+        {saved ? <p className="mt-2 text-sm font-semibold">{copy.authSaved}</p> : null}
+        {saveError !== null ? (
+          <AdminErrorState
+            message={saveError}
+            retryLabel={copy.commonRetry}
+            onRetry={persistStatus}
+            pending={save.isPending}
+          />
+        ) : null}
       </div>
 
       <AdminConfirmDialog

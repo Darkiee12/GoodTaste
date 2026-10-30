@@ -9,11 +9,14 @@ pho-bo-vietnam,review,,Beef pho,en,localized,Vietnamese beef noodle soup with fl
 `;
 
 /**
- * Reference tables for the Upload-stage schema viewer. Kept in this
- * pure module (no React) so unit tests can pin them against the real
- * contracts: CSV_COLUMNS mirrors the documented `csvToRecords` contract in
- * `admin.schema.ts`, and RECORD_FIELDS mirrors `AuthoringDish` in
- * `server/domain/schemas.ts` field by field.
+ * Reference tables for the Upload-stage schema viewer. Hand-maintained
+ * (never presented as generated): CSV_COLUMNS mirrors the documented
+ * `csvToRecords` contract in `admin.schema.ts`, and RECORD_FIELDS mirrors
+ * `AuthoringDish` in `server/domain/schemas.ts` field by field. Drift is
+ * pinned by `tests/admin-import-schema-dialog.test.ts`, which checks the
+ * field set against the canonical `AuthoringDish` struct, the CSV columns
+ * against the real parser, and the vocabulary against the canonical id
+ * enums — a stale row fails loudly there, not in review.
  */
 export const CSV_COLUMNS: ReadonlyArray<{ readonly name: string; readonly detail: string }> = [
   { name: "slug", detail: "optional slug; auto-derived from name when absent" },
@@ -38,6 +41,7 @@ export interface ReferenceFieldRow {
   readonly field: string;
   readonly required: boolean;
   readonly type: string;
+  readonly members?: ReadonlyArray<{ readonly name: string; readonly detail: string }>;
 }
 
 export const RECORD_FIELDS: ReadonlyArray<ReferenceFieldRow> = [
@@ -47,22 +51,43 @@ export const RECORD_FIELDS: ReadonlyArray<ReferenceFieldRow> = [
   {
     field: "names",
     required: true,
-    type: "non-empty array of { language_tag (BCP 47), name (1–300 chars), name_kind (native, localized, alias, transliteration) }",
+    type: "non-empty array, one entry per language",
+    members: [
+      { name: "language_tag", detail: "BCP 47 tag (default en)" },
+      { name: "name", detail: "1–300 chars" },
+      { name: "name_kind", detail: "native, localized, alias, transliteration" },
+    ],
   },
   {
     field: "descriptions",
     required: false,
-    type: "array of { language_tag, description (1–20000 chars), summary (null or 1–1000 chars) }",
+    type: "array of localized descriptions",
+    members: [
+      { name: "language_tag", detail: "BCP 47 tag" },
+      { name: "description", detail: "1–20000 chars" },
+      { name: "summary", detail: "null or 1–1000 chars" },
+    ],
   },
   {
     field: "ingredients",
     required: false,
-    type: "array of { name (1–300 chars), role (core, common, optional, garnish), language_tag? }",
+    type: "array of named ingredients",
+    members: [
+      { name: "name", detail: "1–300 chars" },
+      { name: "role", detail: "core, common, optional, garnish" },
+      { name: "language_tag", detail: "optional BCP 47 tag" },
+    ],
   },
   {
     field: "places",
     required: false,
-    type: "array of { iso (AA or AA-XXX uppercase code)?, place_id?, association (origin, associated, popular), note? }",
+    type: "array of place links",
+    members: [
+      { name: "iso", detail: "optional AA or AA-XXX uppercase code" },
+      { name: "place_id", detail: "optional internal place id" },
+      { name: "association", detail: "origin, associated, popular" },
+      { name: "note", detail: "optional 1–2000 chars" },
+    ],
   },
   { field: "cuisines", required: false, type: "array of cuisine slugs" },
   { field: "categories", required: false, type: "array of category slugs" },

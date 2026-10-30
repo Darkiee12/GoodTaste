@@ -14,6 +14,7 @@ import {
   type RevisionTimelineItem,
   type RevisionTimelinePage,
 } from "@/components/admin/dish/RevisionTimeline";
+import { dishDetailReturnSchema, resolveDishesBackSearch } from "@/components/admin/page-header";
 import { AdminRouteError } from "@/components/admin/ui";
 import {
   adminPublicationCheckFn,
@@ -132,7 +133,11 @@ export const adminDishRevisionHistoryFn = createServerFn({ method: "GET" })
   });
 
 export const Route = createFileRoute("/admin/dishes/$dishId")({
-  validateSearch: localeSearchSchema,
+  // Optional return destination for the breadcrumb back-link: the dishes
+  // list passes its active filter + cursor so back-navigation restores the
+  // caller's context. Deep links omit them and fall back to the canonical
+  // parent (review/0).
+  validateSearch: localeSearchSchema.extend(dishDetailReturnSchema.shape),
   loaderDeps: ({ search }) => ({ locale: search.lang }),
   beforeLoad: async ({ search }) => {
     const session = await getSessionFn();
@@ -328,9 +333,10 @@ const statusLabel = (status: string, copy: Messages): string => {
   return status;
 };
 
-const dishSummary = (dish: DishProfile, lang: Locale, copy: Messages): string => {
+const dishSummary = (dish: DishProfile, lang: Locale): string => {
+  // Status lives in the header badge and the status editor — the summary
+  // carries only the one-line counts so the three never repeat each other.
   const parts = [
-    statusLabel(dish.status, copy),
     lang === "vi"
       ? `${dish.ingredients.length} nguyên liệu`
       : `${dish.ingredients.length} ingredients`,
@@ -342,10 +348,12 @@ const dishSummary = (dish: DishProfile, lang: Locale, copy: Messages): string =>
 
 function AdminDishDetail() {
   const { lang } = rootRoute.useSearch();
+  const { fromCursor, fromStatus } = Route.useSearch();
   const copy = messagesFor(lang);
   const detail = Route.useLoaderData();
   const { dish, notes } = detail;
   const title = dish.englishName ?? dish.name ?? dish.slug;
+  const backSearch = resolveDishesBackSearch({ lang, fromStatus, fromCursor });
 
   const fetchPage = useCallback(
     async (input: {
@@ -379,11 +387,11 @@ function AdminDishDetail() {
     <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4">
       <DishHeader
         lang={lang}
-        backLabel={copy.adminBackToDishes}
-        crumbLabLabel={lang === "vi" ? "Feast Lab" : "Feast Lab"}
-        crumbDishesLabel={copy.adminDishesHeading}
+        labLabel={copy.adminWorkspace}
+        dishesLabel={copy.adminDishesHeading}
+        backSearch={backSearch}
         title={title}
-        summary={dishSummary(dish, lang, copy)}
+        summary={dishSummary(dish, lang)}
         statusBadge={
           <p className="rounded-full bg-cream px-3 py-1 text-sm font-bold text-food-orange-dark">
             {copy.adminStatus}: {statusLabel(dish.status, copy)}
