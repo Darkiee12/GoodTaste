@@ -5,6 +5,8 @@
 infra/.env
 infra/.env.production
 !infra/.env.production.example
+.env.compose
+!.env.compose.example
 *.local
 node_modules/
 .output/
