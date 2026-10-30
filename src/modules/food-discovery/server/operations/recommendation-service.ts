@@ -1,5 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 
+import type { RecommendationLocation } from "@/modules/food-discovery/food.schema";
 import type {
   MealOccasion,
   RecommendationMood,
@@ -13,6 +14,11 @@ import {
   pickDisplayName,
 } from "@/modules/food-discovery/server/domain/search";
 import { windowForSurprise } from "@/modules/food-discovery/server/domain/surprise-window";
+import {
+  findNearbyDishCandidates,
+  NEARBY_MAX_M,
+  type NearbyRecommendationCandidateRow,
+} from "@/modules/food-discovery/server/operations/dish-service";
 import type {
   DishDescriptionRow,
   DishIngredientRow,
@@ -40,6 +46,7 @@ import {
   type MetaAuthError,
   MetaInvalidOutput,
   type MetaPermanentError,
+  type MetaRankContext,
   type MetaRateLimited,
   type MetaRequestError,
   type MetaRankCandidate,
@@ -126,10 +133,94 @@ export interface RecommendDishesInput {
   readonly allergies: ReadonlyArray<string>;
   readonly cuisine?: string | undefined;
   readonly country?: string | undefined;
+  readonly location?: RecommendationLocation | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
   readonly surpriseSeed: number;
 }
+
+/**
+ * Server-side location scope resolved from the validated request. The
+ * request schema guarantees `country` and `location` never arrive together;
+ * legacy country-only payloads resolve to the country scope, and no scope
+ * at all means worldwide. Coordinates never leave this scope object: ranking
+ * input, logs, and wire output only ever see the coarse derivations below.
+ */
+export type LocationScope = Data.TaggedEnum<{
+  Country: { readonly country: string };
+  Precise: {
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly accuracy: number | null;
+  };
+  Worldwide: {};
+}>;
+
+export const LocationScope = Data.taggedEnum<LocationScope>();
+
+export const resolveLocationScope = (
+  input: Pick<RecommendDishesInput, "country" | "location">,
+): LocationScope => {
+  const location = input.location;
+
+  if (location === undefined) {
+    if (input.country === undefined) {
+      return LocationScope.Worldwide();
+    }
+
+    return LocationScope.Country({ country: input.country });
+  }
+
+  if (location.kind === "approx" || location.kind === "destination") {
+    return LocationScope.Country({ country: location.country });
+  }
+
+  if (location.kind === "precise") {
+    return LocationScope.Precise({
+      accuracy: location.accuracy ?? null,
+      latitude: location.latitude,
+      longitude: location.longitude,
+    });
+  }
+
+  return LocationScope.Worldwide();
+};
+
+/** Country filter implied by a scope, if any. Precise and worldwide imply none. */
+export const scopeCountryOf = (
+  input: Pick<RecommendDishesInput, "country" | "location">,
+): string | null =>
+  LocationScope.$match(resolveLocationScope(input), {
+    Country: ({ country }) => country,
+    Precise: () => null,
+    Worldwide: () => null,
+  });
+
+/**
+ * Coarse, log-safe location fields. Coordinates are deliberately absent:
+ * server logs record only which scope ran and (for precise) the bounded
+ * search cap, never visitor coordinates. The Record shape is forced by
+ * Effect's annotateLogs API, not an application map.
+ */
+export const locationLogFields = (
+  input: Pick<RecommendDishesInput, "country" | "location">,
+): Record<string, string | number> =>
+  LocationScope.$match(resolveLocationScope(input), {
+    Country: ({ country }) => ({ locationKind: "country", country }),
+    Precise: () => ({ locationKind: "precise", searchRadiusMaxM: NEARBY_MAX_M }),
+    Worldwide: () => ({ locationKind: "worldwide" }),
+  });
+
+/**
+ * Ranking-model context. Carries occasion, mood, and an optional cuisine or
+ * country label — never coordinates, never venue claims. The model only
+ * re-ranks the candidate rows it is given.
+ */
+export const toRankContext = (input: RecommendDishesInput): MetaRankContext => ({
+  cuisineOrRegion: input.cuisine ?? scopeCountryOf(input),
+  mood: input.mood,
+  occasion: input.meal,
+});
 
 export type RecommendationError =
   | InvalidLocale
@@ -478,28 +569,60 @@ const validateRankedIds = (
 // tests). Cuisine match outranks meal-category match, then id ASC keeps
 // the order stable across seed changes. Mirrors the SQL ORDER BY so the
 // candidate window and the final slice agree.
+const scoreCandidate = (
+  candidate: RecommendationCandidateRow,
+  input: RecommendDishesInput,
+): number => {
+  const mealSlug = input.meal === "anything" ? null : input.meal;
+  let score = 1;
+
+  if (input.cuisine !== undefined && nonNullStrings(candidate.cuisines).includes(input.cuisine)) {
+    score += 2;
+  }
+
+  if (mealSlug !== null && nonNullStrings(candidate.categories).includes(mealSlug)) {
+    score += 1;
+  }
+
+  return score;
+};
+
 const rankAllDeterministic = (
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   input: RecommendDishesInput,
 ): Array<RecommendationCandidateRow> => {
-  const mealSlug = input.meal === "anything" ? null : input.meal;
-
-  const scored = candidates.map((candidate) => {
-    let score = 1;
-
-    if (input.cuisine !== undefined && nonNullStrings(candidate.cuisines).includes(input.cuisine)) {
-      score += 2;
-    }
-
-    if (mealSlug !== null && nonNullStrings(candidate.categories).includes(mealSlug)) {
-      score += 1;
-    }
-
-    return { candidate, score };
-  });
+  const scored = candidates.map((candidate) => ({
+    candidate,
+    score: scoreCandidate(candidate, input),
+  }));
 
   scored.sort(
     (left, right) => right.score - left.score || compareIds(left.candidate.id, right.candidate.id),
+  );
+
+  return scored.map((entry) => entry.candidate);
+};
+
+/**
+ * Precise-scope order: nearest curated association first, then the same
+ * cuisine/meal/id order as the country scope. Distance comes from the
+ * PostGIS candidate query; unknown distances sort last.
+ */
+const rankPreciseDeterministic = (
+  candidates: ReadonlyArray<NearbyRecommendationCandidateRow>,
+  input: RecommendDishesInput,
+): Array<RecommendationCandidateRow> => {
+  const scored = candidates.map((candidate) => ({
+    candidate,
+    distanceM: candidate.nearbyDistanceM ?? Number.POSITIVE_INFINITY,
+    score: scoreCandidate(candidate, input),
+  }));
+
+  scored.sort(
+    (left, right) =>
+      left.distanceM - right.distanceM ||
+      right.score - left.score ||
+      compareIds(left.candidate.id, right.candidate.id),
   );
 
   return scored.map((entry) => entry.candidate);
@@ -566,23 +689,13 @@ const rankWithMuse = (
 
   return Effect.flatMap(
     Effect.flatMap(MetaClient, (client) =>
-      client
-        .rank(
-          rankInput,
-          {
-            occasion: input.meal,
-            mood: input.mood,
-            cuisineOrRegion: input.cuisine ?? input.country ?? null,
-          },
-          config,
-        )
-        .pipe(
-          Effect.annotateLogs({
-            backend: "muse",
-            modelId: config.modelId,
-            candidateCount: candidates.length,
-          }),
-        ),
+      client.rank(rankInput, toRankContext(input), config).pipe(
+        Effect.annotateLogs({
+          backend: "muse",
+          modelId: config.modelId,
+          candidateCount: candidates.length,
+        }),
+      ),
     ),
     (ids) => validateRankedIds(ids, candidates, outputLimit),
   ).pipe(
@@ -606,41 +719,26 @@ interface RankingLimits {
 // size matrix is unit-testable without a database.
 const SURPRISE_NOTE = "Surprise variety applied: showing a different slice of the eligible pool.";
 
-const serveRecommendations = (
+/** Accuracy above this is too coarse to call nearby; the client warns and the server widens honestly. */
+const POOR_ACCURACY_M = 1_000;
+
+const finishRecommendations = (
   input: RecommendDishesInput,
+  sortedAll: ReadonlyArray<RecommendationCandidateRow>,
   warnings: ReadonlyArray<string>,
-  excluded: ReadonlySet<bigint>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
   Effect.gen(function* () {
-    const candidates = yield* runQuery("dish/recommendation-candidates", (sql) =>
-      dishRecommendationCandidates.run(sql, {
-        cuisine: input.cuisine ?? null,
-        country: input.country ?? null,
-        excluded_ids: [...excluded],
-        locale: input.locale,
-        meal: input.meal,
-        limit: limits.candidateLimit,
-      }),
-    );
-
-    if (candidates.length === 0) {
-      return RecommendationOutcome.Empty({
-        reasons: ["No published dishes match the current filters."],
-      });
-    }
-
-    const sortedAll = rankAllDeterministic(candidates, input);
-
     const deterministicTop = windowForSurprise(sortedAll, input.surpriseSeed, limits.outputLimit);
     const deterministicIds = deterministicTop.map((candidate) => candidate.id);
 
     yield* Effect.logInfo("Recommendation candidates resolved").pipe(
       Effect.annotateLogs({
         backend: muse === null || input.surpriseSeed > 0 ? "deterministic" : "muse",
-        candidateCount: candidates.length,
+        candidateCount: sortedAll.length,
         returnedCount: deterministicTop.length,
+        ...locationLogFields(input),
       }),
     );
 
@@ -666,14 +764,14 @@ const serveRecommendations = (
     }
 
     const ranked = yield* rankWithMuse(
-      candidates,
+      sortedAll,
       input,
       muse,
       deterministicIds,
       limits.outputLimit,
     );
 
-    const byId = new Map(candidates.map((candidate) => [candidate.id, candidate] as const));
+    const byId = new Map(sortedAll.map((candidate) => [candidate.id, candidate] as const));
 
     const rankedIds = MuseRankResult.$match(ranked, {
       Ranked: ({ ids }) => ids,
@@ -705,6 +803,88 @@ const serveRecommendations = (
         }),
     });
   });
+
+const serveCountryCandidates = (
+  input: RecommendDishesInput,
+  warnings: ReadonlyArray<string>,
+  excluded: ReadonlySet<bigint>,
+  limits: RankingLimits,
+  muse: MuseRankingConfig | null,
+): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
+  Effect.gen(function* () {
+    const candidates = yield* runQuery("dish/recommendation-candidates", (sql) =>
+      dishRecommendationCandidates.run(sql, {
+        cuisine: input.cuisine ?? null,
+        country: scopeCountryOf(input),
+        excluded_ids: [...excluded],
+        locale: input.locale,
+        meal: input.meal,
+        limit: limits.candidateLimit,
+      }),
+    );
+
+    if (candidates.length === 0) {
+      return RecommendationOutcome.Empty({
+        reasons: ["No published dishes match the current filters."],
+      });
+    }
+
+    return yield* finishRecommendations(
+      input,
+      rankAllDeterministic(candidates, input),
+      warnings,
+      limits,
+      muse,
+    );
+  });
+
+const serveRecommendations = (
+  input: RecommendDishesInput,
+  warnings: ReadonlyArray<string>,
+  excluded: ReadonlySet<bigint>,
+  limits: RankingLimits,
+  muse: MuseRankingConfig | null,
+): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> => {
+  const scope = resolveLocationScope(input);
+
+  return LocationScope.$match(scope, {
+    Precise: (precise) =>
+      Effect.gen(function* () {
+        const nearby = yield* findNearbyDishCandidates({
+          cuisine: input.cuisine ?? null,
+          excludedIds: [...excluded],
+          latitude: precise.latitude,
+          limit: limits.candidateLimit,
+          locale: input.locale,
+          longitude: precise.longitude,
+          meal: input.meal,
+        });
+
+        if (nearby.rows.length === 0) {
+          return RecommendationOutcome.Empty({
+            reasons: [
+              `No published dishes mapped near your location (searched within ${(nearby.searchedM / 1000).toString()} km).`,
+              "Try a chosen destination or the worldwide catalog instead.",
+            ],
+          });
+        }
+
+        const sortedAll = rankPreciseDeterministic(nearby.rows, input);
+
+        const scopedWarnings =
+          precise.accuracy !== null && precise.accuracy > POOR_ACCURACY_M
+            ? [
+                ...warnings,
+                `Location accuracy is coarse (±${Math.round(precise.accuracy).toString()} m); nearby results cover a wider area.`,
+              ]
+            : warnings;
+
+        return yield* finishRecommendations(input, sortedAll, scopedWarnings, limits, muse);
+      }),
+    Country: () => serveCountryCandidates(input, warnings, excluded, limits, muse),
+    Worldwide: () => serveCountryCandidates(input, warnings, excluded, limits, muse),
+  });
+};
 
 export const RecommendationServiceLive = Layer.effect(
   RecommendationService,

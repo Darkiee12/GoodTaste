@@ -355,6 +355,7 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
             allergies: data.allergies,
             cuisine: data.cuisine,
             country: data.country,
+            location: data.location,
             mood: data.mood,
             locale: data.locale,
             surpriseSeed: data.surpriseSeed,

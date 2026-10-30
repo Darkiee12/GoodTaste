@@ -1,10 +1,18 @@
+import { Globe2Icon, LocateFixedIcon, MapPinIcon, PlaneIcon } from "lucide-react";
 import { useRef } from "react";
 
 import {
   formatTemplate,
+  regionChoiceFor,
+  type PreciseFix,
   type QuizDraft,
-  type RecRegionMode,
+  type RegionChoice,
 } from "@/components/home/recommend/quiz-model";
+import {
+  accuracyLabelFor,
+  fallbackOptionsFor,
+  type PreciseStatus,
+} from "@/components/home/recommend/use-precise-location";
 import {
   type MealOccasion,
   type RecommendationMood,
@@ -87,25 +95,40 @@ export const moodLabelFor = (mood: RecommendationMood, copy: Messages): string =
 const countryNameFor = (code: string, options: ReadonlyArray<CountryOption>): string | undefined =>
   options.find((option) => option.code === code)?.label;
 
-type WhereChoice = "detected" | "another" | "anywhere";
+export interface PreciseControl {
+  readonly status: PreciseStatus;
+  readonly fix: PreciseFix | null;
+  readonly request: () => void;
+}
 
-const choiceFor = (draft: QuizDraft, detected: string | null): WhereChoice => {
-  if (draft.regionMode === "anywhere") {
-    return "anywhere";
+const choiceLabelFor = (
+  choice: RegionChoice,
+  copy: Messages,
+  detectedName: string | null,
+): string => {
+  if (choice === "home" && detectedName !== null) {
+    return formatTemplate(copy.recWhereExploring, detectedName);
   }
 
-  if (detected !== null && draft.country.toUpperCase() === detected) {
-    return "detected";
+  if (choice === "precise") {
+    return copy.recWhereNearYou;
   }
 
-  return "another";
+  if (choice === "destination") {
+    return copy.recWhereAnother;
+  }
+
+  return copy.recWhereAnywhere;
 };
 
 /**
- * Step 1 — "Where are we eating?" A trusted network-region offer in
- * human-readable form (never raw coordinates), an explicit lane to another
- * destination with a country selector, or anywhere. Completing the answer
- * auto-advances; opening the selector never does.
+ * Step 1 — "Where should we explore?" Four ordered choices: the trusted home
+ * region (default when network-region detection knows it), an explicit
+ * precise-location lane, another destination from the country catalog, or
+ * worldwide. Only the complete approximate region auto-advances on pointer;
+ * precise fixes, destination picks, and worldwide wait for Continue, and
+ * nothing advances while geolocation is pending. Coordinates are never
+ * displayed raw — success shows an accuracy label at most.
  */
 export function WhereStep({
   copy,
@@ -116,6 +139,7 @@ export function WhereStep({
   onAdvance,
   onDraft,
   onRetryCountries,
+  precise,
 }: {
   readonly copy: Messages;
   readonly countriesError: boolean;
@@ -125,25 +149,70 @@ export function WhereStep({
   readonly onAdvance: () => void;
   readonly onDraft: (next: QuizDraft) => void;
   readonly onRetryCountries: () => void;
+  readonly precise: PreciseControl;
 }) {
   const { consumePointer, markPointer } = usePointerAdvance();
 
-  const choice = choiceFor(draft, detected.country);
+  const choice = regionChoiceFor(draft, detected.country);
 
   const detectedName =
     detected.country === null
       ? null
       : (countryNameFor(detected.country, countryOptions) ?? detected.country);
 
-  const pick = (mode: RecRegionMode, country: string): void => {
-    onDraft({ ...draft, country, regionMode: mode });
+  const pickDestination = (country: string): void => {
+    onDraft({
+      ...draft,
+      country,
+      countrySource: country === "" ? null : "chosen",
+      precise: null,
+      regionMode: "country",
+    });
   };
 
-  const maybeAdvance = (): void => {
+  const pickChoice = (next: RegionChoice): void => {
+    if (next === "home" && detected.country !== null) {
+      onDraft({
+        ...draft,
+        country: detected.country,
+        countrySource: "detected",
+        precise: null,
+        regionMode: "country",
+      });
+
+      return;
+    }
+
+    if (next === "precise") {
+      onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "precise" });
+
+      return;
+    }
+
+    if (next === "destination") {
+      onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "country" });
+
+      return;
+    }
+
+    onDraft({ ...draft, country: "", countrySource: null, precise: null, regionMode: "anywhere" });
+  };
+
+  const maybeAdvanceHome = (): void => {
     if (consumePointer()) {
       onAdvance();
     }
   };
+
+  const failed = fallbackOptionsFor(precise.status, detected.country);
+
+  const showAlternatives =
+    choice === "precise" &&
+    (precise.status === "denied" ||
+      precise.status === "timeout" ||
+      precise.status === "unavailable" ||
+      precise.status === "unsupported" ||
+      precise.status === "insecure");
 
   return (
     <fieldset className="min-w-0">
@@ -154,51 +223,139 @@ export function WhereStep({
       ) : null}
       <div className="flex flex-col gap-3">
         {detected.country !== null && detectedName !== null ? (
-          <label className={optionClass(choice === "detected")} onPointerDown={markPointer}>
+          <label className={optionClass(choice === "home")} onPointerDown={markPointer}>
             <input
               type="radio"
               name="rec-where"
-              value="detected"
-              checked={choice === "detected"}
+              value="home"
+              checked={choice === "home"}
               onChange={() => {
-                pick("country", detected.country ?? "");
+                pickChoice("home");
               }}
-              onClick={maybeAdvance}
+              onClick={maybeAdvanceHome}
               className="size-5 flex-none accent-food-orange-strong"
             />
-            {formatTemplate(copy.recWhereExploring, detectedName)}
+            <MapPinIcon aria-hidden="true" className="size-5 flex-none" />
+            {choiceLabelFor("home", copy, detectedName)}
           </label>
         ) : null}
-        <label className={optionClass(choice === "another")} onPointerDown={markPointer}>
+        <label className={optionClass(choice === "precise")} onPointerDown={markPointer}>
           <input
             type="radio"
             name="rec-where"
-            value="another"
-            checked={choice === "another"}
+            value="precise"
+            checked={choice === "precise"}
             onChange={() => {
-              pick("country", "");
+              pickChoice("precise");
+            }}
+            onClick={() => {
+              if (consumePointer()) {
+                precise.request();
+              }
             }}
             className="size-5 flex-none accent-food-orange-strong"
           />
-          {copy.recWhereAnother}
+          <LocateFixedIcon aria-hidden="true" className="size-5 flex-none" />
+          {choiceLabelFor("precise", copy, null)}
         </label>
-        <label className={optionClass(choice === "anywhere")} onPointerDown={markPointer}>
+        <label className={optionClass(choice === "destination")} onPointerDown={markPointer}>
           <input
             type="radio"
             name="rec-where"
-            value="anywhere"
-            checked={choice === "anywhere"}
+            value="destination"
+            checked={choice === "destination"}
             onChange={() => {
-              pick("anywhere", "");
+              pickChoice("destination");
             }}
-            onClick={maybeAdvance}
             className="size-5 flex-none accent-food-orange-strong"
           />
-          {copy.recWhereAnywhere}
+          <PlaneIcon aria-hidden="true" className="size-5 flex-none" />
+          {choiceLabelFor("destination", copy, null)}
+        </label>
+        <label className={optionClass(choice === "worldwide")} onPointerDown={markPointer}>
+          <input
+            type="radio"
+            name="rec-where"
+            value="worldwide"
+            checked={choice === "worldwide"}
+            onChange={() => {
+              pickChoice("worldwide");
+            }}
+            className="size-5 flex-none accent-food-orange-strong"
+          />
+          <Globe2Icon aria-hidden="true" className="size-5 flex-none" />
+          {choiceLabelFor("worldwide", copy, null)}
         </label>
       </div>
 
-      {choice === "another" ? (
+      {choice === "precise" ? (
+        <div aria-live="polite" className="mt-5 min-h-6">
+          {precise.status === "locating" ? (
+            <p className="text-sm font-semibold text-muted">{copy.recWhereLocating}</p>
+          ) : null}
+          {precise.status === "success" && precise.fix !== null ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <output className="block text-sm font-bold text-ink">
+                {accuracyLabelFor(precise.fix) ?? copy.recWhereNearYou}
+              </output>
+              <button
+                type="button"
+                onClick={precise.request}
+                className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-ink"
+              >
+                {copy.recRetry}
+              </button>
+            </div>
+          ) : null}
+          {precise.status === "idle" ? (
+            <button
+              type="button"
+              onClick={precise.request}
+              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
+            >
+              <LocateFixedIcon aria-hidden="true" className="size-4" />
+              {copy.recWhereNearYou}
+            </button>
+          ) : null}
+          {showAlternatives ? (
+            <div>
+              <p role="alert" className="text-sm font-bold text-danger">
+                {precise.status === "denied" ? copy.discoverLocalUnknown : copy.recError}
+              </p>
+              {precise.status === "denied" ? (
+                <p className="mt-1 text-sm text-muted">{copy.recEmptySuggest}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {failed
+                  .filter((option) => option.choice !== "precise")
+                  .map((option) => (
+                    <button
+                      key={option.choice}
+                      type="button"
+                      onClick={() => {
+                        pickChoice(option.choice);
+                      }}
+                      className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-ink"
+                    >
+                      {choiceLabelFor(option.choice, copy, detectedName)}
+                    </button>
+                  ))}
+                {failed.some((option) => option.retryPrecise) ? (
+                  <button
+                    type="button"
+                    onClick={precise.request}
+                    className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-4 text-xs font-bold text-ink transition hover:bg-ink hover:text-white"
+                  >
+                    {copy.recRetry}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {choice === "destination" ? (
         <div className="mt-5">
           <label htmlFor="rec-country" className="mb-2 block text-sm font-bold text-ink">
             {copy.recWhereCountryLabel}
@@ -223,18 +380,8 @@ export function WhereStep({
             <select
               id="rec-country"
               value={draft.country}
-              onPointerDown={markPointer}
               onChange={(event) => {
-                const next = event.target.value;
-
-                if (next === "") {
-                  pick("country", next);
-
-                  return;
-                }
-
-                pick("country", next);
-                maybeAdvance();
+                pickDestination(event.target.value);
               }}
               className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink focus:border-brand-blue"
             >

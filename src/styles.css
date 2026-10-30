@@ -524,3 +524,21 @@
     }
   }
 }
+
+/* Radix Select has no `modal` prop in this version: every open listbox
+   mounts a `remove-scroll` body lock (`overflow: hidden` + a `margin-right`
+   gap compensation). That lock breaks `position: sticky` (the site header
+   scrolls away while the menu is open) and moves centered content whenever
+   the compensation misfires, so opening a popover reads as a layout shift.
+   Genuine modals (AdminDialog, MemberDrawer) keep their lock; only
+   non-modal overlays — Select listboxes and DropdownMenu menus — with no
+   dialog open are restored to the document flow values above
+   (`overflow-x: clip`, `overflow-y: visible`, no gap margin), matching the
+   `modal={false}` account/language menus. Unlayered on purpose: the injected
+   lock stylesheet is unlayered `!important`, which beats any layered rule
+   regardless of specificity. */
+body[data-scroll-locked]:has([role="listbox"], [role="menu"]):not(:has([role="dialog"])) {
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+  margin-right: 0 !important;
+}
