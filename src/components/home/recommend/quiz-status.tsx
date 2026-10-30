@@ -1,6 +1,6 @@
 import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
 
-import type { Locale, Messages } from "@/shared/i18n";
+import type { Messages } from "@/shared/i18n";
 
 /**
  * Status hierarchy for recommendation outcomes.
@@ -87,56 +87,40 @@ export type RecommendationModeLabel = "ai" | "deterministic";
  */
 const AI_FALLBACK_MARKER = "AI ranking was";
 
-type RankingNoteLegacyProps = {
-  readonly note: string | null;
-  readonly mode?: undefined;
-  readonly warnings?: undefined;
-  readonly copy?: undefined;
-  readonly lang?: undefined;
-};
+/**
+ * Interim localized sentences for mode labels (see the TODO on RankingNote).
+ * One writer only: both RankingNote and AiExplanationCard read these, so the
+ * inline note and the sidebar card can never drift apart.
+ */
+const aiExplainerFor = (copy: Messages): string => copy.recAiExplainer;
+
+const catalogNoteFor = (copy: Messages): string => copy.recCatalogNote;
+
+const fallbackNoteFor = (copy: Messages): string => copy.recFallbackNote;
 
 type RankingNoteModeProps = {
-  readonly note?: string | null | undefined;
   readonly mode: RecommendationModeLabel;
   readonly warnings: ReadonlyArray<string>;
   readonly copy: Messages;
-  readonly lang: Locale;
 };
 
 /**
- * Mode label rendered under the results heading. AI shows a subtle sparkles
- * icon, the localized AI note, and a one-line explainer that credits Muse
+ * Mode label for the results area. AI shows a subtle sparkles
+ * icon, the localized AI title, and a one-line explainer that credits Muse
  * with ranking only — catalog names and descriptions stay as curated and are
  * never presented as AI-written. Deterministic shows no icon and states the
  * picks come from the food catalog; a degraded AI attempt (fallback warning
- * present) says so instead of silently passing as catalog order. The legacy
- * `note`-only shape is preserved until quiz-flow adopts the mode props.
- *
- * TODO(i18n-coordinator): promote the interim lang-conditional sentences to
- * recAiExplainer / recCatalogNote / recFallbackNote in src/shared/i18n.ts.
- * Interim copy lives here so this file stays the only writer of mode labels.
+ * present) says so instead of silently passing as catalog order.
  */
-export function RankingNote(props: RankingNoteLegacyProps | RankingNoteModeProps) {
-  if (props.mode === undefined) {
-    if (props.note === null) {
-      return null;
-    }
-
-    return <p className="mb-3 text-sm font-semibold text-muted">{props.note}</p>;
-  }
-
+export function RankingNote(props: RankingNoteModeProps) {
   if (props.mode === "ai") {
     return (
       <div className="mb-3 flex flex-col gap-1">
         <p className="flex items-center gap-1.5 text-sm font-bold text-ink">
           <SparklesIcon aria-hidden="true" className="size-4 flex-none text-food-orange-strong" />
-          {props.copy.recAiNote}
+          {props.copy.recAiRankedTitle}
         </p>
-        <p className="text-sm font-semibold text-muted">
-          {props.lang === "vi"
-            ? "Muse chỉ sắp xếp lại các món trong danh mục — tên và mô tả giữ nguyên bản biên tập."
-            : "Muse re-ranked these catalog matches — names and descriptions stay as curated."}
-        </p>
+        <p className="text-sm font-semibold text-muted">{aiExplainerFor(props.copy)}</p>
       </div>
     );
   }
@@ -144,20 +128,83 @@ export function RankingNote(props: RankingNoteLegacyProps | RankingNoteModeProps
   const degraded = props.warnings.some((warning) => warning.includes(AI_FALLBACK_MARKER));
 
   if (degraded) {
+    return <p className="mb-3 text-sm font-semibold text-muted">{fallbackNoteFor(props.copy)}</p>;
+  }
+
+  return <p className="mb-3 text-sm font-semibold text-muted">{catalogNoteFor(props.copy)}</p>;
+}
+
+/**
+ * Sidebar-ready AI explanation card. Explicit props only: `mode` (straight
+ * from `outcome.mode`) is the single branding source of truth — only
+ * `mode === "ai"` renders Muse branding, and only with the ranking-only
+ * explainer (catalog names/descriptions are never presented as AI-written,
+ * and no scores are shown or invented). Deterministic renders neutral
+ * catalog wording with no icon; a degraded AI attempt (fallback warning
+ * present) says so honestly instead of passing as catalog order. Empty and
+ * uncertain render explanatory states — the panel owns those, so the card
+ * never renders dish content for them.
+ *
+ * Drop-in for the lead integrator: where quiz-flow renders
+ * `<RankingNote note={modeNoteFor(outcome.mode, copy)} />`, pass
+ * `mode={outcome.mode} warnings={outcome.warnings} copy` here plus
+ * `reasons={outcome.reasons}` for the empty/uncertain states.
+ */
+export type AiCardMode = "ai" | "deterministic" | "uncertain" | "empty";
+
+const NO_REASONS: ReadonlyArray<string> = [];
+
+export function AiExplanationCard({
+  mode,
+  warnings,
+  copy,
+  reasons = NO_REASONS,
+}: {
+  readonly mode: AiCardMode;
+  readonly warnings: ReadonlyArray<string>;
+  readonly copy: Messages;
+  readonly reasons?: ReadonlyArray<string>;
+}) {
+  if (mode === "ai") {
     return (
-      <p className="mb-3 text-sm font-semibold text-muted">
-        {props.lang === "vi"
-          ? "Xếp hạng AI không khả dụng nên danh sách này theo thứ tự danh mục — không phải do AI xếp hạng."
-          : "AI ranking was unavailable, so these follow catalog order — not AI-ranked."}
-      </p>
+      <aside
+        aria-label={copy.recAiRankedTitle}
+        className="rounded-2xl border-2 border-mango bg-cream px-4 py-3"
+      >
+        <p className="flex items-center gap-1.5 text-sm font-extrabold text-ink">
+          <SparklesIcon aria-hidden="true" className="size-4 flex-none text-food-orange-strong" />
+          {copy.recAiRankedTitle}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-ink">{aiExplainerFor(copy)}</p>
+      </aside>
+    );
+  }
+
+  if (mode === "deterministic") {
+    const degraded = warnings.some((warning) => warning.includes(AI_FALLBACK_MARKER));
+
+    return (
+      <aside className="rounded-2xl border-2 border-border-soft bg-white px-4 py-3">
+        <p className="text-sm font-semibold text-muted">
+          {degraded ? fallbackNoteFor(copy) : catalogNoteFor(copy)}
+        </p>
+      </aside>
     );
   }
 
   return (
-    <p className="mb-3 text-sm font-semibold text-muted">
-      {props.lang === "vi"
-        ? "Được chọn từ danh mục món ăn, không qua xếp hạng AI."
-        : "Selected from our food catalog without AI ranking."}
-    </p>
+    <aside className="rounded-2xl border-2 border-border-soft bg-white px-4 py-3">
+      <p className="text-sm font-extrabold text-ink">{copy.recReasonsHeading}</p>
+      {reasons.length > 0 ? (
+        <ul className="mt-2 flex list-disc flex-col gap-1 pl-6 text-sm text-ink">
+          {reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      ) : null}
+      {mode === "empty" ? (
+        <p className="mt-2 text-sm font-semibold text-muted">{copy.recEmptySuggest}</p>
+      ) : null}
+    </aside>
   );
 }

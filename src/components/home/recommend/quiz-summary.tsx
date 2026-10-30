@@ -1,3 +1,5 @@
+import { PencilIcon } from "lucide-react";
+
 import { formatTemplate, scopeLabelFor } from "@/components/home/recommend/quiz-model";
 import {
   mealLabelFor,
@@ -18,9 +20,9 @@ export interface SummaryChips {
 }
 
 /**
- * Compact editable summary shown above results (e.g. "Exploring Vietnam ·
- * Dinner · No pork"). Each chip returns to its step so the visitor adjusts
- * one thing instead of restarting. Allergies do not render here as editable
+ * Sidebar YOUR PICKS card: compact editable summary of the last submitted
+ * request (e.g. "Exploring Vietnam · Dinner · No pork"). Each chip returns
+ * to its step so the visitor adjusts one thing instead of restarting. Allergies do not render here as editable
  * text — they stay a session-only safety input. The region chip names the
  * scope honestly: approximate home regions explore by country name, precise
  * fixes show the nearby label with accuracy, destinations show the plain
@@ -75,7 +77,8 @@ export function QuizSummary({
 
   return (
     <div className="rounded-2xl border-2 border-border-soft bg-cream px-4 py-3">
-      <p className="text-xs font-extrabold tracking-wide text-muted uppercase">
+      <p className="flex items-center gap-2 font-display text-xl tracking-wide text-ink">
+        <PencilIcon aria-hidden="true" className="size-4 shrink-0" />
         {copy.recSummaryLabel}
       </p>
       <ul className="mt-2 flex flex-wrap gap-2">
