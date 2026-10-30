@@ -88,6 +88,17 @@ export const toCarouselPublishedImage = (
   };
 };
 
+/** Display index resolution shared by both carousel modes. The controlled
+ * `activeIndex` wins when provided; otherwise the internal fallback (the
+ * uncontrolled state) shows. Out-of-range values wrap; empty input stays
+ * at 0. Exported so the controlled-mode contract is unit-testable without
+ * a DOM renderer. */
+export const carouselDisplayIndex = (
+  activeIndex: number | undefined,
+  fallbackIndex: number,
+  total: number,
+): number => carouselWrappedIndex(activeIndex ?? fallbackIndex, total);
+
 export interface DishCarouselProps {
   /** One to ten dishes; empty states stay with the caller (no empty carousel). */
   readonly items: ReadonlyArray<DishCarouselItem>;
@@ -97,6 +108,19 @@ export interface DishCarouselProps {
   readonly favoriteStatus: FavoriteStatusQuery;
   /** Accessible name for the carousel region (the visible heading text). */
   readonly label: string;
+  /**
+   * Controlled selected slide. When set, the parent owns the index: the
+   * carousel renders it (wrapped into range) and reports every user or
+   * autoplay change through `onIndexChange` instead of moving internal
+   * state. Omit for the default uncontrolled behavior (Discover).
+   */
+  readonly activeIndex?: number | undefined;
+  /**
+   * Fires with the wrapped index on every slide change — prev/next, dots,
+   * arrows, swipe, and autoplay — in both modes. The rail parent passes a
+   * state setter here; uncontrolled callers may omit it.
+   */
+  readonly onIndexChange?: ((index: number) => void) | undefined;
   /** Autoplay timer; defaults to off (recommendation results stay still). */
   readonly autoplay?: boolean | undefined;
   readonly autoplayMs?: number | undefined;
@@ -114,6 +138,7 @@ export interface DishCarouselProps {
  * the caller, outside this component.
  */
 export function DishCarousel({
+  activeIndex,
   autoplay = false,
   autoplayMs = DISH_CAROUSEL_AUTOPLAY_MS,
   copy,
@@ -121,10 +146,12 @@ export function DishCarousel({
   items,
   label,
   lang,
+  onIndexChange,
   resetKey,
   session,
 }: DishCarouselProps): ReactNode {
-  const [index, setIndex] = useState(0);
+  const controlled = activeIndex !== undefined;
+  const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
   const [activeResetKey, setActiveResetKey] = useState(resetKey);
   const [playing, setPlaying] = useState(true);
   const [hoverPaused, setHoverPaused] = useState(false);
@@ -137,10 +164,15 @@ export function DishCarousel({
 
   // Render-time reset (the endorsed pattern): the discarded render never
   // commits, so no stale-index frame paints when the scope or rotation
-  // changes underneath the carousel.
+  // changes underneath the carousel. Controlled parents own the reset and
+  // return `activeIndex` to 0 alongside the new `resetKey`; uncontrolled
+  // mode resets its internal index here.
   if (resetKey !== activeResetKey) {
     setActiveResetKey(resetKey);
-    setIndex(0);
+
+    if (!controlled) {
+      setUncontrolledIndex(0);
+    }
   }
 
   const total = items.length;
@@ -197,12 +229,33 @@ export function DishCarousel({
     };
   }, []);
 
+  const safeIndex = carouselDisplayIndex(activeIndex, uncontrolledIndex, total);
+
+  // Latest control-channel snapshot for the autoplay timer. The timer effect
+  // intentionally keeps its original dependency set (running/total/ms) so
+  // Discover autoplay cadence is untouched; refs carry the live values.
+  const controlRef = useRef({ controlled, onIndexChange });
+  useEffect(() => {
+    controlRef.current = { controlled, onIndexChange };
+  });
+
+  const liveIndexRef = useRef(safeIndex);
+  useEffect(() => {
+    liveIndexRef.current = safeIndex;
+  });
+
   useEffect(() => {
     // Autoplay advances silently: manual navigation announces via the
     // live region, the timer never spams screen readers.
     const timer = window.setTimeout(() => {
       if (running) {
-        setIndex((current) => carouselWrappedIndex(current + 1, total));
+        const wrapped = carouselWrappedIndex(liveIndexRef.current + 1, total);
+
+        if (!controlRef.current.controlled) {
+          setUncontrolledIndex(wrapped);
+        }
+
+        controlRef.current.onIndexChange?.(wrapped);
       }
     }, autoplayMs);
 
@@ -216,11 +269,14 @@ export function DishCarousel({
     return null;
   }
 
-  const safeIndex = carouselWrappedIndex(index, total);
-
   const goTo = (next: number): void => {
     const wrapped = carouselWrappedIndex(next, total);
-    setIndex(wrapped);
+
+    if (!controlled) {
+      setUncontrolledIndex(wrapped);
+    }
+
+    onIndexChange?.(wrapped);
     setAnnouncement(carouselAnnouncement(copy, wrapped, total));
   };
 

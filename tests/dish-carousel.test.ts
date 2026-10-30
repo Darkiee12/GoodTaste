@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   carouselAnnouncement,
+  carouselDisplayIndex,
   carouselWrappedIndex,
   DISH_CAROUSEL_AUTOPLAY_MS,
   dishCarouselIngredientNames,
@@ -12,6 +13,11 @@ import {
   DishCarouselSkeleton,
   toCarouselPublishedImage,
 } from "@/components/dish/dish-carousel";
+import {
+  RECOMMENDATION_RAIL_THUMB_SIZES,
+  RecommendationRail,
+} from "@/components/home/recommend/recommendation-rail";
+import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import type { CarouselCard } from "@/modules/food-discovery/server/operations/dish-service";
 import { messagesFor } from "@/shared/i18n";
 
@@ -229,5 +235,139 @@ describe("carousel loading skeleton", () => {
     // Pulse is motion-safe like the rest of the carousel.
     expect(html).toContain("animate-pulse");
     expect(html).toContain("motion-reduce:animate-none");
+  });
+});
+
+describe("controlled index resolution", () => {
+  test("uncontrolled mode shows the internal fallback (homepage default)", () => {
+    expect(carouselDisplayIndex(undefined, 0, 5)).toBe(0);
+    expect(carouselDisplayIndex(undefined, 3, 5)).toBe(3);
+  });
+
+  test("controlled activeIndex wins over the internal fallback", () => {
+    expect(carouselDisplayIndex(2, 0, 5)).toBe(2);
+    expect(carouselDisplayIndex(4, 1, 5)).toBe(4);
+  });
+
+  test("wraps out-of-range controlled values instead of clipping", () => {
+    expect(carouselDisplayIndex(5, 0, 5)).toBe(0);
+    expect(carouselDisplayIndex(-1, 0, 5)).toBe(4);
+  });
+
+  test("empty input stays at zero in both modes", () => {
+    expect(carouselDisplayIndex(undefined, 0, 0)).toBe(0);
+    expect(carouselDisplayIndex(3, 0, 0)).toBe(0);
+  });
+});
+
+const railDish = (overrides?: Partial<DishSummary>): DishSummary => ({
+  categorySlugs: ["noodles"],
+  description: "A short rail description.",
+  descriptionLanguage: "en",
+  englishName: "Pho",
+  id: "dish-1",
+  image: null,
+  ingredients: [],
+  lastUpdate: 0,
+  name: "Phở",
+  nativeLanguageTag: "vi",
+  nativeName: "Phở bò",
+  regionNames: ["Hanoi"],
+  slug: "pho",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  ...overrides,
+});
+
+const railProps = (overrides?: Partial<Parameters<typeof RecommendationRail>[0]>) => {
+  // SAFETY: every entry comes from the DishSummary-typed railDish() helper;
+  // the assertion only widens the mutable literal to the readonly prop type.
+  const railItems = [
+    railDish({ id: "dish-1", slug: "pho", name: "Phở" }),
+    railDish({
+      description: "Second dish description.",
+      id: "dish-2",
+      image: {
+        alt: "A test bowl",
+        attribution: null,
+        dishId: "dish-2",
+        id: "photo-2",
+        srcSet: "https://cdn.example.com/400 400w, https://cdn.example.com/800 800w",
+        url: "https://cdn.example.com/1600",
+      },
+      name: "Bánh mì",
+      nativeName: undefined,
+      regionNames: ["Saigon", "Central"],
+      slug: "banh-mi",
+    }),
+    railDish({ id: "dish-3", image: null, name: "Bún chả", slug: "bun-cha" }),
+  ] as ReadonlyArray<DishSummary>;
+
+  return {
+    activeIndex: 1,
+    copy: messagesFor("en"),
+    items: railItems,
+    label: "More recommendations",
+    lang: "en" as const,
+    onSelect: () => {},
+    ...overrides,
+  };
+};
+
+describe("recommendation rail", () => {
+  test("omits the rail for empty and single-dish result sets", () => {
+    expect(renderToStaticMarkup(createElement(RecommendationRail, railProps({ items: [] })))).toBe(
+      "",
+    );
+    expect(
+      renderToStaticMarkup(
+        createElement(
+          RecommendationRail,
+          railProps({ items: [railDish({ id: "only", slug: "only" })] }),
+        ),
+      ),
+    ).toBe("");
+  });
+
+  test("renders one thumbnail per dish with the shared order, marking the active slide", () => {
+    const html = renderToStaticMarkup(createElement(RecommendationRail, railProps()));
+
+    expect(html).toContain("More recommendations");
+    // Three dishes in, three thumbnails out: no placeholders, no filler.
+    expect(html.match(/<li/g)?.length).toBe(3);
+    expect(html).toContain("Phở");
+    expect(html).toContain("Bánh mì");
+    expect(html).toContain("Bún chả");
+    // Exactly one active thumbnail; selection is by position.
+    expect(html.match(/aria-current="true"/g)?.length).toBe(1);
+    expect(html).toContain("Go to slide 2: Bánh mì");
+    // Selected/hover/focus states ride on the border treatment.
+    expect(html).toContain("border-food-orange-strong");
+  });
+
+  test("shows region context, native name, and short description without ratings or links", () => {
+    const html = renderToStaticMarkup(createElement(RecommendationRail, railProps()));
+
+    expect(html).toContain("Saigon · Central");
+    expect(html).toContain("Phở bò");
+    expect(html).toContain("Second dish description.");
+    expect(html).not.toContain("See all");
+    expect(html).not.toContain("★");
+    expect(html).not.toMatch(/rating/i);
+    expect(html).not.toMatch(/score/i);
+  });
+
+  test("falls back to a branded initial tile instead of inventing a photo", () => {
+    const html = renderToStaticMarkup(createElement(RecommendationRail, railProps()));
+
+    expect(html).toContain("from-food-orange-strong");
+  });
+
+  test("lazy-loads narrow thumbnails, never the featured 1600px bytes", () => {
+    const html = renderToStaticMarkup(createElement(RecommendationRail, railProps()));
+
+    expect(RECOMMENDATION_RAIL_THUMB_SIZES).toBe("(max-width: 640px) 40vw, 160px");
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain("40vw");
+    expect(html).not.toContain("1600w");
   });
 });

@@ -18,11 +18,9 @@ const SURPRISE = "Surprise variety applied: showing a different slice of the eli
 
 describe("recommendation mode labels", () => {
   test("ai mode shows the sparkles icon, the AI note, and a ranking-only explainer", () => {
-    const html = renderToStaticMarkup(
-      RankingNote({ copy: copyEn, lang: "en", mode: "ai", warnings: [] }),
-    );
+    const html = renderToStaticMarkup(RankingNote({ copy: copyEn, mode: "ai", warnings: [] }));
 
-    expect(html).toContain(copyEn.recAiNote);
+    expect(html).toContain(copyEn.recAiRankedTitle);
     expect(html).toContain("<svg");
     expect(html).toContain("Muse re-ranked these catalog matches");
     expect(html).toContain("stay as curated");
@@ -30,18 +28,16 @@ describe("recommendation mode labels", () => {
   });
 
   test("ai mode explains ranking-only in Vietnamese", () => {
-    const html = renderToStaticMarkup(
-      RankingNote({ copy: copyVi, lang: "vi", mode: "ai", warnings: [] }),
-    );
+    const html = renderToStaticMarkup(RankingNote({ copy: copyVi, mode: "ai", warnings: [] }));
 
-    expect(html).toContain(copyVi.recAiNote);
+    expect(html).toContain(copyVi.recAiRankedTitle);
     expect(html).toContain("<svg");
     expect(html).toContain("giữ nguyên bản biên tập");
   });
 
   test("deterministic mode shows catalog wording with no icon", () => {
     const html = renderToStaticMarkup(
-      RankingNote({ copy: copyEn, lang: "en", mode: "deterministic", warnings: [] }),
+      RankingNote({ copy: copyEn, mode: "deterministic", warnings: [] }),
     );
 
     expect(html).toContain("Selected from our food catalog");
@@ -51,7 +47,7 @@ describe("recommendation mode labels", () => {
 
   test("deterministic mode states catalog wording in Vietnamese with no icon", () => {
     const html = renderToStaticMarkup(
-      RankingNote({ copy: copyVi, lang: "vi", mode: "deterministic", warnings: [] }),
+      RankingNote({ copy: copyVi, mode: "deterministic", warnings: [] }),
     );
 
     expect(html).toContain("không qua xếp hạng AI");
@@ -61,7 +57,7 @@ describe("recommendation mode labels", () => {
   test("deterministic fallback warnings render the honest non-AI explanation", () => {
     for (const warning of [UNAVAILABLE_FALLBACK, RATE_LIMIT_FALLBACK]) {
       const html = renderToStaticMarkup(
-        RankingNote({ copy: copyEn, lang: "en", mode: "deterministic", warnings: [warning] }),
+        RankingNote({ copy: copyEn, mode: "deterministic", warnings: [warning] }),
       );
 
       expect(html).toContain("not AI-ranked");
@@ -71,7 +67,6 @@ describe("recommendation mode labels", () => {
     const htmlVi = renderToStaticMarkup(
       RankingNote({
         copy: copyVi,
-        lang: "vi",
         mode: "deterministic",
         warnings: [UNAVAILABLE_FALLBACK],
       }),
@@ -84,7 +79,7 @@ describe("recommendation mode labels", () => {
   test("non-fallback warnings keep the plain catalog sentence", () => {
     for (const warning of [NOT_CONFIGURED, SURPRISE, 'Ignored unknown dislike "durian".']) {
       const html = renderToStaticMarkup(
-        RankingNote({ copy: copyEn, lang: "en", mode: "deterministic", warnings: [warning] }),
+        RankingNote({ copy: copyEn, mode: "deterministic", warnings: [warning] }),
       );
 
       expect(html).toContain("Selected from our food catalog");
@@ -94,11 +89,10 @@ describe("recommendation mode labels", () => {
 
   test("mode labels never promise dietary safety", () => {
     const variants = [
-      RankingNote({ copy: copyEn, lang: "en", mode: "ai", warnings: [] }),
-      RankingNote({ copy: copyEn, lang: "en", mode: "deterministic", warnings: [] }),
+      RankingNote({ copy: copyEn, mode: "ai", warnings: [] }),
+      RankingNote({ copy: copyEn, mode: "deterministic", warnings: [] }),
       RankingNote({
         copy: copyEn,
-        lang: "en",
         mode: "deterministic",
         warnings: [UNAVAILABLE_FALLBACK],
       }),
@@ -110,12 +104,5 @@ describe("recommendation mode labels", () => {
       expect(html).not.toContain("guarantee");
       expect(html).not.toContain("allergy");
     }
-  });
-
-  test("legacy note-only shape keeps rendering for the current call site", () => {
-    expect(renderToStaticMarkup(RankingNote({ note: copyEn.recPopularNote }))).toContain(
-      copyEn.recPopularNote,
-    );
-    expect(renderToStaticMarkup(RankingNote({ note: null }))).toBe("");
   });
 });
