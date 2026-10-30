@@ -1,4 +1,6 @@
 import { Link, getRouteApi, useRouter } from "@tanstack/react-router";
+import { X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
 
 import type { ImportJobStatus } from "@/modules/food-discovery/admin.schema";
@@ -275,6 +277,124 @@ export function AdminErrorState({
   );
 }
 
+/**
+ * Shared centered modal for Feast Lab surfaces (import schema guide,
+ * confirm dialogs). One Radix Dialog primitive so every modal shares the
+ * same contract: portaled and truly modal, viewport-covering backdrop with
+ * an inert background plus scroll lock, Escape and backdrop-click close,
+ * automatic focus trap with restore, an always-visible X close button, and
+ * an accessible title/description pair.
+ *
+ * Geometry: centered with `left-1/2 top-1/2` plus translate (never a
+ * hand-rolled `<dialog open>` inside a flex wrapper, which UA stylesheets
+ * left-anchor), `w: calc(100vw - 2rem)` inside viewport padding,
+ * `max-w: 54rem` (~864px) on desktop, `max-h: min(85dvh, 900px)`, a sticky
+ * header, an independently scrollable body (`min-h-0`/`min-w-0`), and an
+ * optional sticky footer. No animation classes, so `prefers-reduced-motion`
+ * needs no override. No page layout shift or horizontal overflow.
+ *
+ * Usage:
+ *
+ * ```tsx
+ * const [open, setOpen] = useState(false);
+ *
+ * <AdminDialog
+ *   open={open}
+ *   onOpenChange={setOpen}
+ *   title={copy.adminImportSchemaGuideTitle}
+ *   description={limitsLine}
+ *   closeLabel={copy.adminImportSchemaClose}
+ * >
+ *   <p>Body scrolls while the header and close button stay put.</p>
+ * </AdminDialog>;
+ * ```
+ *
+ * Focus: Radix traps focus while open. Restore is recorded here because
+ * these dialogs open from plain buttons (controlled `open`, no Radix
+ * Trigger child), and this Radix version only restores to a registered
+ * Trigger — without one, focus fell back to `body` on close.
+ */
+export function AdminDialog({
+  children,
+  closeLabel,
+  description,
+  dismissOnBackdrop,
+  footer,
+  onOpenChange,
+  open,
+  title,
+}: {
+  readonly children: ReactNode;
+  readonly closeLabel: string;
+  readonly description?: string;
+  readonly dismissOnBackdrop?: boolean;
+  readonly footer?: ReactNode;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+  readonly title: string;
+}): ReactNode {
+  const openerRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return () => undefined;
+    }
+
+    openerRef.current = document.activeElement;
+
+    return () => {
+      const opener = openerRef.current;
+
+      openerRef.current = null;
+
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange} modal>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-ink/40" />
+        <Dialog.Content
+          onInteractOutside={(event) => {
+            if (dismissOnBackdrop === false) {
+              event.preventDefault();
+            }
+          }}
+          className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(85dvh,900px)] min-h-0 w-[calc(100vw-2rem)] max-w-[54rem] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-soft bg-white shadow-xl focus:outline-none"
+        >
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-soft px-5 py-4">
+            <div className="min-w-0">
+              <Dialog.Title className="font-display text-2xl tracking-wide">{title}</Dialog.Title>
+              {description === undefined ? null : (
+                <Dialog.Description className="mt-1 text-sm text-muted">
+                  {description}
+                </Dialog.Description>
+              )}
+            </div>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                aria-label={closeLabel}
+                title={closeLabel}
+                className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-white text-ink hover:bg-cream focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:outline-none"
+              >
+                <X aria-hidden="true" className="size-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+          {footer === undefined ? null : (
+            <div className="shrink-0 border-t border-border-soft px-5 py-3">{footer}</div>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function AdminConfirmDialog({
   open,
   title,
@@ -296,90 +416,23 @@ export function AdminConfirmDialog({
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }): ReactNode {
-  const titleId = useId();
-  const descriptionId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const previousFocus = useRef<Element | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return () => undefined;
-    }
-
-    previousFocus.current = document.activeElement;
-    panelRef.current?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        onCancel();
-
-        return;
-      }
-
-      if (event.key !== "Tab") {
-        return;
-      }
-
-      const panel = panelRef.current;
-
-      if (panel === null) {
-        return;
-      }
-
-      const items = panel.querySelectorAll<HTMLButtonElement>("button:not([disabled])");
-      const first = items[0];
-      const last = items[items.length - 1];
-
-      if (first === undefined || last === undefined) {
-        return;
-      }
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      }
-
-      if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-
-      if (previousFocus.current instanceof HTMLElement) {
-        previousFocus.current.focus();
-      }
-    };
-  }, [open, onCancel]);
-
-  if (!open) {
-    return null;
-  }
-
   const confirmClass = dangerous === true ? adminPrimaryButtonClass : adminSecondaryButtonClass;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-      <div
-        ref={panelRef}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        className="w-full max-w-md rounded-2xl border border-border-soft bg-white p-5"
-      >
-        <h2 id={titleId} className="font-display text-2xl tracking-wide">
-          {title}
-        </h2>
-        <p id={descriptionId} className="mt-2 text-sm text-muted">
-          {description}
-        </p>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <AdminGhostButton type="button" data-autofocus onClick={onCancel}>
+    <AdminDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          onCancel();
+        }
+      }}
+      title={title}
+      description={description}
+      closeLabel={cancelLabel}
+      dismissOnBackdrop={!(pending ?? false)}
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <AdminGhostButton type="button" onClick={onCancel}>
             {cancelLabel}
           </AdminGhostButton>
           <button
@@ -392,8 +445,10 @@ export function AdminConfirmDialog({
             {confirmLabel}
           </button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      <p className="text-sm text-muted">{description}</p>
+    </AdminDialog>
   );
 }
 
@@ -429,6 +484,12 @@ export function AdminField({ id, label, error, ...rest }: AdminFieldProps): Reac
 }
 
 /**
+ * @deprecated Prefer the canonical Radix primitive
+ * (`@/components/admin/select` AdminSelect/AdminSelectField) for every
+ * standard single-value select. This native `<select>` stays working for
+ * any remaining consumers but is no longer used by the import wizard.
+ * Do not extend it — report if it becomes fully unused so it can be removed.
+ *
  * One consistent select presentation for every Feast Lab surface (import
  * toolbar, wizard stages). A styled native `<select>` with
  * `appearance-none` plus a single decorative chevron — never a second

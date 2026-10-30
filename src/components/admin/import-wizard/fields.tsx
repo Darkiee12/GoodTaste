@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { AdminSelect } from "@/components/admin/ui";
+import { AdminSelectField } from "@/components/admin/select";
 
 const describedByFor = (
   id: string,
@@ -79,33 +79,47 @@ export function TextField({
 }
 
 interface SelectFieldProps {
+  readonly disabled?: boolean;
+  readonly error?: string | null;
   readonly hint?: string;
   readonly id: string;
   readonly label: string;
   readonly onChange: (value: string) => void;
   readonly options: ReadonlyArray<{ readonly label: string; readonly value: string }>;
+  readonly placeholder?: string;
+  readonly required?: boolean;
   readonly value: string;
 }
 
 export function SelectField({
+  disabled,
+  error,
   hint,
   id,
   label,
   onChange,
   options,
+  placeholder,
+  required,
   value,
 }: SelectFieldProps): ReactNode {
-  // Single shared select presentation (see AdminSelect): one decorative
-  // chevron, identical padding/radius/focus/disabled states everywhere.
+  // Wizard-level composition over the canonical Radix primitive (see
+  // select.tsx AdminSelectField): portaled menu, state-driven chevron,
+  // Escape/outside dismissal, and typeahead come from Radix — this control
+  // is visual only, mutations stay in the callers.
   return (
     <div className="mt-4">
-      <AdminSelect
+      <AdminSelectField
         id={id}
         label={label}
-        hint={hint}
+        description={hint}
+        error={error ?? null}
         value={value}
-        onChange={onChange}
+        onValueChange={onChange}
         options={options}
+        placeholder={placeholder}
+        disabled={disabled}
+        required={required}
       />
     </div>
   );
