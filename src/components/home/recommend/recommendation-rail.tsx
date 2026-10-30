@@ -1,4 +1,10 @@
-import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import {
   carouselWrappedIndex,
@@ -16,6 +22,26 @@ import type { Locale, Messages } from "@/shared/i18n";
  * pick) and every thumbnail loads lazily.
  */
 export const RECOMMENDATION_RAIL_THUMB_SIZES = "(max-width: 640px) 40vw, 160px";
+
+/** Presentation-only preview cap: user-perceived characters, never bytes. */
+const DESCRIPTION_PREVIEW_LIMIT = 100;
+
+/**
+ * Unicode-safe description preview. Code-point aware (`Array.from` never
+ * splits a surrogate pair), so CJK and Vietnamese diacritics survive intact.
+ * Ellipsis only when truncation actually happened. The full description
+ * stays untouched in the featured card and detail page.
+ */
+const toDescriptionPreview = (value: string): string => {
+  const trimmed = value.trim();
+  const points = Array.from(trimmed);
+
+  if (points.length <= DESCRIPTION_PREVIEW_LIMIT) {
+    return trimmed;
+  }
+
+  return `${points.slice(0, DESCRIPTION_PREVIEW_LIMIT).join("")}…`;
+};
 
 export interface RecommendationRailProps {
   /**
@@ -44,6 +70,12 @@ export interface RecommendationRailProps {
  * "see all" link, no ratings or scores. Tapping a thumbnail selects the
  * featured slide; the active thumbnail stays scrolled into view. The rail
  * renders nothing for empty or single-dish result sets.
+ *
+ * Uniform heights: every `li` stretches to the row height, each card is a
+ * full-height flex column with reserved slots (region, two-line title,
+ * one-line native name, two-line description preview), so no card can
+ * drive its own height — no staircase. Prev/next controls render only
+ * when the row actually overflows.
  */
 export function RecommendationRail({
   activeIndex,
@@ -57,6 +89,9 @@ export function RecommendationRail({
   const headingId = useId();
   const reducedMotion = usePrefersReducedMotion();
   const thumbRefs = useRef(new Map<number, HTMLButtonElement>());
+  const scrollerRef = useRef<HTMLUListElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
   const reducedMotionRef = useRef(reducedMotion);
 
   useEffect(() => {
@@ -80,9 +115,55 @@ export function RecommendationRail({
     });
   }, [safeActive, total]);
 
+  // Measure overflow: nav controls exist only while the row scrolls.
+  // Re-measured on scroll, resize, and item-count change.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+
+    if (scroller !== null && total > 1) {
+      const updateNav = (): void => {
+        const max = scroller.scrollWidth - scroller.clientWidth;
+        setCanScrollLeft(scroller.scrollLeft > 4);
+        setCanScrollRight(scroller.scrollLeft < max - 4);
+      };
+
+      updateNav();
+      scroller.addEventListener("scroll", updateNav, { passive: true });
+      window.addEventListener("resize", updateNav);
+
+      const observer =
+        typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateNav);
+
+      observer?.observe(scroller);
+
+      return () => {
+        scroller.removeEventListener("scroll", updateNav);
+        window.removeEventListener("resize", updateNav);
+        observer?.disconnect();
+      };
+    }
+
+    return undefined;
+  }, [total]);
+
   if (total <= 1) {
     return null;
   }
+
+  const canScroll = canScrollLeft || canScrollRight;
+
+  const scrollRail = (direction: 1 | -1): void => {
+    const scroller = scrollerRef.current;
+
+    if (scroller === null) {
+      return;
+    }
+
+    scroller.scrollBy({
+      left: direction * scroller.clientWidth * 0.8,
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
+  };
 
   const handleThumbKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
@@ -102,10 +183,38 @@ export function RecommendationRail({
 
   return (
     <section aria-labelledby={headingId}>
-      <h3 id={headingId} className="text-lg font-extrabold text-ink">
-        {label}
-      </h3>
-      <ul className="mt-3 flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 id={headingId} className="text-lg font-extrabold text-ink">
+          {label}
+        </h3>
+        {canScroll ? (
+          <div className="flex flex-none items-center gap-2">
+            <button
+              type="button"
+              disabled={!canScrollLeft}
+              aria-label={copy.carouselPrev}
+              onClick={() => {
+                scrollRail(-1);
+              }}
+              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-3 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-ink motion-reduce:transition-none"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              disabled={!canScrollRight}
+              aria-label={copy.carouselNext}
+              onClick={() => {
+                scrollRail(1);
+              }}
+              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-3 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-ink motion-reduce:transition-none"
+            >
+              →
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <ul ref={scrollerRef} className="mt-3 flex items-stretch gap-3 overflow-x-auto pb-2">
         {items.map((dish, thumb) => {
           const title = dishCarouselTitle(dish);
           const selected = thumb === safeActive;
@@ -113,7 +222,10 @@ export function RecommendationRail({
           const regions =
             dish.regionNames.length > 0 ? dish.regionNames.slice(0, 2).join(" · ") : null;
 
-          const description = dish.description ?? null;
+          const preview =
+            dish.description === null || dish.description === undefined
+              ? null
+              : toDescriptionPreview(dish.description);
 
           const descriptionLanguage =
             dish.descriptionLanguage !== null &&
@@ -123,7 +235,7 @@ export function RecommendationRail({
               : undefined;
 
           return (
-            <li key={dish.id} className="w-36 flex-none sm:w-40">
+            <li key={dish.id} className="flex w-40 flex-none sm:w-52 lg:w-60">
               <button
                 ref={(node) => {
                   if (node !== null) {
@@ -133,19 +245,19 @@ export function RecommendationRail({
                   }
                 }}
                 type="button"
-                aria-current={selected}
+                aria-current={selected ? true : undefined}
                 aria-label={`${copy.carouselGoTo} ${thumb + 1}: ${title}`}
                 onClick={() => {
                   onSelect(thumb);
                 }}
                 onKeyDown={handleThumbKeyDown}
-                className={`group block w-full cursor-pointer overflow-hidden rounded-2xl border-2 bg-white text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink motion-reduce:transition-none ${
+                className={`group flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-2xl border-2 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink motion-reduce:transition-none ${
                   selected
-                    ? "border-food-orange-strong shadow-[0_8px_20px_rgba(194,65,12,0.18)]"
-                    : "border-border-soft hover:border-food-orange"
+                    ? "border-food-orange-strong bg-cream shadow-[0_8px_20px_rgba(194,65,12,0.22)]"
+                    : "border-border-soft bg-white hover:border-food-orange"
                 }`}
               >
-                <span className="relative block aspect-[4/3] w-full overflow-hidden bg-gradient-to-br from-food-orange-strong via-food-orange to-mango">
+                <span className="relative block aspect-[4/3] w-full shrink-0 overflow-hidden bg-gradient-to-br from-food-orange-strong via-food-orange to-mango">
                   {dish.image === undefined || dish.image === null ? (
                     <span
                       aria-hidden="true"
@@ -163,31 +275,25 @@ export function RecommendationRail({
                     />
                   )}
                 </span>
-                <span className="block min-w-0 p-3">
-                  {regions !== null ? (
-                    <span className="block truncate text-[0.65rem] font-bold tracking-[0.14em] text-food-orange-strong uppercase">
-                      {regions}
-                    </span>
-                  ) : null}
-                  <span className="mt-0.5 block truncate text-sm font-extrabold text-ink">
+                <span className="flex min-w-0 flex-1 flex-col p-3">
+                  <span className="block min-h-4 truncate text-[0.65rem] leading-4 font-bold tracking-[0.14em] text-food-orange-strong uppercase">
+                    {regions ?? ""}
+                  </span>
+                  <span className="mt-0.5 line-clamp-2 block min-h-[2.75em] text-sm leading-snug font-extrabold text-ink">
                     {title}
                   </span>
-                  {dish.nativeName !== undefined ? (
-                    <span
-                      lang={dish.nativeLanguageTag ?? undefined}
-                      className="block truncate text-xs font-semibold text-food-orange-strong"
-                    >
-                      {dish.nativeName}
-                    </span>
-                  ) : null}
-                  {description !== null ? (
-                    <span
-                      lang={descriptionLanguage}
-                      className="mt-1 line-clamp-2 block text-xs leading-relaxed text-muted"
-                    >
-                      {description}
-                    </span>
-                  ) : null}
+                  <span
+                    lang={dish.nativeLanguageTag ?? undefined}
+                    className="mt-0.5 block min-h-4 truncate text-xs font-semibold text-food-orange-strong"
+                  >
+                    {dish.nativeName ?? ""}
+                  </span>
+                  <span
+                    lang={descriptionLanguage}
+                    className="mt-1 line-clamp-2 block min-h-[3.25em] text-xs leading-relaxed text-muted"
+                  >
+                    {preview ?? ""}
+                  </span>
                 </span>
               </button>
             </li>

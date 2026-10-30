@@ -449,7 +449,9 @@ describe("recommendation location (phase 1 geography)", () => {
         copyEn,
         options,
       ),
-    ).toBe(`${copyEn.recWhereNearYou} · ±40 m`);
+    ).toBe(
+      `${copyEn.recWhereUsingLocation} · ${copyEn.recWhereAccuracyNote.replace("{meters}", "40")}`,
+    );
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyEn, options)).toBe(
       copyEn.recWhereAnywhere,
     );
@@ -474,7 +476,7 @@ describe("recommendation location (phase 1 geography)", () => {
         copyVi,
         options,
       ),
-    ).toBe(copyVi.recWhereNearYou);
+    ).toBe(copyVi.recWhereUsingLocation);
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyVi, options)).toBe(
       copyVi.recWhereAnywhere,
     );
@@ -606,6 +608,8 @@ describe("recommendation location (phase 1 geography)", () => {
       "recWhereNearYou",
       "recWhereAnother",
       "recWhereAnywhere",
+      "recWhereUsingLocation",
+      "recWhereAccuracyNote",
       "recWhereCountryLabel",
       "recWhereChoose",
       "recWhereLocating",

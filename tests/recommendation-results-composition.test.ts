@@ -128,7 +128,7 @@ describe("results summary chips", () => {
       }),
     );
 
-    expect(html).toContain(copyEn.recWhereNearYou);
+    expect(html).toContain(copyEn.recWhereUsingLocation);
     expect(html).toContain("25 m");
     expect(html).not.toContain("Hanoi");
   });

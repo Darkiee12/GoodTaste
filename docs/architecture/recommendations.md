@@ -6,6 +6,45 @@ plus a minimal public dish
 page (`/dishes/$dishId`, slug or numeric id) linked from result cards.
 The database owns facts; Muse only orders already-eligible candidates.
 
+## Homepage discovery carousel (implemented)
+
+The `/#discover` section shows published food immediately, country-first:
+
+- Visitor country comes only from the trusted boundary
+  (`getQuizRegionFn` → `getTrustedVisitorCountry`: Cloudflare
+  `cf-ipcountry` honored behind a verified trusted proxy/CDN, otherwise
+  only `DEV_VISITOR_COUNTRY` applies). No other IP-geolocation provider,
+  no untrusted header path. All headers missing → worldwide fallback.
+- One exclusive scope per request (`carouselQuerySchema` + the
+  `CarouselScope` ADT: `Nearby{lat, lon, country?}` | `Country{country}` |
+  `Worldwide{}`): worldwide never carries coordinates or a country, a
+  country request never retains previous precise coordinates. Ambiguous
+  shapes fail closed with `InvalidSearchFilter`.
+- One coherent fallback chain in `DishService.getLocalCarousel`
+  (nearby → country top-up → country → worldwide → honest empty; country
+  → worldwide → honest empty). A sparse nearby pool (< limit) keeps its
+  dishes first and is topped up with distinct country dishes
+  (`supplemented: true`, served scope stays `nearby`); unknown
+  well-formed country codes stay typed `PlaceNotFound` at the service and
+  the server function serves worldwide instead. The response carries
+  `requestedScope`, `scope`, `fallback`, `fallbackReason`, and
+  `supplemented` — the client words every label from the served scope,
+  never the requested one.
+- A dish linked to a child locality (e.g. Hanoi under Vietnam) is eligible
+  for country browsing: country selection expands the place subtree
+  downward (country → descendants), never upward. Association reads as
+  "associated with", never as proof a restaurant serves it nearby.
+- Consumer copy rules (do not reintroduce): one compact location control
+  (`{country} · Change location`) with a focused selector (precise,
+  destination, worldwide); never show "network region", "IP-derived",
+  "precise fix", "Cloudflare", raw coordinates, or a city in a heading
+  the query did not run. Headings and subtitles follow the served scope
+  (`discoveryHeadingFor` / `discoverySubtitleFor`); supplemented pools
+  read as regional with the country named. The carousel footprint never
+  collapses to a paragraph: loading skeleton, real cards, error-with-retry,
+  or the illustrated catalog-empty panel. Geolocation is explicit-only
+  (tapped, never auto-requested) and denial keeps existing content.
+
 ## Provider selection (explicit, validated)
 
 `RECOMMENDATION_PROVIDER` (`deterministic` default, or `muse`) plus

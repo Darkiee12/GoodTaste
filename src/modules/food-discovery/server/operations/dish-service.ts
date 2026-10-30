@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 
 import type { DishProfile, DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import {
@@ -157,6 +157,125 @@ export interface LocalCarouselInput {
   readonly seed?: number | undefined;
 }
 
+/**
+ * Discriminated carousel scope: exactly one variant per call. The flat
+ * {@link LocalCarouselInput} wire shape can hold every field at once, so
+ * {@link resolveCarouselScope} normalizes it here — ambiguous combinations
+ * (worldwide with coordinates, partial coordinates) fail closed with
+ * {@link InvalidSearchFilter} instead of silently running the precise
+ * search. Coordinates never leave the Nearby variant: logs, cache keys, and
+ * the response only ever see the coarse scope names below.
+ */
+export type CarouselScope = Data.TaggedEnum<{
+  Nearby: {
+    readonly latitude: number;
+    readonly longitude: number;
+    /** Country fallback pool when the precise bands are empty; null when absent. */
+    readonly country: string | null;
+  };
+  Country: { readonly country: string };
+  Worldwide: {};
+}>;
+
+export const CarouselScope = Data.taggedEnum<CarouselScope>();
+
+/** Coarse scope names for logs, cache keys, and the requested/served labels. */
+export type CarouselScopeName = "nearby" | "country" | "worldwide";
+
+/** Which exhausted scopes a fallback skipped; absent when nothing was skipped. */
+export type CarouselFallbackReason =
+  | "nearby-empty"
+  | "country-empty"
+  | "nearby-empty-country-empty";
+
+export const carouselScopeName = (scope: CarouselScope): CarouselScopeName =>
+  CarouselScope.$match(scope, {
+    Country: (): CarouselScopeName => "country",
+    Nearby: (): CarouselScopeName => "nearby",
+    Worldwide: (): CarouselScopeName => "worldwide",
+  });
+
+const COUNTRY_PATTERN = /^[A-Z]{2}(-[A-Z0-9]{1,3})?$/;
+
+/**
+ * Normalize the flat carousel input to exactly one scope. Returns null for
+ * the legacy no-scope call, which the operation serves as an honest empty
+ * outcome labeled worldwide (no query runs). Every other shape resolves to
+ * one variant; ambiguous or malformed shapes fail closed so no query ever
+ * runs with a scope the caller did not actually request.
+ */
+export const resolveCarouselScope = (
+  input: Pick<LocalCarouselInput, "country" | "latitude" | "longitude" | "worldwide">,
+): Effect.Effect<CarouselScope | null, InvalidSearchFilter> => {
+  const latitude = input.latitude;
+  const longitude = input.longitude;
+  const country = input.country;
+
+  if (input.worldwide === true) {
+    if (latitude !== undefined || longitude !== undefined || country !== undefined) {
+      return Effect.fail(
+        new InvalidSearchFilter({
+          reason: "worldwide must not carry coordinates or country; send one scope only",
+        }),
+      );
+    }
+
+    return Effect.succeed(CarouselScope.Worldwide());
+  }
+
+  if (latitude !== undefined || longitude !== undefined) {
+    if (latitude === undefined || longitude === undefined) {
+      return Effect.fail(
+        new InvalidSearchFilter({ reason: "latitude and longitude must be sent together" }),
+      );
+    }
+
+    if (
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return Effect.fail(
+        new InvalidSearchFilter({
+          reason: "latitude must be between -90 and 90 and longitude between -180 and 180",
+        }),
+      );
+    }
+
+    if (country !== undefined && !COUNTRY_PATTERN.test(country)) {
+      return Effect.fail(new InvalidSearchFilter({ reason: "country must be an ISO 3166 code" }));
+    }
+
+    return Effect.succeed(CarouselScope.Nearby({ country: country ?? null, latitude, longitude }));
+  }
+
+  if (country !== undefined) {
+    if (!COUNTRY_PATTERN.test(country)) {
+      return Effect.fail(new InvalidSearchFilter({ reason: "country must be an ISO 3166 code" }));
+    }
+
+    return Effect.succeed(CarouselScope.Country({ country }));
+  }
+
+  return Effect.succeed(null);
+};
+
+/** One scope attempt: the dish ids found plus which scope actually served them. */
+interface CarouselSelection {
+  readonly ids: ReadonlyArray<bigint>;
+  readonly servedScope: CarouselScopeName;
+  readonly fallbackReason: CarouselFallbackReason | null;
+  /**
+   * True when a sparse nearby pool was topped up with distinct
+   * country-associated dishes (nearby dishes first). The client labels this
+   * regional — never "near you" — while keeping the nearby cards up front.
+   */
+  readonly supplemented: boolean;
+}
+
 export interface CarouselIngredient {
   readonly name: string | undefined;
   readonly role: string;
@@ -188,12 +307,32 @@ export interface CarouselCard {
 export interface LocalCarouselOutput {
   readonly items: ReadonlyArray<CarouselCard>;
   /**
-   * Scope actually served — the honest label for the cards. Precise requests
-   * with no dishes in range fall back to the country scope when a country is
-   * known (never relabeled as nearby); the client words the scope line from
-   * this, not from what it asked for.
+   * Scope actually served — the honest label for the cards. A precise
+   * request with no dishes in range falls back to the country pool when a
+   * hint is known, then to the worldwide pool; a known-but-empty country
+   * pool falls back to worldwide. The client words the scope line from this,
+   * never from what it asked for.
    */
-  readonly scope: "nearby" | "country" | "worldwide";
+  readonly scope: CarouselScopeName;
+  /**
+   * Scope the caller actually requested. Differs from {@link scope} only
+   * when {@link fallback} is true, so the UI never mislabels fallback cards
+   * as local coverage.
+   */
+  readonly requestedScope: CarouselScopeName;
+  /** True when the served scope differs from the requested scope. */
+  readonly fallback: boolean;
+  /**
+   * Which exhausted scopes the fallback skipped. Absent when no fallback
+   * occurred. Never carries restaurant or venue claims.
+   */
+  readonly fallbackReason?: CarouselFallbackReason | undefined;
+  /**
+   * True when a sparse nearby pool was topped up with distinct
+   * country-associated dishes (nearby dishes first). The UI labels this
+   * regional — never "near you" — while keeping the nearby cards up front.
+   */
+  readonly supplemented: boolean;
 }
 
 export class DishService extends Context.Service<
@@ -218,9 +357,14 @@ export class DishService extends Context.Service<
     /**
      * Batch carousel projection for the homepage local discovery: one
      * round of batched reads per relation (no per-card fetch), resolving
-     * dishes by visitor coordinate (nearest associated places first) or by
-     * country filter. Coordinates never invent dishes — every card is a
-     * real published catalog association.
+     * dishes by exactly one scope — visitor coordinates (nearest real
+     * associations first, with the country hint as fallback pool), a
+     * country filter, or the worldwide pool. Coordinates never invent
+     * dishes — every card is a real published catalog association.
+     * Fallback runs inside this one operation (nearby -> country ->
+     * worldwide -> honest empty; country -> worldwide -> honest empty);
+     * the response carries the requested scope, the served scope, and
+     * whether a fallback occurred so the client never mislabels cards.
      */
     readonly getLocalCarousel: (
       input: LocalCarouselInput,
@@ -979,11 +1123,26 @@ export const DishServiceLive = Layer.effect(
         const locale = yield* checkLocale(input.locale ?? "en");
         const limit = clampLimit(input.limit, 5);
         const seed = input.seed ?? 0;
-        let scope: LocalCarouselOutput["scope"] = "worldwide";
-        let ordered: Array<bigint> = [];
+        const scope = yield* resolveCarouselScope(input);
+
+        if (scope === null) {
+          // Legacy no-scope call: honest empty labeled worldwide, no query
+          // runs. The wire schema requires exactly one scope; this path stays
+          // for existing service-level callers.
+          return {
+            fallback: false,
+            items: [],
+            requestedScope: "worldwide",
+            scope: "worldwide",
+            supplemented: false,
+          };
+        }
+
+        const requestedScope = carouselScopeName(scope);
 
         const selectCountry = (
           country: string,
+          fetchLimit: number = limit,
         ): Effect.Effect<ReadonlyArray<bigint>, DishServiceError, Database> =>
           Effect.gen(function* () {
             if (!/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/.test(country)) {
@@ -1000,7 +1159,7 @@ export const DishServiceLive = Layer.effect(
 
             const rows = yield* runQuery("dish/carousel-country", (sql) =>
               dishCarouselCountry.run(sql, {
-                limit,
+                limit: fetchLimit,
                 place_id: place.id,
                 seed,
               }),
@@ -1009,77 +1168,204 @@ export const DishServiceLive = Layer.effect(
             return rows.map((row) => row.id);
           });
 
-        if (input.latitude !== undefined || input.longitude !== undefined) {
-          const latitude = input.latitude;
-          const longitude = input.longitude;
-
-          if (
-            latitude === undefined ||
-            longitude === undefined ||
-            !Number.isFinite(latitude) ||
-            latitude < -90 ||
-            latitude > 90 ||
-            !Number.isFinite(longitude) ||
-            longitude < -180 ||
-            longitude > 180
-          ) {
-            return yield* new InvalidSearchFilter({
-              reason: "latitude must be between -90 and 90 and longitude between -180 and 180",
-            });
-          }
-
-          // Bounded progressive selection over locality-kind places only:
-          // metro first, then regional, then the documented cap. The first
-          // non-empty band wins, so ordering only ever rotates within the
-          // tightest band that actually has dishes. An empty cap resolves
-          // to no rows — never a silent worldwide scan, never a full-table
-          // in-memory haversine over every catalog coordinate.
-          for (const radiusM of nearbyRadiiM()) {
-            const rows = yield* runQuery("dish/carousel-nearby", (sql) =>
-              dishCarouselNearby.run(sql, {
-                latitude,
-                limit,
-                longitude,
-                radius_m: radiusM,
-                seed,
-              }),
+        const runWorldwideIds = (): Effect.Effect<Array<bigint>, DatabaseError, Database> =>
+          Effect.gen(function* () {
+            const rows = yield* runQuery("dish/carousel-worldwide", (sql) =>
+              dishCarouselWorldwide.run(sql, { limit, seed }),
             );
 
-            if (rows.length > 0) {
-              scope = "nearby";
-              ordered = rows.map((row) => row.id);
-              break;
-            }
-          }
+            return rows.map((row) => row.id);
+          });
 
-          // Labeled broader fallback: country-associated dishes when a
-          // country is known, served as country scope — never relabeled as
-          // "near you". Without a country this stays an honest nearby empty
-          // and the client offers the explicit worldwide browse.
-          if (ordered.length === 0) {
-            if (input.country !== undefined) {
-              ordered = [...(yield* selectCountry(input.country))];
-              scope = "country";
-            } else {
-              scope = "nearby";
+        const runNearbyIds = (
+          latitude: number,
+          longitude: number,
+        ): Effect.Effect<Array<bigint>, DatabaseError, Database> =>
+          Effect.gen(function* () {
+            // Bounded progressive selection over locality-kind places only:
+            // metro first, then regional, then the documented cap. The first
+            // non-empty band wins at any size — sparse nearby dishes (one or
+            // two) are served, never hidden — and an empty cap resolves to no
+            // rows for the fallback below, never a silent worldwide scan or a
+            // full-table pass over every catalog coordinate.
+            for (const radiusM of nearbyRadiiM()) {
+              const rows = yield* runQuery("dish/carousel-nearby", (sql) =>
+                dishCarouselNearby.run(sql, {
+                  latitude,
+                  limit,
+                  longitude,
+                  radius_m: radiusM,
+                  seed,
+                }),
+              );
+
+              if (rows.length > 0) {
+                return rows.map((row) => row.id);
+              }
             }
-          }
-        } else if (input.country !== undefined) {
-          ordered = [...(yield* selectCountry(input.country))];
-          scope = "country";
-        } else if (input.worldwide === true) {
-          const rows = yield* runQuery("dish/carousel-worldwide", (sql) =>
-            dishCarouselWorldwide.run(sql, { limit, seed }),
+
+            const empty: Array<bigint> = [];
+
+            return empty;
+          });
+
+        // Country-hint resolution for the nearby fallback: an unknown hint is
+        // not a request failure (coordinates were the requested scope), so it
+        // resolves to an empty pool and the chain continues to worldwide.
+        // Real database failures still propagate as typed failures.
+        const runCountryHintIds = (
+          country: string,
+          fetchLimit: number = limit,
+        ): Effect.Effect<ReadonlyArray<bigint>, DishServiceError, Database> =>
+          Effect.catchTag(selectCountry(country, fetchLimit), "PlaceNotFound", () =>
+            Effect.succeed<ReadonlyArray<bigint>>([]),
           );
 
-          ordered = rows.map((row) => row.id);
-          scope = "worldwide";
-        } else {
-          return { items: [], scope: "worldwide" };
-        }
+        // One coherent fallback chain: nearby (+ country top-up when sparse)
+        // -> country -> worldwide -> honest empty; country -> worldwide ->
+        // honest empty; worldwide runs direct with zero constraints. Empty
+        // pools fall through; only real database failures reject.
+        const selection: CarouselSelection = yield* CarouselScope.$match(scope, {
+          Country: ({ country }) =>
+            Effect.gen(function* () {
+              const countryIds = yield* selectCountry(country);
+
+              if (countryIds.length > 0) {
+                const served: CarouselSelection = {
+                  fallbackReason: null,
+                  ids: countryIds,
+                  servedScope: "country",
+                  supplemented: false,
+                };
+
+                return served;
+              }
+
+              const worldwideIds = yield* runWorldwideIds();
+
+              const fallback: CarouselSelection = {
+                fallbackReason: "country-empty",
+                ids: worldwideIds,
+                servedScope: "worldwide",
+                supplemented: false,
+              };
+
+              return fallback;
+            }),
+          Nearby: ({ country, latitude, longitude }) =>
+            Effect.gen(function* () {
+              const nearbyIds = yield* runNearbyIds(latitude, longitude);
+
+              if (nearbyIds.length > 0) {
+                // Sparse locality pool: keep the eligible nearby dishes
+                // first, then top up with distinct country-associated
+                // dishes to the requested limit. No duplicates; geographic
+                // relevance keeps its order (never a bare "no dishes"
+                // panel just because the radius held few matches).
+                if (nearbyIds.length < limit && country !== null) {
+                  const countryIds = yield* runCountryHintIds(country, limit + nearbyIds.length);
+
+                  const seen = new Set(nearbyIds.map((id) => id.toString()));
+
+                  const extra = countryIds
+                    .filter((id) => !seen.has(id.toString()))
+                    .slice(0, limit - nearbyIds.length);
+
+                  if (extra.length > 0) {
+                    const supplemented: CarouselSelection = {
+                      fallbackReason: null,
+                      ids: [...nearbyIds, ...extra],
+                      servedScope: "nearby",
+                      supplemented: true,
+                    };
+
+                    return supplemented;
+                  }
+                }
+
+                const served: CarouselSelection = {
+                  fallbackReason: null,
+                  ids: nearbyIds,
+                  servedScope: "nearby",
+                  supplemented: false,
+                };
+
+                return served;
+              }
+
+              if (country !== null) {
+                const countryIds = yield* runCountryHintIds(country);
+
+                if (countryIds.length > 0) {
+                  const countryFallback: CarouselSelection = {
+                    fallbackReason: "nearby-empty",
+                    ids: countryIds,
+                    servedScope: "country",
+                    supplemented: false,
+                  };
+
+                  return countryFallback;
+                }
+
+                const worldwideIds = yield* runWorldwideIds();
+
+                const worldwideFallback: CarouselSelection = {
+                  fallbackReason: "nearby-empty-country-empty",
+                  ids: worldwideIds,
+                  servedScope: "worldwide",
+                  supplemented: false,
+                };
+
+                return worldwideFallback;
+              }
+
+              const worldwideIds = yield* runWorldwideIds();
+
+              const directFallback: CarouselSelection = {
+                fallbackReason: "nearby-empty",
+                ids: worldwideIds,
+                servedScope: "worldwide",
+                supplemented: false,
+              };
+
+              return directFallback;
+            }),
+          Worldwide: () =>
+            Effect.gen(function* () {
+              const worldwideIds = yield* runWorldwideIds();
+
+              const served: CarouselSelection = {
+                fallbackReason: null,
+                ids: worldwideIds,
+                servedScope: "worldwide",
+                supplemented: false,
+              };
+
+              return served;
+            }),
+        });
+
+        const ordered: Array<bigint> = [...selection.ids];
 
         if (ordered.length === 0) {
-          return { items: [], scope };
+          if (selection.fallbackReason === null) {
+            return {
+              fallback: false,
+              items: [],
+              requestedScope,
+              scope: selection.servedScope,
+              supplemented: false,
+            };
+          }
+
+          return {
+            fallback: true,
+            fallbackReason: selection.fallbackReason,
+            items: [],
+            requestedScope,
+            scope: selection.servedScope,
+            supplemented: false,
+          };
         }
 
         const records = yield* recordsByIds(ordered);
@@ -1189,7 +1475,24 @@ export const DishServiceLive = Layer.effect(
           });
         }
 
-        return { items, scope };
+        if (selection.fallbackReason === null) {
+          return {
+            fallback: false,
+            items,
+            requestedScope,
+            scope: selection.servedScope,
+            supplemented: selection.supplemented,
+          };
+        }
+
+        return {
+          fallback: true,
+          fallbackReason: selection.fallbackReason,
+          items,
+          requestedScope,
+          scope: selection.servedScope,
+          supplemented: selection.supplemented,
+        };
       });
 
     const getRelated = (

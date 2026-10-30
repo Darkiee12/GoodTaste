@@ -45,24 +45,68 @@ export const dishSearchQuerySchema = z.object({
 
 export type DishSearchQuery = z.infer<typeof dishSearchQuerySchema>;
 
-export const carouselQuerySchema = z.object({
-  latitude: z.number().min(-90).max(90).optional(),
-  longitude: z.number().min(-180).max(180).optional(),
-  country: z
-    .string()
-    .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
-    .optional(),
-  worldwide: z.boolean().optional(),
-  locale: localeSchema,
-  limit: z.coerce.number().int().min(1).max(20).default(5),
-  /**
-   * Rotation seed for the carousel selection (Agent B). Same seed + same
-   * scope renders the same set (session-stable); incrementing it renders
-   * "another set". Additive optional field — older clients omit it and get
-   * the stable default order.
-   */
-  seed: z.coerce.number().int().min(0).max(2147483647).default(0),
-});
+export const carouselQuerySchema = z
+  .object({
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    country: z
+      .string()
+      .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
+      .optional(),
+    worldwide: z.boolean().optional(),
+    locale: localeSchema,
+    limit: z.coerce.number().int().min(1).max(20).default(5),
+    /**
+     * Rotation seed for the carousel selection (Agent B). Same seed + same
+     * scope renders the same set (session-stable); incrementing it renders
+     * "another set". Additive optional field — older clients omit it and get
+     * the stable default order.
+     */
+    seed: z.coerce.number().int().min(0).max(2147483647).default(0),
+  })
+  .superRefine((value, context) => {
+    const hasLatitude = value.latitude !== undefined;
+    const hasLongitude = value.longitude !== undefined;
+    const hasCountry = value.country !== undefined;
+    const worldwide = value.worldwide === true;
+
+    // Exactly one scope per call: a worldwide request must never carry
+    // coordinates or a country, otherwise the service could silently run a
+    // precise search for it.
+    if (worldwide) {
+      if (hasLatitude || hasLongitude || hasCountry) {
+        context.addIssue({
+          code: "custom",
+          message: "worldwide must not carry coordinates or country; send one scope only",
+          path: ["worldwide"],
+        });
+      }
+
+      return;
+    }
+
+    if (hasLatitude !== hasLongitude) {
+      context.addIssue({
+        code: "custom",
+        message: "latitude and longitude must be sent together",
+        path: [hasLatitude ? "longitude" : "latitude"],
+      });
+
+      return;
+    }
+
+    // Nearby coordinates may carry a country hint (fallback pool when the
+    // precise bands are empty); country alone is its own scope.
+    if ((hasLatitude && hasLongitude) || hasCountry) {
+      return;
+    }
+
+    context.addIssue({
+      code: "custom",
+      message: "send exactly one scope: country, nearby coordinates, or worldwide",
+      path: ["worldwide"],
+    });
+  });
 
 export type CarouselQuery = z.infer<typeof carouselQuerySchema>;
 

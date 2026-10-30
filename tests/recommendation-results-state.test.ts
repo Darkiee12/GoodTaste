@@ -12,7 +12,6 @@ import {
   buildSurprisePayload,
   draftLocation,
   EMPTY_DRAFT,
-  formatAccuracyM,
   scopeLabelFor,
   toTransportPayload,
   type QuizDraft,
@@ -127,7 +126,7 @@ describe("result scope labels stay honest", () => {
     ).toBe("Vietnam");
   });
 
-  test("precise fixes show nearby plus accuracy", () => {
+  test("precise fixes show usage plus accuracy, never food-within-meters", () => {
     expect(
       scopeLabelFor(
         {
@@ -136,7 +135,9 @@ describe("result scope labels stay honest", () => {
         copyEn,
         countryOptions,
       ),
-    ).toBe(`${copyEn.recWhereNearYou} · ${formatAccuracyM(25)}`);
+    ).toBe(
+      `${copyEn.recWhereUsingLocation} · ${copyEn.recWhereAccuracyNote.replace("{meters}", "25")}`,
+    );
   });
 
   test("worldwide and missing scopes never invent a place", () => {

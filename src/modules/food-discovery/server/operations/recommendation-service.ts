@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Match, Option } from "effect";
 
 import type { RecommendationLocation } from "@/modules/food-discovery/food.schema";
 import type {
@@ -38,6 +38,8 @@ import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/
 import dishRecommendationCandidates from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates.sql";
 import ingredientNamesByIngredientIds from "@/modules/food-discovery/server/repository/sql/ingredient-names-by-ingredient-ids.sql";
 import placeNamesByPlaceIds from "@/modules/food-discovery/server/repository/sql/place-names-by-place-ids.sql";
+import { Actor } from "@/server/auth/actor";
+import { CurrentActor } from "@/server/auth/current-actor";
 import type { Database } from "@/server/database/client";
 import type { DatabaseError } from "@/server/database/query";
 import { runQuery } from "@/server/database/query";
@@ -62,16 +64,39 @@ export type RecommendationOutcome = Data.TaggedEnum<{
   ReadyMuse: {
     readonly dishes: ReadonlyArray<DishSummary>;
     readonly warnings: ReadonlyArray<string>;
+    readonly ranking: RankingProvenance;
   };
   ReadyDeterministic: {
     readonly dishes: ReadonlyArray<DishSummary>;
     readonly warnings: ReadonlyArray<string>;
+    readonly ranking: RankingProvenance;
   };
   Uncertain: { readonly reasons: ReadonlyArray<string> };
   Empty: { readonly reasons: ReadonlyArray<string> };
 }>;
 
 export const RecommendationOutcome = Data.taggedEnum<RecommendationOutcome>();
+
+/**
+ * Structured ranking provenance for the wire envelope. Replaces
+ * English-sniffing on the client ("AI ranking was..."): the frontend
+ * branches on `ranking._tag` instead of warning substrings.
+ *
+ * - LiveMuse: a signed-in member request ranked by Muse.
+ * - DeterministicCatalog: catalog order with no provider attempt (guests,
+ *   unconfigured provider, surprise slices, and the zero-dish outcomes).
+ * - DegradedMuse: a member request attempted Muse and fell back, with the
+ *   typed cause (rate-limited | transient | invalid-output).
+ */
+export type DegradedCause = "rate-limited" | "transient" | "invalid-output";
+
+export type RankingProvenance = Data.TaggedEnum<{
+  LiveMuse: {};
+  DeterministicCatalog: {};
+  DegradedMuse: { readonly cause: DegradedCause };
+}>;
+
+export const RankingProvenance = Data.taggedEnum<RankingProvenance>();
 
 /** Typed operator error: muse was requested but key/model/baseUrl is unusable. */
 export class RecommendationMisconfigured extends Data.TaggedError("RecommendationMisconfigured")<{
@@ -81,7 +106,11 @@ export class RecommendationMisconfigured extends Data.TaggedError("Recommendatio
 /** Intermediate provider result before hydration into dish summaries. */
 export type MuseRankResult = Data.TaggedEnum<{
   Ranked: { readonly ids: ReadonlyArray<string> };
-  Degraded: { readonly ids: ReadonlyArray<string>; readonly warning: string };
+  Degraded: {
+    readonly ids: ReadonlyArray<string>;
+    readonly warning: string;
+    readonly cause: DegradedCause;
+  };
 }>;
 
 export const MuseRankResult = Data.taggedEnum<MuseRankResult>();
@@ -89,7 +118,9 @@ export const MuseRankResult = Data.taggedEnum<MuseRankResult>();
 /**
  * Client-safe wire envelope. The transport returns HTTP 200 with exactly this
  * shape for every outcome; provider/auth/config failures reject instead and
- * surface as HTTP 500. Asserted per-variant in
+ * surface as HTTP 500. `mode`/`warnings` stay for wire compatibility while
+ * `ranking` carries the structured provenance (the single branching source
+ * for the frontend). Asserted per-variant in
  * tests/integration/recommendation.test.ts.
  */
 export interface RecommendationWireOutcome {
@@ -97,34 +128,41 @@ export interface RecommendationWireOutcome {
   readonly dishes: Array<DishSummary>;
   readonly warnings: Array<string>;
   readonly reasons: Array<string>;
+  readonly ranking: RankingProvenance;
 }
 
 /** Exhaustive outcome-to-wire mapping; the transport handler delegates here. */
 export const toWireOutcome = (outcome: RecommendationOutcome): RecommendationWireOutcome =>
   RecommendationOutcome.$match(outcome, {
-    ReadyMuse: ({ dishes, warnings }) => ({
+    ReadyMuse: ({ dishes, warnings, ranking }) => ({
       mode: "ai" as const,
       dishes: [...dishes],
       warnings: [...warnings],
       reasons: [],
+      ranking,
     }),
-    ReadyDeterministic: ({ dishes, warnings }) => ({
+    ReadyDeterministic: ({ dishes, warnings, ranking }) => ({
       mode: "deterministic" as const,
       dishes: [...dishes],
       warnings: [...warnings],
       reasons: [],
+      ranking,
     }),
+    // No ranking was performed for zero-dish outcomes; the catalog basis is
+    // the honest provenance (no AI attempt, nothing to degrade from).
     Uncertain: ({ reasons }) => ({
       mode: "uncertain" as const,
       dishes: [],
       warnings: [],
       reasons: [...reasons],
+      ranking: RankingProvenance.DeterministicCatalog(),
     }),
     Empty: ({ reasons }) => ({
       mode: "empty" as const,
       dishes: [],
       warnings: [],
       reasons: [...reasons],
+      ranking: RankingProvenance.DeterministicCatalog(),
     }),
   });
 
@@ -664,7 +702,19 @@ const failLoudly = (
 // Retry-After is stripped, so pretending to return 429 would lie.
 // Degrade to deterministic order with a rate-limit warning instead.
 // 5xx, timeouts, network failures, and invalid structured output
-// degrade the same way with the generic unavailable warning.
+// degrade the same way with the generic unavailable warning. The warning
+// text stays the single branding source downstream; the typed `cause`
+// travels alongside so the wire envelope never needs English-sniffing.
+const causeForDegraded = (
+  error: MetaRateLimited | MetaRequestError | MetaInvalidOutput,
+): DegradedCause =>
+  Match.value(error).pipe(
+    Match.tag("MetaRateLimited", () => "rate-limited" as const),
+    Match.tag("MetaRequestError", () => "transient" as const),
+    Match.tag("MetaInvalidOutput", () => "invalid-output" as const),
+    Match.exhaustive,
+  );
+
 const degradeToDeterministic = (
   config: MuseRankingConfig,
   deterministicIds: ReadonlyArray<string>,
@@ -682,7 +732,15 @@ const degradeToDeterministic = (
           failure: error._tag,
           fallbackReason: warning,
         }),
-        Effect.andThen(Effect.succeed(MuseRankResult.Degraded({ ids: deterministicIds, warning }))),
+        Effect.andThen(
+          Effect.succeed(
+            MuseRankResult.Degraded({
+              ids: deterministicIds,
+              warning,
+              cause: causeForDegraded(error),
+            }),
+          ),
+        ),
       ),
   });
 
@@ -733,6 +791,13 @@ interface RankingLimits {
 // size matrix is unit-testable without a database.
 const SURPRISE_NOTE = "Surprise variety applied: showing a different slice of the eligible pool.";
 
+// Guests never reach the provider even when one is configured: the honest
+// note names catalog order and the member-only upgrade without reusing the
+// "AI ranking was..." degraded marker (that prefix is reserved for a failed
+// member attempt the frontend must explain differently).
+const GUEST_DETERMINISTIC_NOTE =
+  "Deterministic mode: showing catalog order. Sign in for AI-ranked picks.";
+
 /** Accuracy above this is too coarse to call nearby; the client warns and the server widens honestly. */
 const POOR_ACCURACY_M = 1_000;
 
@@ -742,6 +807,7 @@ const finishRecommendations = (
   warnings: ReadonlyArray<string>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
+  guestGated: boolean,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
   Effect.gen(function* () {
     const deterministicTop = windowForSurprise(sortedAll, input.surpriseSeed, limits.outputLimit);
@@ -766,14 +832,26 @@ const finishRecommendations = (
         input.locale,
       );
 
-      const surpriseWarnings =
-        input.surpriseSeed === 0
-          ? [...warnings, ...(muse === null ? [AI_NOT_CONFIGURED_NOTE] : [])]
-          : [...warnings, SURPRISE_NOTE];
+      if (input.surpriseSeed > 0) {
+        return RecommendationOutcome.ReadyDeterministic({
+          dishes,
+          warnings: [...warnings, SURPRISE_NOTE],
+          ranking: RankingProvenance.DeterministicCatalog(),
+        });
+      }
+
+      if (guestGated) {
+        return RecommendationOutcome.ReadyDeterministic({
+          dishes,
+          warnings: [...warnings, GUEST_DETERMINISTIC_NOTE],
+          ranking: RankingProvenance.DeterministicCatalog(),
+        });
+      }
 
       return RecommendationOutcome.ReadyDeterministic({
         dishes,
-        warnings: surpriseWarnings,
+        warnings: [...warnings, AI_NOT_CONFIGURED_NOTE],
+        ranking: RankingProvenance.DeterministicCatalog(),
       });
     }
 
@@ -809,11 +887,17 @@ const finishRecommendations = (
     );
 
     return MuseRankResult.$match(ranked, {
-      Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: [...warnings] }),
-      Degraded: ({ warning }) =>
+      Ranked: () =>
+        RecommendationOutcome.ReadyMuse({
+          dishes,
+          warnings: [...warnings],
+          ranking: RankingProvenance.LiveMuse(),
+        }),
+      Degraded: ({ warning, cause }) =>
         RecommendationOutcome.ReadyDeterministic({
           dishes,
           warnings: [...warnings, warning],
+          ranking: RankingProvenance.DegradedMuse({ cause }),
         }),
     });
   });
@@ -824,6 +908,7 @@ const serveCountryCandidates = (
   excluded: ReadonlySet<bigint>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
+  guestGated: boolean,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
   Effect.gen(function* () {
     const candidates = yield* runQuery("dish/recommendation-candidates", (sql) =>
@@ -849,6 +934,7 @@ const serveCountryCandidates = (
       warnings,
       limits,
       muse,
+      guestGated,
     );
   });
 
@@ -858,6 +944,7 @@ const serveRecommendations = (
   excluded: ReadonlySet<bigint>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
+  guestGated: boolean,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> => {
   const scope = resolveLocationScope(input);
 
@@ -893,10 +980,17 @@ const serveRecommendations = (
               ]
             : warnings;
 
-        return yield* finishRecommendations(input, sortedAll, scopedWarnings, limits, muse);
+        return yield* finishRecommendations(
+          input,
+          sortedAll,
+          scopedWarnings,
+          limits,
+          muse,
+          guestGated,
+        );
       }),
-    Country: () => serveCountryCandidates(input, warnings, excluded, limits, muse),
-    Worldwide: () => serveCountryCandidates(input, warnings, excluded, limits, muse),
+    Country: () => serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated),
+    Worldwide: () => serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated),
   });
 };
 
@@ -971,14 +1065,36 @@ export const RecommendationServiceLive = Layer.effect(
 
         const ranking = resolveRankingConfig(serverEnv());
 
+        // Member-only Muse: guests always take the deterministic path even
+        // when a provider is configured, so unauthenticated traffic can never
+        // spend model budget. A missing CurrentActor (direct service use
+        // without a request scope) is fail-closed to guest. Misconfiguration
+        // stays loud for every actor: an operator error must surface, never
+        // hide behind deterministic order.
+        const current = yield* Effect.serviceOption(CurrentActor);
+
+        const isGuest =
+          Option.isNone(current) ||
+          Actor.$match(current.value, {
+            Guest: () => true,
+            Member: () => false,
+          });
+
         return yield* RankingConfig.$match(ranking, {
           Misconfigured: ({ reason }) =>
             Effect.logError("Recommendation ranking misconfigured").pipe(
               Effect.annotateLogs({ backend: "muse", reason }),
               Effect.andThen(Effect.fail(new RecommendationMisconfigured({ reason }))),
             ),
-          Deterministic: (config) => serveRecommendations(input, warnings, excluded, config, null),
-          Muse: (config) => serveRecommendations(input, warnings, excluded, config, config),
+          Deterministic: (config) =>
+            serveRecommendations(input, warnings, excluded, config, null, false),
+          Muse: (config) => {
+            if (isGuest) {
+              return serveRecommendations(input, warnings, excluded, config, null, true);
+            }
+
+            return serveRecommendations(input, warnings, excluded, config, config, false);
+          },
         });
       });
 
