@@ -4,13 +4,33 @@ import type {
   MealOccasion,
   RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
-import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
+import type { DishCardImage, DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import { InvalidLocale } from "@/modules/food-discovery/server/domain/errors";
-import { isLanguageTag } from "@/modules/food-discovery/server/domain/ids";
-import { normalizeSearchKey } from "@/modules/food-discovery/server/domain/search";
+import { isDbIdString, isLanguageTag } from "@/modules/food-discovery/server/domain/ids";
+import {
+  asLocalizedName,
+  normalizeSearchKey,
+  pickDisplayName,
+} from "@/modules/food-discovery/server/domain/search";
 import { windowForSurprise } from "@/modules/food-discovery/server/domain/surprise-window";
+import type {
+  DishDescriptionRow,
+  DishIngredientRow,
+  DishMediaRow,
+  DishNameRow,
+  DishPlaceRow,
+} from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
+import type { IngredientNameRow } from "@/modules/food-discovery/server/repository/ingredient-repository";
+import type { PlaceNameRow } from "@/modules/food-discovery/server/repository/place-repository";
+import dishDescriptionsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-descriptions-by-dish-ids.sql";
+import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-ingredients-by-dish-ids.sql";
+import dishMediaByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-by-dish-ids.sql";
+import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
+import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-places-by-dish-ids.sql";
 import dishRecommendationCandidates from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates.sql";
+import ingredientNamesByIngredientIds from "@/modules/food-discovery/server/repository/sql/ingredient-names-by-ingredient-ids.sql";
+import placeNamesByPlaceIds from "@/modules/food-discovery/server/repository/sql/place-names-by-place-ids.sql";
 import type { Database } from "@/server/database/client";
 import type { DatabaseError } from "@/server/database/query";
 import { runQuery } from "@/server/database/query";
@@ -162,6 +182,12 @@ const nonNullStrings = (values: ReadonlyArray<string | null>): Array<string> =>
  * fabricating it. Row shape stays Reylo-inferred; this function only
  * projects it into the published DishSummary contract.
  */
+/**
+ * Semantic card assembly without relations: the ranking projection already
+ * carries the localized display name and English fallback. Relation reads
+ * (media, native names, descriptions, ingredients, places) happen in
+ * `enrichRows` as bounded batch reads over the final ranked slice only.
+ */
 const toSummary = (row: RecommendationCandidateRow): DishSummary => ({
   id: row.id,
   slug: row.slug,
@@ -172,6 +198,242 @@ const toSummary = (row: RecommendationCandidateRow): DishSummary => ({
   updatedAt: row.updatedAt,
   lastUpdate: unixSeconds(row.updatedAt),
 });
+
+const groupRowsByDish = <Row>(
+  rows: ReadonlyArray<Row>,
+  dishId: (row: Row) => bigint,
+): ReadonlyMap<string, Array<Row>> => {
+  const groups = new Map<string, Array<Row>>();
+
+  for (const row of rows) {
+    const key = dishId(row).toString();
+    const existing = groups.get(key);
+
+    if (existing === undefined) {
+      groups.set(key, [row]);
+    } else {
+      existing.push(row);
+    }
+  }
+
+  return groups;
+};
+
+const MAX_CARD_INGREDIENTS = 6;
+
+const imageFor = (
+  media: ReadonlyArray<DishMediaRow> | undefined,
+  fallbackName: string,
+): DishCardImage | null => {
+  const first = media?.[0];
+  const url = first?.public_url ?? null;
+
+  if (url === null || !url.startsWith("https://")) {
+    return null;
+  }
+
+  return {
+    alt: first?.alt_text ?? fallbackName,
+    attribution: first?.attribution ?? null,
+    license: first?.license ?? null,
+    url,
+  };
+};
+
+interface NativeName {
+  readonly name: string | undefined;
+  readonly languageTag: string | undefined;
+}
+
+const nativeNameFor = (
+  names: ReadonlyArray<DishNameRow> | undefined,
+  displayName: string | undefined,
+): NativeName => {
+  const native = names?.find((entry) => entry.name_kind === "native");
+
+  if (native === undefined || native.name === displayName) {
+    return { languageTag: undefined, name: undefined };
+  }
+
+  return { languageTag: native.language_tag, name: native.name };
+};
+
+interface CardDescription {
+  readonly description: string | null;
+  readonly language: string | null;
+}
+
+const descriptionFor = (
+  descriptions: ReadonlyArray<DishDescriptionRow> | undefined,
+  locale: string,
+): CardDescription => {
+  if (descriptions === undefined || descriptions.length === 0) {
+    return { description: null, language: null };
+  }
+
+  const picked =
+    descriptions.find((entry) => entry.language_tag === locale) ??
+    descriptions.find((entry) => entry.language_tag === "en") ??
+    descriptions[0];
+
+  if (picked === undefined) {
+    return { description: null, language: null };
+  }
+
+  return {
+    description: picked.description ?? picked.summary ?? null,
+    language: picked.language_tag,
+  };
+};
+
+/**
+ * Image-led card enrichment over the final ranked slice: one bounded batch
+ * read per relation (media, names, descriptions, ingredients, ingredient
+ * names, places, place names), no per-card fetch, no invented content.
+ * Missing relations stay absent so the card renders its placeholder.
+ */
+const enrichRows = (
+  rows: ReadonlyArray<RecommendationCandidateRow>,
+  base: ReadonlyArray<DishSummary>,
+  locale: string,
+): Effect.Effect<ReadonlyArray<DishSummary>, DatabaseError, Database> =>
+  Effect.gen(function* () {
+    if (rows.length === 0) {
+      return base;
+    }
+
+    const ids: Array<bigint> = [];
+
+    for (const row of rows) {
+      if (isDbIdString(row.id)) {
+        ids.push(BigInt(row.id));
+      }
+    }
+
+    if (ids.length === 0) {
+      return base;
+    }
+
+    const [mediaRows, nameRows, descriptionRows, dishIngredientRows, dishPlaceRows] =
+      yield* Effect.all(
+        [
+          runQuery("dish/media-by-ids", (sql) =>
+            dishMediaByDishIds.run(sql, { ids: [...ids], status: "published" }),
+          ),
+          runQuery("dish/names-by-ids", (sql) => dishNamesByDishIds.run(sql, { ids: [...ids] })),
+          runQuery("dish/descriptions-by-ids", (sql) =>
+            dishDescriptionsByDishIds.run(sql, { ids: [...ids] }),
+          ),
+          runQuery("dish/ingredients-by-ids", (sql) =>
+            dishIngredientsByDishIds.run(sql, { ids: [...ids] }),
+          ),
+          runQuery("dish/places-by-ids", (sql) => dishPlacesByDishIds.run(sql, { ids: [...ids] })),
+        ] as const,
+        { concurrency: "unbounded" },
+      );
+
+    const mediaByDish = groupRowsByDish<DishMediaRow>(mediaRows, (row) => row.dish_id);
+
+    const namesByDish = groupRowsByDish<DishNameRow>(nameRows, (row) => row.dish_id);
+
+    const descriptionsByDish = groupRowsByDish<DishDescriptionRow>(
+      descriptionRows,
+      (row) => row.dish_id,
+    );
+
+    const dishIngredientsByDish = groupRowsByDish<DishIngredientRow>(
+      dishIngredientRows,
+      (row) => row.dish_id,
+    );
+
+    const dishPlacesByDish = groupRowsByDish<DishPlaceRow>(dishPlaceRows, (row) => row.dish_id);
+
+    const ingredientIds = [
+      ...new Set(
+        [...dishIngredientsByDish.values()].flatMap((entries) =>
+          entries.map((entry) => entry.ingredient_id),
+        ),
+      ),
+    ];
+
+    const placeIds = [
+      ...new Set(
+        [...dishPlacesByDish.values()].flatMap((entries) => entries.map((entry) => entry.place_id)),
+      ),
+    ];
+
+    const [ingredientNameRows, placeNameRows] = yield* Effect.all(
+      [
+        ingredientIds.length > 0
+          ? runQuery("ingredient/names-by-ids", (sql) =>
+              ingredientNamesByIngredientIds.run(sql, { ids: ingredientIds }),
+            )
+          : // SAFETY: empty batch input stays empty; the row type only guides the empty array.
+            Effect.succeed([] as ReadonlyArray<IngredientNameRow>),
+        placeIds.length > 0
+          ? runQuery("place/names-by-ids", (sql) =>
+              placeNamesByPlaceIds.run(sql, { ids: placeIds }),
+            )
+          : // SAFETY: empty batch input stays empty; the row type only guides the empty array.
+            Effect.succeed([] as ReadonlyArray<PlaceNameRow>),
+      ] as const,
+      { concurrency: "unbounded" },
+    );
+
+    const ingredientNamesByIngredient = groupRowsByDish<IngredientNameRow>(
+      ingredientNameRows,
+      (row) => row.ingredient_id,
+    );
+
+    const placeNamesByPlace = groupRowsByDish<PlaceNameRow>(placeNameRows, (row) => row.place_id);
+
+    return base.map((summary) => {
+      const names = namesByDish.get(summary.id);
+
+      const native = nativeNameFor(names, summary.name);
+
+      const dishIngredients = (dishIngredientsByDish.get(summary.id) ?? []).slice(
+        0,
+        MAX_CARD_INGREDIENTS,
+      );
+
+      const described = descriptionFor(descriptionsByDish.get(summary.id), locale);
+
+      const regionNames: Array<string> = [];
+
+      for (const place of dishPlacesByDish.get(summary.id) ?? []) {
+        const labels = (placeNamesByPlace.get(place.place_id.toString()) ?? []).map(
+          asLocalizedName,
+        );
+
+        const picked = pickDisplayName(labels, locale);
+
+        if (picked !== undefined && !regionNames.includes(picked.name)) {
+          regionNames.push(picked.name);
+        }
+      }
+
+      return {
+        ...summary,
+        description: described.description,
+        descriptionLanguage: described.language,
+        image: imageFor(mediaByDish.get(summary.id), summary.name ?? summary.slug),
+        ingredients: dishIngredients.map((entry) => {
+          const labels = (
+            ingredientNamesByIngredient.get(entry.ingredient_id.toString()) ?? []
+          ).map(asLocalizedName);
+
+          return {
+            name: pickDisplayName(labels, locale)?.name,
+            role: entry.role,
+          };
+        }),
+        nativeName: native.name,
+        nativeLanguageTag: native.languageTag,
+        regionNames,
+      };
+    });
+  });
 
 const validateRankedIds = (
   ids: ReadonlyArray<string>,
@@ -386,7 +648,11 @@ const serveRecommendations = (
     // is deterministic pool variety at no model cost, stated honestly in the
     // warnings. The standard path below always runs with seed 0.
     if (muse === null || input.surpriseSeed > 0) {
-      const dishes = deterministicTop.map((candidate) => toSummary(candidate));
+      const dishes = yield* enrichRows(
+        deterministicTop,
+        deterministicTop.map((candidate) => toSummary(candidate)),
+        input.locale,
+      );
 
       const surpriseWarnings =
         input.surpriseSeed === 0
@@ -408,20 +674,27 @@ const serveRecommendations = (
     );
 
     const byId = new Map(candidates.map((candidate) => [candidate.id, candidate] as const));
-    const dishes: Array<DishSummary> = [];
 
     const rankedIds = MuseRankResult.$match(ranked, {
       Ranked: ({ ids }) => ids,
       Degraded: ({ ids }) => ids,
     });
 
+    const rankedRows: Array<RecommendationCandidateRow> = [];
+
     for (const id of rankedIds) {
       const row = byId.get(id);
 
       if (row !== undefined) {
-        dishes.push(toSummary(row));
+        rankedRows.push(row);
       }
     }
+
+    const dishes = yield* enrichRows(
+      rankedRows,
+      rankedRows.map((row) => toSummary(row)),
+      input.locale,
+    );
 
     return MuseRankResult.$match(ranked, {
       Ranked: () => RecommendationOutcome.ReadyMuse({ dishes, warnings: [...warnings] }),

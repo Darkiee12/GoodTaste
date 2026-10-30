@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   adminRoleAssignSchema,
+  adminUserEmailSchema,
   adminUserQuerySchema,
   roleGrantsSchema,
   roleIdSchema,
@@ -106,6 +107,98 @@ export const authorizeFn = createServerFn({ method: "POST" })
       );
   });
 
+/**
+ * Server-authoritative admin navigation capabilities, computed once per page
+ * load. Each section maps to the same resource:action vocabulary its
+ * operations enforce — never a separate hardcoded role flag. Route-level
+ * guards still enforce their own (possibly stricter) checks; this only
+ * decides which nav entries to render.
+ */
+export type AdminCapabilities = {
+  readonly admin: boolean;
+  readonly overview: boolean;
+  readonly dishes: boolean;
+  readonly imports: boolean;
+  readonly reviews: boolean;
+  readonly members: boolean;
+  readonly roles: boolean;
+};
+
+export const NO_ADMIN_CAPABILITIES: AdminCapabilities = {
+  admin: false,
+  dishes: false,
+  imports: false,
+  members: false,
+  overview: false,
+  reviews: false,
+  roles: false,
+};
+
+export const adminCapabilitiesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { effects, server, authorization, session, actor, runtime, permissions } =
+    await loadServer();
+
+  const headers = server.getRequestHeaders();
+  const requestId = crypto.randomUUID();
+
+  const trusted = await runtime
+    .runApp(session.requireAuthenticatedActor(headers), "fn/admin/capabilities", 15000, requestId)
+    .then(
+      (verified) => verified,
+      () => null,
+    );
+
+  if (trusted === null) {
+    return { capabilities: NO_ADMIN_CAPABILITIES };
+  }
+
+  return runtime.runApp(
+    effects.Effect.gen(function* () {
+      const member = actor.Actor.Member({ userId: trusted.userId });
+
+      const sectionAllowed = (resource: string, actions: ReadonlyArray<string>) => {
+        const check = { resource, actions };
+
+        if (!permissions.isPermissionRequest(check)) {
+          return effects.Effect.succeed(false);
+        }
+
+        return effects.Effect.flatMap(authorization.Authorization, (authz) =>
+          authz.has(member, check),
+        );
+      };
+
+      // Members operations require both user:list and admin:access; mirror
+      // that here so the nav entry never advertises what the operation
+      // will deny.
+      const membersAllowed = effects.Effect.all(
+        [sectionAllowed("user", ["list"]), sectionAllowed("admin", ["access"])],
+        { concurrency: 2 },
+      ).pipe(effects.Effect.map(([listed, surfaced]) => listed && surfaced));
+
+      const [admin, overview, dishes, imports, reviews, members, roles] = yield* effects.Effect.all(
+        [
+          sectionAllowed("admin", ["access"]),
+          sectionAllowed("food", ["read"]),
+          sectionAllowed("food", ["read"]),
+          sectionAllowed("food", ["import"]),
+          sectionAllowed("moderation", ["read"]),
+          membersAllowed,
+          sectionAllowed("role", ["read"]),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      return {
+        capabilities: { admin, dishes, imports, members, overview, reviews, roles },
+      };
+    }),
+    "fn/admin/capabilities",
+    15000,
+    requestId,
+  );
+});
+
 export const adminListUsersFn = createServerFn({ method: "GET" })
   .validator(adminUserQuerySchema)
   .handler(async ({ data }) => {
@@ -136,6 +229,37 @@ export const adminListUsersFn = createServerFn({ method: "GET" })
         ),
       ),
       "fn/admin/users",
+      15000,
+      requestId,
+    );
+  });
+
+export const adminFindUserByEmailFn = createServerFn({ method: "GET" })
+  .validator(adminUserEmailSchema)
+  .handler(async ({ data }) => {
+    const { effects, server, admin, session, actor, currentActor, runtime } = await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, [
+        { resource: "user", actions: ["list"] },
+        { resource: "admin", actions: ["access"] },
+      ]),
+      "fn/admin/user-by-email",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(admin.UserAdminService, (service) =>
+          service.findUserByEmail(actor.Actor.Member({ userId: trusted.userId }), data.email),
+        ),
+      ),
+      "fn/admin/user-by-email",
       15000,
       requestId,
     );
@@ -251,6 +375,33 @@ export const adminListRolesFn = createServerFn({ method: "GET" }).handler(async 
       ),
     ),
     "fn/admin/roles",
+    15000,
+    requestId,
+  );
+});
+
+export const adminRoleMemberCountsFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { effects, server, session, actor, currentActor, runtime, roleService } =
+    await loadServer();
+
+  const headers = server.getRequestHeaders();
+  const requestId = crypto.randomUUID();
+
+  const trusted = await runtime.runApp(
+    session.requirePermission(headers, [{ resource: "role", actions: ["read"] }]),
+    "fn/admin/role-member-counts",
+    15000,
+    requestId,
+  );
+
+  return runtime.runApp(
+    currentActor.withActor(
+      actor.Actor.Member({ userId: trusted.userId }),
+      effects.Effect.flatMap(roleService.RoleService, (service) =>
+        service.memberCounts(actor.Actor.Member({ userId: trusted.userId })),
+      ),
+    ),
+    "fn/admin/role-member-counts",
     15000,
     requestId,
   );

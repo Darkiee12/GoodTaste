@@ -24,7 +24,11 @@ import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type RevisionRow = (typeof revisionsByDishId)["~reylo"]["element"];
 
+export type RevisionInsertRow = (typeof revisionInsert)["~reylo"]["element"];
+
 export type NoteRow = (typeof notesByDishId)["~reylo"]["element"];
+
+export type NoteInsertRow = (typeof noteInsert)["~reylo"]["element"];
 
 export type ImportJobRow = (typeof importJobFindById)["~reylo"]["element"];
 
@@ -50,17 +54,23 @@ export class CurationRepository extends Context.Service<
       readonly actor: string;
       readonly operation: string;
       readonly summary: string;
-    }) => Effect.Effect<RevisionRow, DatabaseError, Database>;
+    }) => Effect.Effect<RevisionInsertRow, DatabaseError, Database>;
     readonly revisionsByDishId: (
       dishId: bigint,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<RevisionRow>, DatabaseError, Database>;
+    readonly revisionHistoryPage: (input: {
+      readonly dishId: bigint;
+      readonly limit: number;
+      readonly cursorCreatedAt: string | null;
+      readonly cursorId: bigint | null;
+    }) => Effect.Effect<ReadonlyArray<RevisionRow>, DatabaseError, Database>;
     readonly insertNote: (input: {
       readonly dishId: bigint;
       readonly author: string;
       readonly noteKind: string;
       readonly note: string;
-    }) => Effect.Effect<NoteRow, DatabaseError, Database>;
+    }) => Effect.Effect<NoteInsertRow, DatabaseError, Database>;
     readonly notesByDishId: (
       dishId: bigint,
       limit: number,
@@ -132,6 +142,7 @@ export class CurationRepository extends Context.Service<
     >;
     readonly recentImportJobs: (
       limit: number,
+      offset?: number,
     ) => Effect.Effect<ReadonlyArray<AdminImportJobRecentRow>, DatabaseError, Database>;
     readonly adminFindImportJob: (
       id: bigint,
@@ -158,7 +169,23 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
   revisionsByDishId: (dishId, limit) =>
     Effect.gen(function* () {
       return yield* runQuery("curation/revisions-by-dish", (sql) =>
-        revisionsByDishId.run(sql, { dish_id: dishId, limit }),
+        revisionsByDishId.run(sql, {
+          dish_id: dishId,
+          limit,
+          cursor_created_at: null,
+          cursor_id: null,
+        }),
+      );
+    }),
+  revisionHistoryPage: (input) =>
+    Effect.gen(function* () {
+      return yield* runQuery("curation/revisions-by-dish", (sql) =>
+        revisionsByDishId.run(sql, {
+          dish_id: input.dishId,
+          limit: input.limit,
+          cursor_created_at: input.cursorCreatedAt,
+          cursor_id: input.cursorId,
+        }),
       );
     }),
   insertNote: (input) =>
@@ -279,8 +306,10 @@ export const CurationRepositoryLive = Layer.succeed(CurationRepository, {
     }),
   importJobsByStatus: () =>
     runQuery("curation/import-jobs-by-status", (sql) => adminImportJobsByStatus.run(sql)),
-  recentImportJobs: (limit) =>
-    runQuery("curation/import-jobs-recent", (sql) => adminImportJobsRecent.run(sql, { limit })),
+  recentImportJobs: (limit, offset = 0) =>
+    runQuery("curation/import-jobs-recent", (sql) =>
+      adminImportJobsRecent.run(sql, { limit, offset }),
+    ),
   adminFindImportJob: (id) =>
     runQuery("curation/import-job-find-admin", (sql) => adminImportJobFind.run(sql, { id })),
   adminRecordsByJobId: (jobId, limit) =>

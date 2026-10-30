@@ -6,7 +6,11 @@ import {
   type InvalidLocale,
 } from "@/modules/food-discovery/server/domain/errors";
 import { encodeDbId, isDbIdString } from "@/modules/food-discovery/server/domain/ids";
-import { CurationRepository } from "@/modules/food-discovery/server/repository/curation-repository";
+import {
+  CurationRepository,
+  type NoteRow,
+  type RevisionRow,
+} from "@/modules/food-discovery/server/repository/curation-repository";
 import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
 import type { Database } from "@/server/database/client";
@@ -31,6 +35,38 @@ export interface PublicationCheck {
   readonly reasons: ReadonlyArray<string>;
 }
 
+export interface ResolvedRevision {
+  readonly id: string;
+  readonly actor: string;
+  readonly actorDisplayName: string | null;
+  readonly importJobId: string | null;
+  readonly appliedByDisplayName: string | null;
+  readonly operation: string;
+  readonly summary: string;
+  readonly createdAt: string;
+}
+
+export interface ResolvedNote {
+  readonly id: string;
+  readonly author: string;
+  readonly authorDisplayName: string | null;
+  readonly importJobId: string | null;
+  readonly appliedByDisplayName: string | null;
+  readonly noteKind: string;
+  readonly note: string;
+  readonly createdAt: string;
+}
+
+export interface RevisionHistoryInput {
+  readonly limit: number;
+  readonly cursor: string | null;
+}
+
+export interface RevisionHistoryPage {
+  readonly items: ReadonlyArray<ResolvedRevision>;
+  readonly nextCursor: string | null;
+}
+
 export class CurationService extends Context.Service<
   CurationService,
   {
@@ -52,36 +88,25 @@ export class CurationService extends Context.Service<
     readonly listNotes: (
       dishId: string,
       limit: number,
-    ) => Effect.Effect<
-      ReadonlyArray<{
-        readonly id: string;
-        readonly author: string;
-        readonly noteKind: string;
-        readonly note: string;
-        readonly createdAt: string;
-      }>,
-      CurationServiceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<ResolvedNote>, CurationServiceError, Database>;
     readonly listRevisions: (
       dishId: string,
       limit: number,
-    ) => Effect.Effect<
-      ReadonlyArray<{
-        readonly id: string;
-        readonly actor: string;
-        readonly operation: string;
-        readonly summary: string;
-        readonly createdAt: string;
-      }>,
-      CurationServiceError,
-      Database
-    >;
+    ) => Effect.Effect<ReadonlyArray<ResolvedRevision>, CurationServiceError, Database>;
+    readonly revisionHistory: (
+      dishId: string,
+      input: RevisionHistoryInput,
+    ) => Effect.Effect<RevisionHistoryPage, CurationServiceError, Database>;
     readonly reviewQueue: (
       limit: number,
       cursor: bigint,
     ) => Effect.Effect<
-      ReadonlyArray<{ readonly id: string; readonly slug: string; readonly status: string }>,
+      ReadonlyArray<{
+        readonly id: string;
+        readonly slug: string;
+        readonly status: string;
+        readonly displayName: string | null;
+      }>,
       CurationServiceError,
       Database
     >;
@@ -102,6 +127,62 @@ const REVISION_OPERATIONS: ReadonlySet<string> = new Set([
   "import_applied",
   "note_added",
 ]);
+
+const toResolvedRevision = (entry: RevisionRow): ResolvedRevision => ({
+  id: encodeDbId(entry.id),
+  actor: entry.actor,
+  actorDisplayName: entry.actor_display_name,
+  importJobId: entry.import_job_id === null ? null : encodeDbId(entry.import_job_id),
+  appliedByDisplayName: entry.applied_by_display_name,
+  operation: entry.operation,
+  summary: entry.summary,
+  createdAt: entry.created_at,
+});
+
+const toResolvedNote = (entry: NoteRow): ResolvedNote => ({
+  id: encodeDbId(entry.id),
+  author: entry.author,
+  authorDisplayName: entry.author_display_name,
+  importJobId: entry.import_job_id === null ? null : encodeDbId(entry.import_job_id),
+  appliedByDisplayName: entry.applied_by_display_name,
+  noteKind: entry.note_kind,
+  note: entry.note,
+  createdAt: entry.created_at,
+});
+
+const encodeHistoryCursor = (createdAt: string, id: string): string =>
+  Buffer.from(`${createdAt}|${id}`, "utf8").toString("base64url");
+
+const decodeHistoryCursor = (
+  cursor: string,
+): { readonly createdAt: string; readonly id: bigint } | null => {
+  if (cursor.length === 0 || cursor.length > 500) {
+    return null;
+  }
+
+  let decoded: string;
+
+  try {
+    decoded = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+
+  const separator = decoded.lastIndexOf("|");
+
+  if (separator === -1) {
+    return null;
+  }
+
+  const createdAt = decoded.slice(0, separator);
+  const id = decoded.slice(separator + 1);
+
+  if (Number.isNaN(Date.parse(createdAt)) || !/^[0-9]+$/.test(id)) {
+    return null;
+  }
+
+  return { createdAt, id: BigInt(id) };
+};
 
 export const CurationServiceLive = Layer.effect(
   CurationService,
@@ -233,13 +314,7 @@ export const CurationServiceLive = Layer.effect(
         const record = yield* requireDish(dishId);
         const rows = yield* curation.notesByDishId(record.id, limit);
 
-        return rows.map((entry) => ({
-          id: encodeDbId(entry.id),
-          author: entry.author,
-          noteKind: entry.note_kind,
-          note: entry.note,
-          createdAt: entry.created_at,
-        }));
+        return rows.map(toResolvedNote);
       });
 
     const listRevisions = (dishId: string, limit: number) =>
@@ -247,13 +322,46 @@ export const CurationServiceLive = Layer.effect(
         const record = yield* requireDish(dishId);
         const rows = yield* curation.revisionsByDishId(record.id, limit);
 
-        return rows.map((entry) => ({
-          id: encodeDbId(entry.id),
-          actor: entry.actor,
-          operation: entry.operation,
-          summary: entry.summary,
-          createdAt: entry.created_at,
-        }));
+        return rows.map(toResolvedRevision);
+      });
+
+    const revisionHistory = (dishId: string, input: RevisionHistoryInput) =>
+      Effect.gen(function* () {
+        const record = yield* requireDish(dishId);
+        const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 50);
+
+        let cursorCreatedAt: string | null = null;
+        let cursorId: bigint | null = null;
+
+        if (input.cursor !== null) {
+          const decoded = decodeHistoryCursor(input.cursor);
+
+          if (decoded === null) {
+            return yield* new InvalidDishData({ reason: "revision cursor is invalid" });
+          }
+
+          cursorCreatedAt = decoded.createdAt;
+          cursorId = decoded.id;
+        }
+
+        const rows = yield* curation.revisionHistoryPage({
+          dishId: record.id,
+          limit: limit + 1,
+          cursorCreatedAt,
+          cursorId,
+        });
+
+        const page = rows.slice(0, limit);
+        const last = page[page.length - 1];
+        const hasMore = rows.length > page.length;
+
+        return {
+          items: page.map(toResolvedRevision),
+          nextCursor:
+            hasMore && last !== undefined
+              ? encodeHistoryCursor(last.created_at, last.id.toString())
+              : null,
+        };
       });
 
     const reviewQueue = (limit: number, cursor: bigint) =>
@@ -264,6 +372,7 @@ export const CurationServiceLive = Layer.effect(
           id: encodeDbId(record.id),
           slug: record.slug,
           status: record.status,
+          displayName: record.displayName,
         }));
       });
 
@@ -273,6 +382,7 @@ export const CurationServiceLive = Layer.effect(
       addNote,
       listNotes,
       listRevisions,
+      revisionHistory,
       reviewQueue,
     });
   }),

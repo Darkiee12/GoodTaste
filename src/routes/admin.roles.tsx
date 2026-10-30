@@ -6,7 +6,7 @@ import {
   adminCreateRoleFn,
   adminDeleteRoleFn,
   adminListRolesFn,
-  adminListUsersFn,
+  adminRoleMemberCountsFn,
   adminSetRoleGrantsFn,
   adminUpdateRoleFn,
   authorizeFn,
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/admin/roles")({
     }
 
     const { allowed } = await authorizeFn({
-      data: { checks: [{ resource: "admin", actions: ["access"] }] },
+      data: { checks: [{ resource: "role", actions: ["read"] }] },
     });
 
     if (!allowed) {
@@ -38,12 +38,9 @@ export const Route = createFileRoute("/admin/roles")({
     return {};
   },
   loader: async () => {
-    const [catalog, users] = await Promise.all([
-      adminListRolesFn(),
-      adminListUsersFn({ data: { limit: 200, offset: 0 } }),
-    ]);
+    const [catalog, counts] = await Promise.all([adminListRolesFn(), adminRoleMemberCountsFn()]);
 
-    return { roles: catalog.roles, vocabulary: catalog.vocabulary, users };
+    return { roles: catalog.roles, vocabulary: catalog.vocabulary, counts };
   },
   component: AdminRoles,
 });
@@ -102,7 +99,7 @@ function AdminRoles() {
   const createErrorId = `${pageId}-create-error`;
   const listErrorId = `${pageId}-list-error`;
   const [roles, setRoles] = useState(initial.roles);
-  const [users, setUsers] = useState(initial.users);
+  const [counts, setCounts] = useState(initial.counts);
   const [vocabulary] = useState(initial.vocabulary);
   const [drafts, setDrafts] = useState<ReadonlyMap<string, RoleDraft>>(new Map());
 
@@ -116,23 +113,20 @@ function AdminRoles() {
 
   const refreshCatalog = useMutation({
     mutationFn: async () => {
-      const [catalog, list] = await Promise.all([
-        adminListRolesFn(),
-        adminListUsersFn({ data: { limit: 200, offset: 0 } }),
-      ]);
+      const [catalog, list] = await Promise.all([adminListRolesFn(), adminRoleMemberCountsFn()]);
 
       return { catalog, list };
     },
     onSuccess: ({ catalog, list }) => {
       setRoles(catalog.roles);
-      setUsers(list);
+      setCounts(list);
       setDrafts(new Map());
       setGrantSelections(new Map());
     },
   });
 
   const memberCount = (roleId: string): number =>
-    users.filter((user) => user.roles.includes(roleId)).length;
+    counts.find((entry) => entry.roleId === roleId)?.memberCount ?? 0;
 
   const groups = groupVocabulary(vocabulary);
 

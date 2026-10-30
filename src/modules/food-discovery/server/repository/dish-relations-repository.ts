@@ -9,6 +9,7 @@ import dishDescriptionsByDishIds from "@/modules/food-discovery/server/repositor
 import dishFilter from "@/modules/food-discovery/server/repository/sql/dish-filter.sql";
 import dishIngredientLink from "@/modules/food-discovery/server/repository/sql/dish-ingredient-link.sql";
 import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-ingredients-by-dish-ids.sql";
+import dishMediaByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-by-dish-ids.sql";
 import dishNameInsert from "@/modules/food-discovery/server/repository/sql/dish-name-insert.sql";
 import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
 import dishPlaceLink from "@/modules/food-discovery/server/repository/sql/dish-place-link.sql";
@@ -25,6 +26,8 @@ export type DishNameRow = (typeof dishNamesByDishIds)["~reylo"]["element"];
 export type DishDescriptionRow = (typeof dishDescriptionsByDishIds)["~reylo"]["element"];
 
 export type DishIngredientRow = (typeof dishIngredientsByDishIds)["~reylo"]["element"];
+
+export type DishMediaRow = (typeof dishMediaByDishIds)["~reylo"]["element"];
 
 export type DishPlaceRow = (typeof dishPlacesByDishIds)["~reylo"]["element"];
 
@@ -46,6 +49,9 @@ export class DishRelationsRepository extends Context.Service<
     readonly ingredientsByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishIngredientRow>, DatabaseError, Database>;
+    readonly mediaByDishIds: (
+      ids: ReadonlyArray<bigint>,
+    ) => Effect.Effect<ReadonlyArray<DishMediaRow>, DatabaseError, Database>;
     readonly placesByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishPlaceRow>, DatabaseError, Database>;
@@ -141,6 +147,12 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
     Effect.gen(function* () {
       return yield* runQuery("dish/ingredients-by-ids", (sql) =>
         dishIngredientsByDishIds.run(sql, { ids: [...ids] }),
+      );
+    }),
+  mediaByDishIds: (ids) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/media-by-ids", (sql) =>
+        dishMediaByDishIds.run(sql, { ids: [...ids], status: "published" }),
       );
     }),
   placesByDishIds: (ids) =>

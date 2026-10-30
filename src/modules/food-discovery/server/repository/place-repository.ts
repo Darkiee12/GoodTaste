@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 
+import placeCoordsAll from "@/modules/food-discovery/server/repository/sql/place-coords-all.sql";
 import placeCountriesWithNames from "@/modules/food-discovery/server/repository/sql/place-countries-with-names.sql";
 import placeFindById from "@/modules/food-discovery/server/repository/sql/place-find-by-id.sql";
 import placeFindByIso from "@/modules/food-discovery/server/repository/sql/place-find-by-iso.sql";
@@ -17,6 +18,8 @@ export type PlaceRow = (typeof placeFindById)["~reylo"]["element"];
 export type PlaceNameRow = (typeof placeNamesByPlaceIds)["~reylo"]["element"];
 
 export type PlaceListRow = (typeof placeListWithNames)["~reylo"]["element"];
+
+export type PlaceCoordsRow = (typeof placeCoordsAll)["~reylo"]["element"];
 
 export class PlaceRepository extends Context.Service<
   PlaceRepository,
@@ -42,6 +45,7 @@ export class PlaceRepository extends Context.Service<
     readonly descendantIds: (
       id: bigint,
     ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
+    readonly coordsAll: () => Effect.Effect<ReadonlyArray<PlaceCoordsRow>, DatabaseError, Database>;
     readonly dishIdsByPlace: (input: {
       readonly placeId: bigint;
       readonly status: string;
@@ -107,6 +111,10 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
       );
 
       return rows.map((row) => row.id);
+    }),
+  coordsAll: () =>
+    Effect.gen(function* () {
+      return yield* runQuery("place/coords-all", (sql) => placeCoordsAll.run(sql, {}));
     }),
   dishIdsByPlace: (input) =>
     Effect.gen(function* () {

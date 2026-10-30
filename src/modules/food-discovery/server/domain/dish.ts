@@ -1,3 +1,15 @@
+export interface DishCardIngredient {
+  readonly name: string | undefined;
+  readonly role: string;
+}
+
+export interface DishCardImage {
+  readonly url: string;
+  readonly alt: string | null;
+  readonly attribution: string | null;
+  readonly license: string | null;
+}
+
 export interface DishSummary {
   readonly id: string;
   readonly slug: string;
@@ -7,6 +19,17 @@ export interface DishSummary {
   readonly categorySlugs: ReadonlyArray<string>;
   readonly updatedAt: string;
   readonly lastUpdate: number;
+  /**
+   * Optional image-led card enrichment (recommendations, local carousel
+   * shape). Absent on list projections that do not read media; the card UI
+   * renders a branded placeholder instead of inventing a photo.
+   */
+  readonly nativeName?: string | undefined;
+  readonly nativeLanguageTag?: string | undefined;
+  readonly description?: string | null | undefined;
+  readonly descriptionLanguage?: string | null | undefined;
+  readonly ingredients?: ReadonlyArray<DishCardIngredient> | undefined;
+  readonly image?: DishCardImage | null | undefined;
 }
 
 export interface DishName {
