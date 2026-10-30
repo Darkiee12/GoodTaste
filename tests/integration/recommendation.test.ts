@@ -735,6 +735,10 @@ beforeAll(() => {
   withRankingEnv({});
 });
 
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
+
 afterAll(async () => {
   withRankingEnv({});
 

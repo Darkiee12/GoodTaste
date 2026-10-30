@@ -20,6 +20,7 @@ const full: AdminCapabilities = {
   overview: true,
   reviews: true,
   roles: true,
+  restaurants: true,
 };
 
 describe("isAdminRouteMatch", () => {
@@ -42,7 +43,7 @@ describe("adminNavEntries", () => {
     expect(adminNavEntries(NO_ADMIN_CAPABILITIES, copy)).toEqual([]);
   });
 
-  test("exposes all six sections with dashboard exact", () => {
+  test("exposes all seven sections with dashboard exact", () => {
     const entries = adminNavEntries(full, copy);
 
     expect(entries.map((entry) => entry.to)).toEqual([
@@ -52,6 +53,7 @@ describe("adminNavEntries", () => {
       "/admin/reviews",
       "/admin/users",
       "/admin/roles",
+      "/admin/restaurants",
     ]);
     expect(entries[0]?.exact).toBe(true);
     expect(entries.slice(1).every((entry) => !entry.exact)).toBe(true);
@@ -61,6 +63,12 @@ describe("adminNavEntries", () => {
     const importer: AdminCapabilities = { ...NO_ADMIN_CAPABILITIES, imports: true };
 
     expect(adminNavEntries(importer, copy).map((entry) => entry.to)).toEqual(["/admin/imports"]);
+  });
+
+  test("restaurant managers can reach their workspace without food permissions", () => {
+    const manager = { ...NO_ADMIN_CAPABILITIES, restaurants: true };
+
+    expect(adminNavEntries(manager, copy).map((entry) => entry.to)).toEqual(["/admin/restaurants"]);
   });
 
   test("labels come from the active locale copy", () => {

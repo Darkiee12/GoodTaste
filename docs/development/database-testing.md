@@ -26,13 +26,18 @@
 ## CI sequencing
 
 The `Quality` workflow's `backend` job provisions a fresh, disposable
-PostgreSQL 18 instance, runs **all** migrations in version order, runs Flyway
-`validate`, then type-checks Reylo `.sql` imports, runs unit and integration
-tests, and builds the production bundle — all against the same migrated
-database. It fails when the database is unavailable or a migration is
-unapplied. Green builds based solely on a stale `.reylo/` cache are
-disallowed: Reylo re-analyzes changed statements against the live schema and
-fails closed without it.
+PostgreSQL 18 instance **and** a disposable single-node Garage object store,
+runs **all** migrations in version order, runs Flyway `validate`, then
+type-checks Reylo `.sql` imports, runs unit and integration tests, and builds
+the production bundle — all against the same migrated database. It fails when
+the database is unavailable or a migration is unapplied. Green builds based
+solely on a stale `.reylo/` cache are disallowed: Reylo re-analyzes changed
+statements against the live schema and fails closed without it.
+
+Storage integration tests use the disposable Garage over loopback S3 with
+committed test-only keys (`tests/bootstrap.ts` defaults, matching the CI
+Garage secrets). Buckets are created by the `--default-bucket` server flag;
+test objects use synthetic generated images, never real customer photographs.
 
 Keep database test fixtures synthetic and disposable; never use user photographs, real account tokens or production credentials. Use PostgreSQL for query tests rather than mocking SQL semantics.
 
@@ -53,5 +58,17 @@ The Compose network deliberately exposes **no PostgreSQL port to the host**. Unt
 This document describes **required scenarios**, not an already-implemented or passing test suite.
 
 ## Geospatial tests (once restaurant schema exists)
+
+Restaurant integration tests are now implemented in `restaurants.test.ts`:
+real PostGIS radius/bounds, normalized names, stable branch ordering, evidence
+eligibility, exact budget/sort, provenance constraints, history, receipt-paid
+selection and RBAC. `restaurant-fx-cache.test.ts` uses PostgreSQL and mocked
+providers for cache hit/miss, staleness, cooldown, concurrent refresh and token
+takeover. No ordinary test calls a live FX provider.
+
+Bun's test preload now loads the existing disposable-database/environment guard
+before application imports. This makes individual auth/restaurant test files
+independent of test-file execution order. Supply the isolated loopback
+`DATABASE_URL`; never point tests at a shared or production database.
 
 Test strict coordinate/radius bounds, venue inclusion/exclusion at the edge of the radius, null/missing coordinates, stable ordering and spatial-index use. Browser-test TanStack SSR-safe MapLibre mounting, map/list selection, narrow/mobile scrolling, missing-location permission and map attribution. See `docs/architecture/maps.md`.

@@ -117,6 +117,15 @@ the resource (acquire/use/release) with the **current** Effect v4 API in
 
 ## Geographic queries
 
+Implemented Restaurant Discovery uses purpose-specific area, name, dish,
+currency-candidate, local-range, menu and administration SQL. Database views
+centralize eligible serving evidence and authoritative displayed-price selection;
+search still checks publication through Food's public operation. Exact decimal
+strings remain NUMERIC through budget multiplication and are never converted to
+JavaScript Number. Expiring token-owned FX refresh leases are acquired/released
+with individual statements; provider HTTP runs outside transactions. See
+[Restaurant Discovery](restaurant-discovery.md).
+
 PostGIS 3.6 in PostgreSQL 18 handles Restaurant Discovery radius and bounding-box queries through domain-owned Reylo SQL. Prefer `geography(Point,4326)` + GiST, use `ST_DWithin` for index-aware filtering and select scalar distances rather than raw geography payloads. Long/lat/radius are bounded by Zod at the HTTP adapter. MapLibre renders results only; it is not the geographic search service. See [maps](maps.md).
 
 ## Domain trust and access
@@ -124,6 +133,10 @@ PostGIS 3.6 in PostgreSQL 18 handles Restaurant Discovery radius and bounding-bo
 A guest or member is represented by a trusted Effect `Data.TaggedEnum` actor; its per-request service must not be cached in a shared runtime. A guest can use public discovery reads; a member's saved data must be queried with actor-scoped predicates (e.g. `WHERE owner_id = :actorId`) and ownership checks. The `user` module owns identity/user preferences; Food Discovery owns dish identity; Restaurant Discovery owns venue-to-food offering evidence. No module imports another module's private SQL.
 
 Input parsing belongs at HTTP/AI/external-provider trust boundaries; do not introduce duplicate Zod row validators just because Reylo returns a row. Domain invariants still need checks and safe output serialization.
+
+## Private scan persistence
+
+Private scan JSONB is decoded as a versioned external document at the actual AI/customer trust boundary. It does not replace relational menu tables. Model and new customer draft IDs are assigned by the server. Revisions append under an expected-revision check; submitted revisions are fixed snapshots. Cleanup deletes expired private JSON and bytes while retaining minimal consent/review attribution and approved relational facts. Single-row inserts use a provable single `VALUES` row; callers do not normalize Reylo arrays into rows.
 
 ## References
 

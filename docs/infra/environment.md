@@ -46,7 +46,7 @@ fast when a required value is missing; see `.env.example` for the full list):
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
 - For Reylo analysis, the URL must point **directly** to a migrated Postgres schema; avoid transaction-mode PgBouncer. A distinct development/CI connection may be used instead of the runtime pool URL.
 - `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=feastjourney-private`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose network.
-- `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
+- `S3_ENDPOINT_PUBLIC` is not read by the implemented scanner. Uploads and authorized photo reads use the application origin; browsers never connect directly to Garage. Future direct signed access would need a separately reviewed endpoint and CORS contract.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL` are **not** application variables: no code reads them. The implemented equivalents are `RECOMMENDATION_PROVIDER`, `MODEL_*`, and `BETTER_AUTH_URL`. Do not reintroduce the old names.
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
@@ -71,3 +71,7 @@ contract is [deployment on Dokploy + Azure](deployment-dokploy-azure.md).
 - Do not commit `.env`, keys, private images or database dumps. Do not print secrets in CI traces, PR descriptions or troubleshooting posts.
 
 See [migration operations](migrations.md) and [local runbook](operations.md).
+
+Menu scanning is optional (`MENU_SCANNER_ENABLED=false`). Enabling it requires `MODEL_API_KEY`, a valid HTTPS `MODEL_BASE_URL` (default `https://api.meta.ai/v1`) and private S3 settings. `MENU_SCAN_MODEL` supports only standard `muse-spark-1.3`; Contributor mode is excluded. Defaults: `MENU_SCAN_TIMEOUT_MS=20000`, `MENU_SCAN_RETRIES=1`, `MENU_SCAN_MAX_RESPONSE_BYTES=1048576`, `MENU_SCAN_MAX_IMAGES=6`, `MENU_SCAN_MAX_IMAGE_BYTES=8388608`, `MENU_SCAN_MAX_COMPLETION_TOKENS=12000`. Enabled invalid configuration fails at the scanner boundary, leaving unrelated reads usable.
+
+SQL policy sets personal retention to 24 hours and explicit contributions to 30 days, including approved private photos/drafts. Repeating a submission reuses its stored consent deadline. Operators must schedule `bun run maintenance:menu-scans` at least every 15 minutes; no in-process scheduler is installed. See [storage](object-storage.md) for deletion retries and limits. Only the deployment's standard Meta terms apply unless its organization has separately obtained zero-data-retention service; `store:false` alone is not that guarantee.

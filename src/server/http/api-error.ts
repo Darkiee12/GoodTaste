@@ -22,6 +22,16 @@ export const apiErrorBody = (code: string, message: string, requestId: string): 
 });
 
 export const troubleByTag = {
+  RestaurantInputError: { status: 400, code: "invalid_request" },
+  RestaurantNotFound: { status: 404, code: "not_found" },
+  FxUnavailable: { status: 503, code: "unavailable" },
+  ScanNotFound: { status: 404, code: "not_found" },
+  ScanConflict: { status: 409, code: "conflict" },
+  ScanInputError: { status: 400, code: "invalid_request" },
+  InvalidImage: { status: 400, code: "invalid_image" },
+  InvalidModelOutput: { status: 422, code: "invalid_extraction" },
+  ExtractionUnavailable: { status: 503, code: "unavailable" },
+  StorageUnavailable: { status: 503, code: "unavailable" },
   DishNotFound: { status: 404, code: "not_found" },
   IngredientNotFound: { status: 404, code: "not_found" },
   PlaceNotFound: { status: 404, code: "not_found" },

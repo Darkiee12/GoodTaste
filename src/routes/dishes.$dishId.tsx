@@ -1,6 +1,7 @@
 import {
   createFileRoute,
   getRouteApi,
+  Link,
   notFound,
   useNavigate,
   useRouter,
@@ -207,6 +208,9 @@ function DishDetail() {
         <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>{updatedLabel}</time>
       </p>
 
+      <Link className="discovery-action mt-5" to="/restaurants" search={{ lang, dish: dish.id }}>
+        {lang === "vi" ? "Tìm nhà hàng phục vụ món này" : "Find restaurants serving this"}
+      </Link>
       <div className="mt-5">
         <SaveDishButton
           dishId={dish.id}

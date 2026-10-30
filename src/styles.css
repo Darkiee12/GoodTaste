@@ -1,5 +1,7 @@
 @import "tailwindcss" source("./");
 @import "tw-animate-css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+@import "./modules/restaurant-discovery/components/menu-order.css";
 
 @theme {
   --color-brand-blue: #2563eb;
@@ -242,6 +244,260 @@
      border-color reset it would render as solid currentColor. */
   [data-slot="dropdown-menu-content"] {
     border-color: var(--color-border);
+  }
+}
+
+/* Restaurant/dish discovery follows the existing editorial cream/navy/orange system. */
+@layer components {
+  .discovery-page {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+  }
+  .discovery-page nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .discovery-page a {
+    color: var(--color-brand-blue-hover);
+    text-underline-offset: 3px;
+  }
+  .discovery-page header {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .discovery-page h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    line-height: 1.1;
+  }
+  .discovery-page h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .discovery-page h3 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .discovery-page input,
+  .discovery-page select,
+  .discovery-page textarea {
+    width: 100%;
+    min-height: 2.75rem;
+    border: 1px solid var(--color-muted);
+    border-radius: 0.5rem;
+    background: white;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-ink);
+  }
+  .discovery-page label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)),
+  .discovery-page .discovery-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    padding: 0.5rem 1rem;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)):hover,
+  .discovery-page .discovery-action:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)):disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .discovery-page button.secondary {
+    background: white;
+    border-color: var(--color-muted);
+    color: var(--color-ink);
+  }
+  .discovery-page button.secondary:hover {
+    background: var(--color-cream);
+  }
+  .discovery-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .discovery-card {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+    overflow-wrap: anywhere;
+  }
+  .discovery-card[data-selected="true"] {
+    border-color: var(--color-brand-blue);
+    outline: 2px solid var(--color-brand-blue);
+  }
+  .discovery-card-actions,
+  .filter-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .discovery-selection {
+    border-left: 3px solid var(--color-food-orange-strong);
+    padding-left: 1rem;
+  }
+  .discovery-empty,
+  .discovery-message {
+    display: grid;
+    gap: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+    padding: 1.5rem;
+  }
+  .discovery-message {
+    border-color: var(--color-food-orange-strong);
+  }
+  .currency-selector {
+    display: grid;
+    gap: 0.25rem;
+    max-width: 24rem;
+  }
+  .currency-selector small {
+    color: var(--color-muted);
+  }
+  .restaurant-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+  }
+  .filter-help,
+  .filter-actions {
+    grid-column: 1 / -1;
+  }
+  .filter-help {
+    font-size: 0.875rem;
+    color: var(--color-muted);
+  }
+  .restaurant-results,
+  .restaurant-detail-layout {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+  }
+  .restaurant-result-list ol {
+    display: grid;
+    gap: 1rem;
+    list-style: none;
+  }
+  .restaurant-offering {
+    border-top: 1px solid var(--color-border-soft);
+    padding-top: 0.75rem;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .discovery-results-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .mobile-map-toggle {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .mobile-map-toggle button {
+    background: white;
+    border-color: var(--color-muted);
+    color: var(--color-ink);
+  }
+  .mobile-map-toggle button[aria-pressed="true"] {
+    background: var(--color-ocean-deep);
+    color: white;
+  }
+  .restaurant-results[data-mobile-view="list"] .restaurant-result-map {
+    display: none;
+  }
+  .restaurant-results[data-mobile-view="map"] .restaurant-result-list {
+    display: none;
+  }
+  .discovery-map,
+  .discovery-map-fallback {
+    height: 28rem;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+  }
+  .discovery-map-fallback {
+    display: grid;
+    place-content: center;
+    padding: 1.5rem;
+    background: white;
+    color: var(--color-muted);
+  }
+  .discovery-page .restaurant-pin {
+    min-width: 2.75rem;
+    border-radius: 50%;
+    background: var(--color-ocean-deep);
+    border: 2px solid white;
+  }
+  .discovery-page .restaurant-pin[aria-pressed="true"] {
+    background: var(--color-food-orange-strong);
+  }
+  .dish-discovery-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  }
+  .discovery-search-bar {
+    display: grid;
+    gap: 0.5rem;
+    max-width: 36rem;
+  }
+  @media (min-width: 64rem) {
+    .restaurant-filters {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .restaurant-results,
+    .restaurant-detail-layout {
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      align-items: start;
+    }
+    .restaurant-result-map {
+      position: sticky;
+      top: 6rem;
+    }
+    .restaurant-results[data-mobile-view] .restaurant-result-list,
+    .restaurant-results[data-mobile-view] .restaurant-result-map {
+      display: block;
+    }
+    .mobile-map-toggle {
+      display: none;
+    }
+  }
+  @media (max-width: 24rem) {
+    .restaurant-filters {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 }
 

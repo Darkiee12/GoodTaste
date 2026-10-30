@@ -57,7 +57,37 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 
 See `docs/infra/migrations.md`, `docs/infra/postgres.md`, and `docs/architecture/persistence.md`.
 
+PR #4 reserves `V20261028_100`–`106` beyond PR #3's inspected `_013` head:
+
+- `_100` creates Restaurant Discovery tables/views, PostGIS/trigram indexes,
+  exact observation history, FX cache/leases, User currency preference and RBAC grants.
+- `_101` enforces immutable provenance and receipt source/amount integrity.
+- `_102` maintains diacritic-folded restaurant search names with a trigger.
+- `_103` installs SIX ISO 4217 monetary codes and reattaches currency foreign
+  keys; the initial ICU lookup is preserved as an unused legacy table.
+- `_104` adds generated non-null coordinate projections of venue geography.
+- `_105` protects item/variant identity and adds variant retirement.
+- `_106` preserves unknown receipt adjustments as NULL rather than fabricated zero.
+
+All are forward-only. No parent migration is modified. Review numbering against
+any later PR #3 migrations before integration; rollback is application rollback
+with the additive schema retained, not Flyway clean/repair or data deletion.
+
 A checked-in migration is immutable once applied. Never edit, rename, or
 delete an applied file; write the next forward migration instead.
 
 Flyway manages the `feastjourney` app schema and schema history, while PostGIS extension objects are in `public` on initialization. Schema-qualify future app tables or set search_path intentionally; do not enable automatic baselining merely to bypass PostGIS-created public objects.
+
+Scanner forward migrations:
+
+- `V20261029_001`: four private scan workflow tables, guest/member ownership, immutable revisions and consented contributions.
+- `V20261029_002`: legacy restaurant-verification claims no longer raise price authority.
+- `V20261029_003`: contribution-to-relational-menu and private source-page mapping.
+- `V20261030_100`: erasable revision references with retained submitted revision numbers, deletion cooldown, supporting pages, reviewed menu/item text and draft variant status.
+- `V20261030_101`: venue-scoped source foreign key for price-free menu items; deferred until transaction commit to support atomic dependent changes.
+- `V20261030_102`: reviewed variant translations stored with immutable offering identity.
+- `V20261030_103`: original printed price tokens retained beside exact NUMERIC observations.
+
+The uncommitted scanner migrations were allocated this separate range before release because Food Discovery added `V20261030_001`. Earlier scanner numbering was exercised only in a disposable test database, which is preserved; validate the combined history against a fresh database rather than repairing or rewriting that history.
+
+These do not create a second published menu store. Private JSONB is temporary; approved facts continue to use the existing restaurant tables. Never change an applied file to resolve a failed check.

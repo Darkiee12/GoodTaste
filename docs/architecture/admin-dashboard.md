@@ -8,6 +8,11 @@ decision.
 
 ## Routes (`src/routes/`)
 
+PR #4 adds `/admin/restaurants` for branch entry/editing, bounded structured menu
+imports, item/variant retirement, source history and separate price/serving
+review. It reuses Better Auth and dynamic RBAC; see
+[Restaurant Discovery](restaurant-discovery.md) for the authoring contract.
+
 | Route | Responsibility |
 | --- | --- |
 | `/admin` | Editorial overview: attention queue, health counts, recent imports/dishes |

@@ -4,6 +4,11 @@ Mobile-first food discovery for travellers: culturally relevant dishes, verified
 
 Start with `AGENTS.md`, then `docs/README.md`.
 
+The [PR #4 implementation report](docs/development/pr4-implementation-status.md)
+records scanner/review behavior, migration integration, executed verification and
+remaining live-provider/deployment checks. Model fixtures do not verify real
+menu extraction accuracy.
+
 ## Run locally
 
 Prerequisites: Bun 1.4.4 (verified), Docker, `openssl` for secret generation.
@@ -99,6 +104,11 @@ retry). Stop with `Ctrl+C`, or
 
 ## Routes
 
+- `/dishes`, `/dishes/$dishId` — public catalog search and detail, with canonical dish IDs carried into restaurant search.
+- `/restaurants`, `/restaurants/$venueId` — independent public restaurant search, optional map/geolocation, branch menus, exact observed prices and optional dated currency equivalents.
+- `/scan` — guest-accessible multilingual menu scanner: private photo upload, Muse structured extraction, customer corrections, dish/variant/quantity selection with exact subtotals, and a bilingual waiter-facing order card. Optional `menu-facts-v1` contribution sends the saved revision to curator review; approved facts enter the relational menu/price model.
+- `/admin/restaurants` — RBAC-protected venue and menu entry, structured source imports, offering retirement and separate price/serving review.
+
 - `/` — public landing page: dish discovery plus an in-place food chooser (one-click quick find or Surprise with windowed pool variety, constraints preserved, provider bypassed; 5-step refinement with auto-advance on answer and a Back button; server-filtered country select; deterministic fallback labeled honestly; opt-in device-local preference memory). English default, `?lang=` switch; the globe menu offers fully translated English and Vietnamese, other locales fall back to English; validated by Zod; no cookie persistence.
 - `/dishes/$dishId` — public canonical dish detail (names, ingredients with uncertainty wording, cuisines/categories, associated places, sources, freshness), linkable by slug or decimal id.
 - `/saved` — member saved dishes (server-verified session; paged list with batch-loaded details).
@@ -110,6 +120,14 @@ retry). Stop with `Ctrl+C`, or
 See `docs/architecture/access-control.md` (permission vocabulary, system roles, owner safeguards) and `docs/architecture/admin-dashboard.md` (dashboard routes, contracts, import lifecycle).
 
 ## Catalog data and imports
+
+Restaurant menus and prices are editorial observations, not AI estimates or live
+availability. There is no seeded restaurant inventory: authorized staff must
+record real branches and source-backed offerings. Original currency stays
+primary; Frankfurter v2 provides optional daily reference equivalents. Strict
+budgets require a canonical dish, comparable portion, channel and known current
+listed price. See [Restaurant Discovery](docs/architecture/restaurant-discovery.md)
+for import contracts, ranking, FX policy, environment and deferred features.
 
 Canonical dishes live in `feastjourney.dishes` plus names/descriptions/ingredients/cuisines/categories/places link tables (`db/migrations/V20261028_001`–`V004`). The import studio (`/admin/imports`) stages JSON/CSV datasets into `catalog_import_jobs`/`catalog_import_records`, validates against canonical taxonomy, requires explicit license + editorial-review acknowledgment plus per-duplicate decisions, and applies records as `review` status — never published. Applied records carry `source_records`/`dish_sources` provenance links. Publication is a separate `food:publish`-gated editorial action.
 

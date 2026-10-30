@@ -80,9 +80,8 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
 
         <div className="flex flex-wrap justify-center gap-3">
           <Link
-            to="/"
+            to="/dishes"
             search={{ lang }}
-            hash="discover"
             resetScroll={false}
             className="inline-flex min-h-12 items-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
           >
@@ -90,6 +89,13 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             {copy.ctaExplore}
           </Link>
 
+          <Link
+            to="/restaurants"
+            search={{ lang }}
+            className="inline-flex min-h-12 items-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
+          >
+            Find restaurants
+          </Link>
           <button
             id="surprise-dish-button"
             type="button"

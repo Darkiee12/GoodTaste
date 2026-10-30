@@ -34,6 +34,14 @@ jobs:
       DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
       BETTER_AUTH_URL: http://localhost:3000
       TRUSTED_PROXIES: ""
+      # Disposable Garage S3 for storage integration tests. Keys are
+      # committed test-only values; the compose step below injects the
+      # matching server-side secrets into infra/.env before startup.
+      S3_ENDPOINT_INTERNAL: http://127.0.0.1:3900
+      S3_REGION: garage
+      S3_BUCKET_PRIVATE: feastjourney-private
+      S3_ACCESS_KEY_ID: GKaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      S3_SECRET_ACCESS_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       # Fill real values under Settings → Secrets and variables → Actions.
       # Unset secrets arrive as empty strings and the test setup substitutes
       # documented non-secret stubs (tests use an in-memory mail sender and
@@ -60,6 +68,12 @@ jobs:
         run: |
           cp infra/.env.example infra/.env
           docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+      - name: Start disposable Garage with loopback access
+        run: |
+          sed -i 's/^GARAGE_RPC_SECRET=.*/GARAGE_RPC_SECRET=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/' infra/.env
+          sed -i 's/^S3_ACCESS_KEY_ID=.*/S3_ACCESS_KEY_ID=GKaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' infra/.env
+          sed -i 's/^S3_SECRET_ACCESS_KEY=.*/S3_SECRET_ACCESS_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' infra/.env
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait garage
       - name: Run Flyway migrations
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
       - name: Validate Flyway migration history

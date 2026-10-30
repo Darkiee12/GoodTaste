@@ -1,0 +1,109 @@
+import { Link, getRouteApi } from "@tanstack/react-router";
+
+import {
+  CurrencySelector,
+  useExchangeRates,
+  usePreferredCurrency,
+} from "@/modules/restaurant-discovery/components/currency-tools";
+import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
+import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
+import { presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
+import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
+
+const route = getRouteApi("/restaurants/$venueId");
+
+export function RestaurantDetailPage() {
+  const { venue, offerings } = route.useLoaderData();
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
+  const preference = usePreferredCurrency();
+
+  const conversion = useExchangeRates(
+    offerings.flatMap((offering) => (offering.currency === null ? [] : [offering.currency])),
+    preference.currency,
+  );
+
+  return (
+    <article className="discovery-page">
+      <nav aria-label="Discover">
+        <Link to="/restaurants" search={{ lang: search.lang }}>
+          Find restaurants
+        </Link>
+        <Link to="/dishes" search={{ lang: search.lang }}>
+          Explore dishes
+        </Link>
+        <Link to="/scan" search={{ lang: search.lang, venueId: venue.id }}>
+          Scan this menu
+        </Link>
+      </nav>
+      <header>
+        <p className="discovery-eyebrow">
+          {venue.business_name} · {venue.area}
+        </p>
+        <h1>{venue.name}</h1>
+        <p>{venue.address}</p>
+        <a
+          className="discovery-action"
+          href={`https://www.google.com/maps/dir/?api=1&destination=${venue.latitude},${venue.longitude}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Get directions ↗
+        </a>
+      </header>
+      <CurrencySelector preference={preference} />
+      <div className="restaurant-detail-layout">
+        <section aria-labelledby="menu-heading">
+          <h2 id="menu-heading">Explore the menu</h2>
+          <div className="my-4">
+            <label htmlFor="menu-channel">Sales channel</label>
+            <select
+              id="menu-channel"
+              value={search.channel}
+              onChange={(event) => {
+                const channel = channelSchema.parse(event.target.value);
+                void navigate({ search: { ...search, channel } });
+              }}
+            >
+              <option value="dine_in">Dine-in</option>
+              <option value="takeaway">Takeaway</option>
+              <option value="delivery">Delivery</option>
+            </select>
+          </div>
+          <p className="mb-4 text-sm text-muted">
+            These are reviewed observations, not live availability. Confirm current prices, taxes,
+            service charges and dietary requirements with the venue.
+          </p>
+          {conversion.unavailable && (
+            <p aria-live="polite">
+              Approximate conversion is unavailable. Original menu prices remain available.
+            </p>
+          )}
+          {offerings.length === 0 ? (
+            <div className="discovery-empty" aria-live="polite">
+              No curated menu offerings have been recorded for this branch yet.
+            </div>
+          ) : (
+            <InteractiveMenuView
+              key={`order:${venue.id}:${search.channel}`}
+              menu={presentReviewed(offerings, venue.name, search.lang)}
+              locale={search.lang}
+              rates={conversion.rates}
+              initialVariant={search.variant}
+            />
+          )}
+        </section>
+        <aside>
+          <h2>Find this branch</h2>
+          <RestaurantMapPanel
+            points={[{ ...venue, distance_meters: null }]}
+            selected={venue.id}
+            onSelect={() => {}}
+            lang={search.lang}
+          />
+          <p className="mt-3 text-sm">{venue.address}</p>
+        </aside>
+      </div>
+    </article>
+  );
+}

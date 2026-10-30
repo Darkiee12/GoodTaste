@@ -48,6 +48,14 @@ All catalog administration endpoints resolve the actor from the verified Better 
 
 `admin:access` guards the administration surface only; it never authorizes a resource mutation by itself.
 
+Restaurant workspace access requires `restaurant:manage`; review controls
+additionally require `restaurant:review`. These grants are seeded to curator,
+admin and owner by `V20261028_100` and remain dynamically assignable. The admin
+surface OR-gate recognizes restaurant managers. Every venue/menu/import and
+visibility operation checks `manage` internally; every price/serving approval or
+rejection checks `review` internally. Mutations and mandatory audit events share
+a transaction. Public discovery needs neither grant nor a session.
+
 ## Better Auth's place in the picture
 
 Better Auth owns **authentication only**: sessions, passwords, OAuth, verification, recovery. Its admin plugin is deliberately neutralized — every role in its access-control config carries **zero grants**, so `/api/auth/admin/*` denies for everyone. All user administration (list, ban, roles, session revocation) is implemented behind our authorization boundary with Reylo queries; the plugin's passive behavior (default role on signup, banned-user session blocking) remains.
@@ -63,6 +71,12 @@ This avoids two competing authorization systems: the plugin can never grant what
 ## Audit atomicity
 
 Privileged mutations (role create/update/delete, grant replacement, assignments, ban/unban, session revocation) write their mandatory audit record in the same PostgreSQL transaction as the mutation: an audit-insert failure rolls the mutation back. Best-effort event audit (profile edits, favorites, provider-owned session flows) is recorded after the decision and never gates access. See `src/modules/user/server/operations/audit.ts` for the category contract.
+
+## Private menu scans
+
+Private menu scans use a separate resource capability: a server-issued random guest cookie whose hash is persisted. A scan UUID alone grants nothing. Each operation also checks expiry. Members use verified session identity; claiming a prior guest scan requires both that identity and the original capability, and is explicit. Guest scans cannot silently migrate between accounts. The scan page and currency caches are account-scoped.
+
+Contributions remain private. Inspection and decisions require both `restaurant:manage` and `restaurant:review` from current database grants. Publication of items and variants is review-gated; importers cannot assert restaurant ownership verification. Approval preserves the authenticated curator attribution and a mandatory transactional audit. Deleted/expired scans deny access before eventual physical deletion. Full policy: [Restaurant Discovery](restaurant-discovery.md).
 
 ## Future work
 

@@ -156,7 +156,7 @@ function isCoastal(grid: Uint8Array, longitude: number, latitude: number): boole
 }
 
 describe("land grid", () => {
-  test("marks curated dish cities as land and mid-ocean points as sea", () => {
+  test("recognizes continental cities, coastal neighborhoods and mid-ocean cells", () => {
     const grid = decodeLandGrid();
 
     expect(grid.length).toBe(720 * 360);

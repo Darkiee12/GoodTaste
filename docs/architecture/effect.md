@@ -2,6 +2,14 @@
 
 TanStack Start owns HTTP. Effect v4 is the application backend toolkit, **not a second HTTP server**.
 
+Restaurant operations use named `Effect.fn` generators, existing `runQuery` and
+transaction boundaries, typed tagged failures and request-scoped authorization.
+`FxProvider` models external HTTP; `FxRates` owns retrieval/cache behavior.
+The composition root supplies the provider Layer; tests substitute providers or
+the FX capability without live requests. Cache freshness reads Effect's Clock.
+The installed `effect/BigDecimal` supplies exact multiplication and explicit
+half-away-from-zero display rounding, avoiding another decimal dependency.
+
 - Use `Effect.gen` for readable orchestration and `Effect.fn` for named reusable effects where tracing helps. Consult vendored `repos/effect/LLMS.md` and current package source for exact APIs.
 - Use `Context.Service` and `Layer` for real capabilities with lifetimes or replaceable implementations (PostgreSQL/Reylo pool, AI provider, Places, object storage), not boilerplate pass-through facades.
 - A process-scoped server-only `ManagedRuntime` is composed under `src/server/runtime.ts` and `src/server/layers.ts`; connect it to TanStack endpoints. Dispose scoped resources with server shutdown.
@@ -24,3 +32,7 @@ Read `docs/architecture/domain-modeling.md` and `docs/architecture/access-contro
 Reylo type checking needs a schema-available development database (or explicitly supported cached analysis). Keep TypeScript 7.1 content mapper configuration and `--runExternalCode` working. Run migrations before checks once SQL imports exist.
 
 Docs: https://effect.website/docs/v4/runtime · https://effect.website/docs/v4/requirements-management/services · https://reylo.dev/#sql
+
+The scanner adds `MenuExtractor` and `PrivateMenuStorage` at the existing composition root. Storage initializes its client lazily and the Layer closes connections at disposal; disabled scanning does not break discovery. Actor/capability values remain request-scoped. Extraction uses a bounded request, database lease and provider cancellation rather than background promises.
+
+Nested `withTransaction` calls join the ambient `TxSql`. The outer workflow owns commit, rollback and bounded serialization retry. This is not a savepoint: callers must propagate a nested failure rather than catch it and commit partially applied work. Contribution promotion uses this contract to reuse import, observation review, publication and audit atomically, without external network work while holding the transaction.
