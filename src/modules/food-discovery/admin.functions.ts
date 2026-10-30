@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { Effect } from "effect";
+import type * as EffectModule from "effect";
 import { z } from "zod";
 
 import {
@@ -13,8 +15,24 @@ import {
   needsLicenseReview,
 } from "@/modules/food-discovery/admin.schema";
 import { localeSchema } from "@/modules/food-discovery/food.schema";
+import type {
+  DishMediaError,
+  DishMediaRepository,
+  DishMediaServiceApi,
+  DishMediaStorage,
+} from "@/modules/food-discovery/server/operations/dish-media-service";
+import type * as AuthorizationModule from "@/modules/user/server/operations/authorization";
+import type { Authorization } from "@/modules/user/server/operations/authorization";
+import type { RoleRepository } from "@/modules/user/server/repository/role-repository";
+import type * as ActorModule from "@/server/auth/actor";
+import type { CurrentActor } from "@/server/auth/current-actor";
 import { InsufficientPermissions } from "@/server/auth/errors";
 import type { PermissionRequest } from "@/server/auth/permissions";
+import type * as SessionModule from "@/server/auth/session";
+import type { Database } from "@/server/database/client";
+import type { TransactionFailed } from "@/server/database/errors";
+import type { DatabaseError } from "@/server/database/query";
+import type * as RuntimeModule from "@/server/runtime";
 
 /**
  * Food-discovery administration transport: dashboard stats, dish curation
@@ -61,7 +79,13 @@ const SURFACE_CHECKS = [
 ] as const;
 
 const requireSurface = async (
-  loaded: Awaited<ReturnType<typeof loadServer>>,
+  loaded: {
+    readonly effects: typeof EffectModule;
+    readonly authorization: typeof AuthorizationModule;
+    readonly session: typeof SessionModule;
+    readonly actor: typeof ActorModule;
+    readonly runtime: typeof RuntimeModule;
+  },
   headers: Headers,
   operation: string,
   requestId: string,
@@ -547,6 +571,374 @@ export const adminUpdateDishStatusFn = createServerFn({ method: "POST" })
       "fn/admin/dish-status",
       15000,
       requestId,
+    );
+  });
+
+const loadMediaServer = async () => {
+  const [effects, server, media, authorization, session, actor, currentActor, runtime] =
+    await Promise.all([
+      import("effect"),
+      import("@tanstack/react-start/server"),
+      import("@/modules/food-discovery/server/operations/dish-media-service"),
+      import("@/modules/user/server/operations/authorization"),
+      import("@/server/auth/session"),
+      import("@/server/auth/actor"),
+      import("@/server/auth/current-actor"),
+      import("@/server/runtime"),
+    ]);
+
+  return { effects, server, media, authorization, session, actor, currentActor, runtime };
+};
+
+const dishMediaIdSchema = z.object({
+  mediaId: z.string().regex(/^[0-9]+$/, "photo id must be a decimal id string"),
+});
+
+const dishMediaDishSchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+});
+
+const dishMediaFocalSchema = z.number().min(0).max(1).nullable().default(null);
+
+const dishMediaMetadataFields = {
+  altText: z.string().trim().max(500).nullable().default(null),
+  attribution: z.string().trim().max(500).nullable().default(null),
+  license: z.string().min(1).max(60),
+  focalX: dishMediaFocalSchema,
+  focalY: dishMediaFocalSchema,
+  sourceUrl: z.string().trim().max(2000).nullable().default(null),
+};
+
+const dishMediaStageSchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+  filename: z.string().min(1).max(255),
+  contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  dataBase64: z.string().min(1).max(12_000_000),
+  makePrimary: z.boolean().default(false),
+  ...dishMediaMetadataFields,
+});
+
+const dishMediaMetadataSchema = z
+  .object({ mediaId: dishMediaIdSchema.shape.mediaId, ...dishMediaMetadataFields })
+  .strict();
+
+const dishMediaReorderSchema = z.object({
+  dishId: z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string"),
+  orderedIds: z
+    .array(z.string().regex(/^[0-9]+$/))
+    .min(1)
+    .max(5),
+});
+
+type PhotoResult<A> =
+  | { readonly ok: true; readonly value: A }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Maps expected photo-domain failures to client-safe outcomes. Database,
+ * permission, transaction, and session failures are not caught here: they
+ * propagate as server-function errors (5xx/4xx) instead of masquerading as
+ * photo reasons.
+ */
+const settlePhotoTask = <A, R>(
+  effects: typeof EffectModule,
+  task: Effect.Effect<A, DishMediaError, R>,
+): Effect.Effect<PhotoResult<A>, DatabaseError | InsufficientPermissions | TransactionFailed, R> =>
+  task.pipe(
+    effects.Effect.map((value) => ({ ok: true as const, value })),
+    effects.Effect.catchTags({
+      DishMediaNotFound: () =>
+        effects.Effect.succeed({ ok: false as const, reason: "photo not found" }),
+      DishNotFound: () => effects.Effect.succeed({ ok: false as const, reason: "dish not found" }),
+      DishMediaValidationFailed: (failure) =>
+        effects.Effect.succeed({ ok: false as const, reason: failure.reason }),
+      DishMediaConflict: (failure) =>
+        effects.Effect.succeed({ ok: false as const, reason: failure.reason }),
+      DishMediaLimitExceeded: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          reason: "this dish already has the maximum of 5 photos",
+        }),
+      DishMediaPublishBlocked: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          reason:
+            failure.reasons.length > 0 ? failure.reasons.join("; ") : "photo cannot be published",
+        }),
+      DishMediaStorageFailed: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          reason: "photo storage failed; try again",
+        }),
+      DishMediaStorageMisconfigured: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          reason: "photo storage is not configured",
+        }),
+    }),
+  );
+
+const withDishMediaService = async <A>(
+  loaded: Awaited<ReturnType<typeof loadMediaServer>>,
+  headers: Headers,
+  permission: PermissionRequest,
+  operation: string,
+  requestId: string,
+  task: (
+    service: DishMediaServiceApi,
+  ) => Effect.Effect<
+    A,
+    DishMediaError,
+    | Database
+    | DishMediaRepository
+    | DishMediaStorage
+    | CurrentActor
+    | Authorization
+    | RoleRepository
+  >,
+): Promise<A> => {
+  const { effects, session, actor, currentActor, runtime } = loaded;
+
+  await requireSurface(loaded, headers, operation, requestId);
+
+  const trusted = await runtime.runApp(
+    session.requirePermission(headers, permission),
+    operation,
+    15000,
+    requestId,
+  );
+
+  return runtime.runApp(
+    effects.Effect.provide(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(loaded.media.DishMediaService, (service) => task(service)),
+      ),
+      loaded.media.DishMediaFullLive,
+    ),
+    operation,
+    60000,
+    requestId,
+  );
+};
+
+export const listDishPhotosFn = createServerFn({ method: "GET" })
+  .validator(dishMediaDishSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["read"] },
+      "fn/admin/dish-photos",
+      requestId,
+      (service) => service.listForAdmin(data.dishId),
+    );
+  });
+
+export const stageDishPhotoFn = createServerFn({ method: "POST" })
+  .validator(dishMediaStageSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    let bytes: Uint8Array;
+
+    try {
+      bytes = new Uint8Array(Buffer.from(data.dataBase64, "base64"));
+    } catch {
+      return { ok: false as const, reason: "upload payload is not valid base64" };
+    }
+
+    if (bytes.byteLength === 0 || bytes.byteLength > 12_000_000) {
+      return { ok: false as const, reason: "upload payload has an unexpected size" };
+    }
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photo-stage",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(
+            effects,
+            service.stagePhoto({
+              dishId: data.dishId,
+              bytes,
+              filename: data.filename,
+              altText: data.altText,
+              attribution: data.attribution,
+              license: data.license,
+              focalX: data.focalX,
+              focalY: data.focalY,
+              sourceUrl: data.sourceUrl,
+              makePrimary: data.makePrimary,
+            }),
+          ),
+          (outcome) => (outcome.ok ? { ok: true as const, photo: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const updateDishPhotoMetadataFn = createServerFn({ method: "POST" })
+  .validator(dishMediaMetadataSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photo-metadata",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(
+            effects,
+            service.updateMetadata({
+              mediaId: data.mediaId,
+              altText: data.altText,
+              attribution: data.attribution,
+              license: data.license,
+              focalX: data.focalX,
+              focalY: data.focalY,
+              sourceUrl: data.sourceUrl,
+            }),
+          ),
+          (outcome) => (outcome.ok ? { ok: true as const, photo: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const reorderDishPhotosFn = createServerFn({ method: "POST" })
+  .validator(dishMediaReorderSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photos-reorder",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(
+            effects,
+            service.reorderPhotos({ dishId: data.dishId, orderedIds: data.orderedIds }),
+          ),
+          (outcome) => (outcome.ok ? { ok: true as const, photos: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const submitDishPhotoForReviewFn = createServerFn({ method: "POST" })
+  .validator(dishMediaIdSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photo-review",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(effects, service.submitForReview(data.mediaId)),
+          (outcome) => (outcome.ok ? { ok: true as const, photo: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const publishDishPhotoFn = createServerFn({ method: "POST" })
+  .validator(dishMediaIdSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["publish"] },
+      "fn/admin/dish-photo-publish",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(effects, service.publishPhoto(data.mediaId)),
+          (outcome) => (outcome.ok ? { ok: true as const, photo: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const returnDishPhotoToDraftFn = createServerFn({ method: "POST" })
+  .validator(dishMediaIdSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photo-draft",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(effects, service.returnToDraft(data.mediaId)),
+          (outcome) => (outcome.ok ? { ok: true as const, photo: outcome.value } : outcome),
+        ),
+    );
+  });
+
+export const removeDishPhotoFn = createServerFn({ method: "POST" })
+  .validator(dishMediaIdSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadMediaServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishMediaService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["import"] },
+      "fn/admin/dish-photo-delete",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePhotoTask(effects, service.removePhoto(data.mediaId)),
+          (outcome) => (outcome.ok ? { ok: true as const, deleted: outcome.value } : outcome),
+        ),
     );
   });
 

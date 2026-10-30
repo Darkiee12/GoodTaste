@@ -1,9 +1,10 @@
-import { formatTemplate } from "@/components/home/recommend/quiz-model";
+import { formatTemplate, scopeLabelFor } from "@/components/home/recommend/quiz-model";
 import {
   mealLabelFor,
   moodLabelFor,
   type CountryOption,
 } from "@/components/home/recommend/quiz-stages";
+import type { RecommendationLocation } from "@/modules/food-discovery/food.schema";
 import type {
   MealOccasion,
   RecommendationMood,
@@ -17,38 +18,40 @@ export interface SummaryChips {
 }
 
 /**
- * Compact editable summary shown above results (e.g. "Vietnam · Dinner ·
- * No pork"). Each chip returns to its step so the visitor adjusts one thing
- * instead of restarting. Allergies do not render here as editable text —
- * they stay a session-only safety input.
+ * Compact editable summary shown above results (e.g. "Exploring Vietnam ·
+ * Dinner · No pork"). Each chip returns to its step so the visitor adjusts
+ * one thing instead of restarting. Allergies do not render here as editable
+ * text — they stay a session-only safety input. The region chip names the
+ * scope honestly: approximate home regions explore by country name, precise
+ * fixes show the nearby label with accuracy, destinations show the plain
+ * country, worldwide stays unlabeled. Never claims city precision.
  */
 export function QuizSummary({
   allergies,
   avoid,
   copy,
   countryOptions,
-  detectedName,
   meal,
   mood,
   onEditStep,
   submittedCountry,
+  submittedLocation,
 }: {
   readonly allergies: ReadonlyArray<string>;
   readonly avoid: ReadonlyArray<string>;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
-  readonly detectedName: string | null;
   readonly meal: MealOccasion;
   readonly mood: RecommendationMood;
   readonly onEditStep: (step: number) => void;
   readonly submittedCountry: string | undefined;
+  readonly submittedLocation?: RecommendationLocation | undefined;
 }) {
-  const regionName =
-    submittedCountry === undefined
-      ? copy.recWhereAnywhere
-      : (countryOptions.find((option) => option.code === submittedCountry)?.label ??
-        detectedName ??
-        submittedCountry);
+  const regionName = scopeLabelFor(
+    { country: submittedCountry, location: submittedLocation },
+    copy,
+    countryOptions,
+  );
 
   const shownAvoid = avoid.slice(0, 2).join(", ");
   const hiddenAvoid = avoid.length - Math.min(avoid.length, 2);

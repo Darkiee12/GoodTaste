@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { RecommendationLocation } from "@/modules/food-discovery/food.schema";
 import {
   MEAL_OCCASIONS,
   RECOMMENDATION_MOODS,
@@ -14,7 +15,20 @@ export const mealSchema = z.enum(MEAL_OCCASIONS);
 /** UI mirror of the shared mood vocabulary; undefined is never a mood. */
 export const moodSchema = z.enum(RECOMMENDATION_MOODS);
 
-export type RecRegionMode = "anywhere" | "country";
+export type RecRegionMode = "anywhere" | "country" | "precise";
+
+/** Step 1 choice in display order: home region, precise, destination, worldwide. */
+export type RegionChoice = "home" | "precise" | "destination" | "worldwide";
+
+/** Where a country value came from: trusted network region or explicit choice. */
+export type CountrySource = "detected" | "chosen";
+
+/** Ephemeral precise fix: client memory only, never persisted or logged. */
+export interface PreciseFix {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracy: number | null;
+}
 
 export const MAX_REC_TERM_LENGTH = 100;
 
@@ -43,6 +57,8 @@ export interface QuizDraft {
   readonly allergiesRaw: string;
   readonly regionMode: RecRegionMode;
   readonly country: string;
+  readonly countrySource: CountrySource | null;
+  readonly precise: PreciseFix | null;
   readonly remember: boolean;
 }
 
@@ -51,6 +67,7 @@ export interface RecommendAnswers {
   readonly avoid: ReadonlyArray<string>;
   readonly allergies: ReadonlyArray<string>;
   readonly country: string | undefined;
+  readonly location?: RecommendationLocation | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
 }
@@ -59,7 +76,9 @@ export interface RecommendPayload {
   readonly meal: MealOccasion;
   readonly avoid: Array<string>;
   readonly allergies: Array<string>;
+  /** Legacy country mirror for display; stripped at transport when location is present. */
   readonly country?: string | undefined;
+  readonly location?: RecommendationLocation | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
   readonly surpriseSeed: number;
@@ -121,10 +140,57 @@ export const buildRecommendPayload = (
   avoid: [...answers.avoid],
   allergies: [...answers.allergies],
   country: answers.country,
+  location: answers.location,
   mood: answers.mood,
   locale: answers.locale,
   surpriseSeed: answers.surpriseSeed ?? 0,
 });
+
+/**
+ * Transport payload: the request schema accepts country XOR location, so the
+ * legacy country mirror is dropped whenever the discriminated location is
+ * present. Pure and shape-preserving otherwise.
+ */
+export const toTransportPayload = (payload: RecommendPayload): RecommendPayload =>
+  payload.location === undefined ? payload : { ...payload, country: undefined };
+
+/**
+ * Derive the discriminated location for a draft. Home region and chosen
+ * destination both filter by country (provenance differs for labels only);
+ * precise needs a live fix; anywhere is explicitly worldwide.
+ */
+export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefined => {
+  if (draft.regionMode === "precise") {
+    const fix = draft.precise;
+
+    if (fix === null) {
+      return undefined;
+    }
+
+    return {
+      kind: "precise",
+      latitude: fix.latitude,
+      longitude: fix.longitude,
+      accuracy: fix.accuracy,
+    };
+  }
+
+  if (draft.regionMode === "country") {
+    const normalized = draft.country.trim().toUpperCase();
+    const parsed = recCountrySchema.safeParse(normalized);
+
+    if (!parsed.success) {
+      return undefined;
+    }
+
+    return {
+      kind: draft.countrySource === "detected" ? "approx" : "destination",
+      country: parsed.data,
+    };
+  }
+
+  return { kind: "worldwide" };
+};
 
 /**
  * Surprise keeps the visitor's current meal, mood, region, and exclusions;
@@ -139,6 +205,7 @@ export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =
     avoid: parseCommaList(inputs.draft.avoidRaw),
     allergies: parseCommaList(inputs.draft.allergiesRaw),
     country: resolveCountry(inputs.draft.regionMode, inputs.draft.country),
+    location: draftLocation(inputs.draft),
     mood: inputs.mood,
     locale: inputs.locale,
     surpriseSeed: inputs.surpriseSeed,
@@ -149,6 +216,7 @@ export const validateRegion = (
   mode: RecRegionMode,
   country: string,
   copy: Messages,
+  precise: PreciseFix | null = null,
 ): string | null => {
   if (mode === "country") {
     if (!recCountrySchema.safeParse(country.trim().toUpperCase()).success) {
@@ -158,7 +226,99 @@ export const validateRegion = (
     return null;
   }
 
+  if (mode === "precise") {
+    return precise === null ? copy.recError : null;
+  }
+
   return null;
+};
+
+/**
+ * Choice precedence for the initial region: an explicit journey choice beats
+ * a saved opt-in preference, which beats the trusted network region. Never
+ * true for untouched defaults, so async detection can never clobber a manual
+ * selection.
+ */
+export const isExplicitRegionChoice = (draft: QuizDraft): boolean => {
+  if (draft.regionMode === "precise") {
+    return true;
+  }
+
+  if (draft.regionMode === "country") {
+    return draft.countrySource === "chosen";
+  }
+
+  return false;
+};
+
+/** Resolve the visible Step 1 choice from draft state and trusted detection. */
+export const regionChoiceFor = (draft: QuizDraft, detected: string | null): RegionChoice => {
+  if (draft.regionMode === "precise") {
+    return "precise";
+  }
+
+  if (draft.regionMode === "country") {
+    if (draft.countrySource === "detected") {
+      return "home";
+    }
+
+    if (
+      draft.countrySource === null &&
+      detected !== null &&
+      draft.country.toUpperCase() === detected
+    ) {
+      return "home";
+    }
+
+    return "destination";
+  }
+
+  return "worldwide";
+};
+
+/** Format a geolocation accuracy in meters; units need no translation. */
+export const formatAccuracyM = (accuracy: number): string =>
+  `±${Math.round(accuracy).toString()} m`;
+
+/**
+ * Result-scope label for the summary chips, composed from existing copy plus
+ * catalog country names: approximate home regions explore by name, precise
+ * fixes show the nearby label with accuracy, destinations show the plain
+ * country name, worldwide stays unlabeled. Never claims city precision.
+ */
+export const scopeLabelFor = (
+  input: {
+    readonly location?: RecommendationLocation | undefined;
+    readonly country?: string | undefined;
+  },
+  copy: Messages,
+  countryOptions: ReadonlyArray<{ readonly code: string; readonly label: string }>,
+): string => {
+  const nameOf = (code: string): string =>
+    countryOptions.find((option) => option.code === code)?.label ?? code;
+
+  const location = input.location;
+
+  if (location !== undefined) {
+    switch (location.kind) {
+      case "approx":
+        return formatTemplate(copy.recWhereExploring, nameOf(location.country));
+      case "precise":
+        return location.accuracy === null || location.accuracy === undefined
+          ? copy.recWhereNearYou
+          : `${copy.recWhereNearYou} · ${formatAccuracyM(location.accuracy)}`;
+      case "destination":
+        return nameOf(location.country);
+      case "worldwide":
+        return copy.recWhereAnywhere;
+    }
+  }
+
+  if (input.country !== undefined) {
+    return nameOf(input.country);
+  }
+
+  return copy.recWhereAnywhere;
 };
 
 const resolveCountry = (mode: RecRegionMode, country: string): string | undefined => {
@@ -196,6 +356,8 @@ export const EMPTY_DRAFT: QuizDraft = {
   allergiesRaw: "",
   regionMode: "anywhere",
   country: "",
+  countrySource: null,
+  precise: null,
   remember: false,
 };
 
@@ -244,8 +406,9 @@ const journeySnapshotSchema = z.object({
   draft: z.object({
     avoidRaw: z.string().max(500).default(""),
     allergiesRaw: z.string().max(500).default(""),
-    regionMode: z.enum(["anywhere", "country"]).default("anywhere"),
+    regionMode: z.enum(["anywhere", "country", "precise"]).default("anywhere"),
     country: z.string().max(12).default(""),
+    countrySource: z.enum(["detected", "chosen"]).nullable().default(null),
     remember: z.boolean().default(false),
   }),
   stepIndex: z.number().int().min(0).max(2).default(0),
@@ -288,14 +451,94 @@ export const writeJourneySnapshot = (snapshot: JourneySnapshot): void => {
 
   const country = sanitizeCountryCode(snapshot.draft.country);
 
+  // Coarse context only: precise coordinates never enter the journey cache,
+  // even though it is memory-only. Restoring a precise choice keeps the mode
+  // so the visitor can re-locate with one explicit tap.
   journeyCache = {
     ...snapshot,
-    draft: { ...snapshot.draft, country: country ?? "" },
+    draft: {
+      avoidRaw: snapshot.draft.avoidRaw,
+      allergiesRaw: snapshot.draft.allergiesRaw,
+      regionMode: snapshot.draft.regionMode,
+      country: country ?? "",
+      countrySource: snapshot.draft.countrySource,
+      remember: snapshot.draft.remember,
+    },
   };
 };
 
 export const clearJourneySnapshot = (): void => {
   journeyCache = null;
+};
+
+/** Full in-memory journey state the quiz hands to the snapshot builder. */
+export interface JourneyWriteModel {
+  readonly meal: MealOccasion;
+  readonly mood: RecommendationMood;
+  readonly draft: QuizDraft;
+  readonly stepIndex: number;
+  readonly submitted: RecommendPayload | null;
+  readonly showResults: boolean;
+  readonly surpriseSeed: number;
+}
+
+/**
+ * Coarse snapshot builder: precise coordinates never enter the journey
+ * cache, even though it is memory-only. A precise draft keeps its mode (the
+ * visitor re-locates with one explicit tap); precise results are dropped
+ * instead of re-running a stale fix on return, landing back on the quiz.
+ * Submitted payloads keep the legacy country mirror for restore display and
+ * re-runs, never the discriminated location.
+ */
+export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
+  if (model.submitted !== null && model.submitted.location?.kind === "precise") {
+    return {
+      meal: model.meal,
+      mood: model.mood,
+      draft: {
+        avoidRaw: model.draft.avoidRaw,
+        allergiesRaw: model.draft.allergiesRaw,
+        regionMode: model.draft.regionMode,
+        country: model.draft.country,
+        countrySource: model.draft.countrySource,
+        remember: model.draft.remember,
+      },
+      stepIndex: model.stepIndex,
+      submitted: null,
+      showResults: false,
+      surpriseSeed: model.surpriseSeed,
+    };
+  }
+
+  return {
+    meal: model.meal,
+    mood: model.mood,
+    draft: {
+      avoidRaw: model.draft.avoidRaw,
+      allergiesRaw: model.draft.allergiesRaw,
+      regionMode: model.draft.regionMode,
+      country: model.draft.country,
+      countrySource: model.draft.countrySource,
+      remember: model.draft.remember,
+    },
+    stepIndex: model.stepIndex,
+    // Field-by-field: the snapshot never carries the discriminated location,
+    // only the legacy country mirror for coarse restore display and re-runs.
+    submitted:
+      model.submitted === null
+        ? null
+        : {
+            meal: model.submitted.meal,
+            avoid: model.submitted.avoid,
+            allergies: model.submitted.allergies,
+            country: model.submitted.country,
+            mood: model.submitted.mood,
+            locale: model.submitted.locale,
+            surpriseSeed: model.submitted.surpriseSeed,
+          },
+    showResults: model.showResults,
+    surpriseSeed: model.surpriseSeed,
+  };
 };
 
 /**
@@ -313,6 +556,8 @@ export const draftFromSavedPrefs = (saved: SavedRecommendPrefs | null): QuizDraf
     allergiesRaw: "",
     regionMode: saved.country === undefined ? "anywhere" : "country",
     country: saved.country ?? "",
+    countrySource: saved.country === undefined ? null : "chosen",
+    precise: null,
     remember: true,
   };
 };

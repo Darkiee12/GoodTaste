@@ -33,6 +33,13 @@ const ITEM_SIZE_CLASS: ReadonlyMap<AdminSelectSize, string> = new Map([
  * trigger's own `data-state` (open/closed as Radix reports it), never by
  * focus/blur heuristics, so it stays correct after Escape, outside click,
  * or disable-while-open.
+ *
+ * Scroll-lock note: this Radix version always mounts a `remove-scroll` body
+ * lock while the listbox is open (there is no `modal` prop to opt out).
+ * The no-shift behavior for that lock lives in `src/styles.css`, which
+ * restores document flow for select/menu-only locks and keeps genuine
+ * modal locks (dialogs, drawers) intact. Do not add per-trigger margin or
+ * width hacks here.
  */
 export function AdminSelect({
   ariaLabel,

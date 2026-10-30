@@ -57,11 +57,6 @@ export function resolveDishesBackSearch(input: {
   return { lang: input.lang, status, cursor };
 }
 
-/** Breadcrumb current-page label for import jobs: "Job <first 8 chars>". */
-export function shortJobId(jobId: string): string {
-  return jobId.slice(0, 8);
-}
-
 export type AdminBreadcrumbItem =
   | {
       readonly label: string;

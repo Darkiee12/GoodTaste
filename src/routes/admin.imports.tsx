@@ -10,7 +10,8 @@ import {
 import { useState, type ReactNode } from "react";
 import { z } from "zod";
 
-import { AdminSelect, ImportStatusBadge } from "@/components/admin/ui";
+import { AdminSelectField } from "@/components/admin/select";
+import { ImportStatusBadge } from "@/components/admin/ui";
 import { adminImportJobsFn } from "@/modules/food-discovery/admin.functions";
 import { importJobStatusSchema } from "@/modules/food-discovery/admin.schema";
 import { authorizeFn } from "@/modules/user/admin.functions";
@@ -307,11 +308,11 @@ function AdminImports() {
             }}
             className="mt-6 grid grid-cols-1 gap-3 rounded-lg border border-border-soft bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
           >
-            <AdminSelect
+            <AdminSelectField
               id="imports-status-filter"
               label={copy.adminImportsFilterStatus}
               value={statusFilter}
-              onChange={selectStatusFilter}
+              onValueChange={selectStatusFilter}
               options={STATUS_FILTERS.map((value) => ({
                 label: value === "all" ? copy.adminImportsAllStatuses : value,
                 value,
