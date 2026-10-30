@@ -77,3 +77,17 @@ A checked-in migration is immutable once applied. Never edit, rename, or
 delete an applied file; write the next forward migration instead.
 
 Flyway manages the `feastjourney` app schema and schema history, while PostGIS extension objects are in `public` on initialization. Schema-qualify future app tables or set search_path intentionally; do not enable automatic baselining merely to bypass PostGIS-created public objects.
+
+Scanner forward migrations:
+
+- `V20261029_001`: four private scan workflow tables, guest/member ownership, immutable revisions and consented contributions.
+- `V20261029_002`: legacy restaurant-verification claims no longer raise price authority.
+- `V20261029_003`: contribution-to-relational-menu and private source-page mapping.
+- `V20261030_100`: erasable revision references with retained submitted revision numbers, deletion cooldown, supporting pages, reviewed menu/item text and draft variant status.
+- `V20261030_101`: venue-scoped source foreign key for price-free menu items; deferred until transaction commit to support atomic dependent changes.
+- `V20261030_102`: reviewed variant translations stored with immutable offering identity.
+- `V20261030_103`: original printed price tokens retained beside exact NUMERIC observations.
+
+The uncommitted scanner migrations were allocated this separate range before release because Food Discovery added `V20261030_001`. Earlier scanner numbering was exercised only in a disposable test database, which is preserved; validate the combined history against a fresh database rather than repairing or rewriting that history.
+
+These do not create a second published menu store. Private JSONB is temporary; approved facts continue to use the existing restaurant tables. Never change an applied file to resolve a failed check.

@@ -164,3 +164,9 @@ docker compose --env-file infra/.env -f infra/compose.yaml ps -a
 Local Compose is not a production deployment. For Docker Swarm, `depends_on` is **not** a rollout gate; run exactly one release-scoped Flyway job through deployment orchestration and deploy/update the app only after success. Use separate DDL/runtime DB credentials, reviewed rollback compatibility, backups, monitoring and a supported object-store provider.
 
 See [migration and deployment policy](migrations.md), [database operation](postgres.md) and [quality gates](../development/quality-gates.md).
+
+## Private scan maintenance
+
+Run `bun run maintenance:menu-scans` from a scheduled job every 15 minutes with the migrated application `DATABASE_URL` and server-side private S3 settings. It needs no OAuth/email credentials. Each run handles at most 100 expired sessions and 100 eligible assets with four concurrent deletions. Failed deletions defer for 15 minutes and produce a nonzero exit status; keep retrying on the next schedule and alert on repeated failures. Never delete the registered metadata to hide an object-store outage.
+
+Expiry removes private access immediately; successful binary cleanup is followed by private draft erasure. Reviewed relational facts and minimal consent/audit metadata may remain. Apply all Flyway migrations before starting the updated job. Rollback preserves additive schema and volumes; no clean/repair or blanket object deletion.

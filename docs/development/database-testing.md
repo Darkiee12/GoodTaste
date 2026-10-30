@@ -26,13 +26,18 @@
 ## CI sequencing
 
 The `Quality` workflow's `backend` job provisions a fresh, disposable
-PostgreSQL 18 instance, runs **all** migrations in version order, runs Flyway
-`validate`, then type-checks Reylo `.sql` imports, runs unit and integration
-tests, and builds the production bundle — all against the same migrated
-database. It fails when the database is unavailable or a migration is
-unapplied. Green builds based solely on a stale `.reylo/` cache are
-disallowed: Reylo re-analyzes changed statements against the live schema and
-fails closed without it.
+PostgreSQL 18 instance **and** a disposable single-node Garage object store,
+runs **all** migrations in version order, runs Flyway `validate`, then
+type-checks Reylo `.sql` imports, runs unit and integration tests, and builds
+the production bundle — all against the same migrated database. It fails when
+the database is unavailable or a migration is unapplied. Green builds based
+solely on a stale `.reylo/` cache are disallowed: Reylo re-analyzes changed
+statements against the live schema and fails closed without it.
+
+Storage integration tests use the disposable Garage over loopback S3 with
+committed test-only keys (`tests/bootstrap.ts` defaults, matching the CI
+Garage secrets). Buckets are created by the `--default-bucket` server flag;
+test objects use synthetic generated images, never real customer photographs.
 
 Keep database test fixtures synthetic and disposable; never use user photographs, real account tokens or production credentials. Use PostgreSQL for query tests rather than mocking SQL semantics.
 

@@ -48,3 +48,9 @@ column. No price column is added to canonical dishes. See
 Postgres constraints enforce relational integrity, Reylo types the SQL
 interface, Zod validates HTTP input at the TanStack boundary, and Effect
 Schema validates internal authoring/import payloads and domain invariants.
+
+Private menu workflow extends Restaurant Discovery through `menu_scan_sessions`, `menu_scan_assets`, immutable `menu_scan_revisions` and `menu_scan_contributions`. Guest bearer hashes and verified member owners are mutually exclusive. Revision JSONB is versioned private data, not published restaurant knowledge. Contribution menu/page mappings retain provenance after promotion. Erasure clears the current-revision pointer and nullable contribution revision FK, retaining only the submitted revision number and audit metadata.
+
+Approved original names, source language and one reviewed translation language per item/variant live in the existing relational menu tables. Price-free items also retain their source through a venue-scoped foreign key. Historical unknowns remain NULL. Inferred ingredient explanations are never promoted into canonical dish attributes. Photos remain registered private assets with the same consented deletion lifecycle even after approval.
+
+Price observations preserve the optional literal printed token in `raw_text` separately from exact NUMERIC `amount`. Unknown historical tokens are NULL; they are never reconstructed and passed off as printed evidence.

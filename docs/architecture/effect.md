@@ -32,3 +32,7 @@ Read `docs/architecture/domain-modeling.md` and `docs/architecture/access-contro
 Reylo type checking needs a schema-available development database (or explicitly supported cached analysis). Keep TypeScript 7.1 content mapper configuration and `--runExternalCode` working. Run migrations before checks once SQL imports exist.
 
 Docs: https://effect.website/docs/v4/runtime · https://effect.website/docs/v4/requirements-management/services · https://reylo.dev/#sql
+
+The scanner adds `MenuExtractor` and `PrivateMenuStorage` at the existing composition root. Storage initializes its client lazily and the Layer closes connections at disposal; disabled scanning does not break discovery. Actor/capability values remain request-scoped. Extraction uses a bounded request, database lease and provider cancellation rather than background promises.
+
+Nested `withTransaction` calls join the ambient `TxSql`. The outer workflow owns commit, rollback and bounded serialization retry. This is not a savepoint: callers must propagate a nested failure rather than catch it and commit partially applied work. Contribution promotion uses this contract to reuse import, observation review, publication and audit atomically, without external network work while holding the transaction.

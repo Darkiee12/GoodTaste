@@ -4,6 +4,11 @@ Mobile-first food discovery for travellers: culturally relevant dishes, verified
 
 Start with `AGENTS.md`, then `docs/README.md`.
 
+The [PR #4 implementation report](docs/development/pr4-implementation-status.md)
+records scanner/review behavior, migration integration, executed verification and
+remaining live-provider/deployment checks. Model fixtures do not verify real
+menu extraction accuracy.
+
 ## Run locally
 
 Prerequisites: Bun 1.4.4 (verified), Docker, `openssl` for secret generation.

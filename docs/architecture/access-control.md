@@ -72,6 +72,12 @@ This avoids two competing authorization systems: the plugin can never grant what
 
 Privileged mutations (role create/update/delete, grant replacement, assignments, ban/unban, session revocation) write their mandatory audit record in the same PostgreSQL transaction as the mutation: an audit-insert failure rolls the mutation back. Best-effort event audit (profile edits, favorites, provider-owned session flows) is recorded after the decision and never gates access. See `src/modules/user/server/operations/audit.ts` for the category contract.
 
+## Private menu scans
+
+Private menu scans use a separate resource capability: a server-issued random guest cookie whose hash is persisted. A scan UUID alone grants nothing. Each operation also checks expiry. Members use verified session identity; claiming a prior guest scan requires both that identity and the original capability, and is explicit. Guest scans cannot silently migrate between accounts. The scan page and currency caches are account-scoped.
+
+Contributions remain private. Inspection and decisions require both `restaurant:manage` and `restaurant:review` from current database grants. Publication of items and variants is review-gated; importers cannot assert restaurant ownership verification. Approval preserves the authenticated curator attribution and a mandatory transactional audit. Deleted/expired scans deny access before eventual physical deletion. Full policy: [Restaurant Discovery](restaurant-discovery.md).
+
 ## Future work
 
 API access/refresh tokens, if ever needed, must go through Better Auth's OAuth 2.1 provider capabilities — never a homemade JWT layer. There is no machine-identity model today: no service clients, no shared secrets, no credential rotation to document.

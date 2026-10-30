@@ -1,146 +1,224 @@
-# Restaurant discovery and observed prices
+# Restaurant discovery, private menu scans and ordering
 
-PR #4 owns `src/modules/restaurant-discovery/`, its additive Flyway migration
-`V20261028_100`–`106` plus `V20261029_001`–`002`, and restaurant routes/tests. Shared changes are limited to
-runtime composition, the permission vocabulary, User currency preference,
-home navigation, and the documented public contracts. Food Discovery's
-canonical identity and private queries remain read-only dependencies.
+Restaurant Discovery owns `src/modules/restaurant-discovery/`, its restaurant
+routes and its SQL under `server/repository/sql/`. Global Flyway history records
+the schema; see the [migration inventory](../../db/migrations/README.md).
+Food Discovery continues to own canonical dishes. The single dish route is
+`/dishes/$dishId`, accepting the established decimal ID or canonical slug.
 
-The outcome is three public journeys: dish → sourced restaurant offering,
-restaurant → menu → canonical dish, and guest menu scan → bilingual waiter
-order card. No questionnaire is required; Muse vision is used only for the
-scan journey.
+Public journeys are dish → sourced venue offering, restaurant → reviewed menu →
+waiter card, and private guest scan → corrected menu → waiter card. Reviewed menu
+reuse needs no model call. Scanning requires neither a venue record nor
+registration and never creates a restaurant from an AI guess.
 
-## Persistence and trust
+## Relational knowledge and publication
 
-A business has physical venues. Menus, sources, items, variants, serving
-evidence and prices are scoped to a venue. Composite foreign keys reject
-cross-branch evidence and prices. An item has an explicit `As listed`
-variant if no meaningful variant exists. A nullable, editorially assigned
-comparison key groups comparable portions; unknown portions cannot qualify
-for price sorting or a budget filter. Cuisine is never serving evidence.
+Businesses have physical venues. Menus, items, variants, source snapshots,
+serving evidence and prices are venue-scoped; composite foreign keys reject
+cross-branch attachments. Food's public `getPublishedDishIdentities` batch read
+filters candidate associations before Restaurant's SQL selects the best eligible
+match, so an unpublished first choice cannot hide a published alternative.
+Restaurant never imports Food's private SQL.
 
-Only accepted, unexpired exact/variant evidence participates in dish search.
-Suggested/fuzzy matches remain outside verified discovery. The published
-Food Discovery API confirms dish publication before search. Every privileged
-operation checks current database RBAC inside the operation and records an
-audit event in the mutation transaction.
+Imports create draft items and variants. Explicit publication requires
+`restaurant:review` in addition to management. Observation decisions use a
+pending-state compare-and-set and record attribution and audit in the same
+transaction. Approval publishes eligible drafts without silently reviving
+archived identities. Item/variant identity is immutable; changed names, portions
+or reviewed text need new rows. Moving a venue invalidates earlier source
+snapshots. Price-free imported items also retain a venue-scoped source reference;
+legacy rows may have unknown source identity.
 
-Item/variant identities cannot be relabelled after creation; retirement changes visibility without erasing history. Moving a branch invalidates its earlier source snapshots.
+Source category, claimed origin and editorial review are distinct. Import input
+accepts only `restaurantVerified: false`, and inserts force false. There is no
+independent restaurant-ownership verification workflow. The legacy boolean no
+longer raises a price's authority. A customer photo, model extraction or customer
+correction is not official restaurant verification. Only approved, unexpired
+exact/variant serving evidence participates in dish search; suggestions and
+cuisine labels are not serving evidence.
 
-Prices are append-only NUMERIC observations, with source, variant, channel,
-listed/paid kind, tax treatment and review horizon. A reviewed listed price
-always precedes a receipt-paid price. Current restaurant-verified official
-listed prices take precedence over other reviewed listed prices; ties use
-observation time and ID. Historical observations and conflicts remain in the
-review surface. The horizon is editorial policy, never a guarantee of current
-availability. Stale prices are labelled and excluded from strict comparisons.
+Approved information remains in the existing restaurant menu, item, variant,
+source, observation and serving-evidence tables. One reviewed translation
+language can accompany each immutable item in its existing row; a menu records
+its source language. Translation appears when it matches the requested display
+language, otherwise original text remains available. There is no parallel
+published JSON menu database or automatic translation cache. Inferred ingredients
+do not become canonical dish attributes.
 
-Receipts retain only structured food-line amounts and semantics, never card,
-customer or transaction identifiers. A derived paid unit amount must multiply exactly by quantity to reproduce the
-known net food-line total. Explicit unit prices must match the observed amount.
-Discount/fee breakdowns may be NULL when unknown; they never default to zero.
-Menu photographs are private scan evidence (Garage + `menu_scan_*` tables),
-never public menu authority; admin entry keeps the reviewed observation
-contract, and curator promotion writes through the same approved
-menu/evidence/price workflows.
+## Prices and currency
 
-## Currency contract
+Price observations are append-only PostgreSQL `NUMERIC`, transported as decimal
+strings. Original currency stays primary; private scans preserve raw printed
+price text separately. Listed prices precede receipt-paid observations;
+freshness, observation date and ID resolve selection. Receipt-paid values are
+historical observations and are not listed ordering prices. Unknown prices never
+become zero.
 
-Original currency is always primary. A conversion is optional and approximate,
-with effective date and source. A display-only FX failure leaves original
-prices intact. A budget/sort FX failure fails explicitly; unknown prices never
-qualify as zero. SQL compares unrounded NUMERIC products against exact budget
-strings using one request's rate snapshot. Portion and sales channel must match.
+Strict budget/sort comparisons require a published dish, compatible portion key,
+sales channel, current listed tax-included price, and common comparison currency.
+Unknown portions and unknown/excluded taxes do not qualify. Local ranges require
+at least three eligible venues. Stale/conflicting data remains reviewable; a
+review horizon never guarantees current availability. Receipt records contain
+structured food-line amounts only, not payment/customer identifiers. Unknown
+discounts and fees remain NULL, and quantity × unit amount must exactly reproduce
+a known net food-line total.
 
-The router preserves scalar URL values as text before Zod validation. Its default
-JSON/number coercion is deliberately replaced: direct dish IDs beyond Number's
-safe range and decimal budgets must not lose precision before reaching SQL.
-Repeated scalar keys are rejected by validators; older quoted-string links work.
+`effect/BigDecimal` performs source-currency lines, subtotal and FX arithmetic.
+A subtotal is available only when every selected line has a complete price in
+the same supported currency. Quantities are integers from 1 to 99. Mixed/unknown
+currencies or prices produce an explicit unavailable subtotal. Taxes and service
+charges are never inferred. A waiter card is an estimate to show staff, not an
+online restaurant order or checkout.
 
-Frankfurter v2 supplies daily reference rates. CSV preserves the decimal token
-without JSON number parsing. Provider currency metadata is intersected with
-SIX’s authoritative ISO 4217 monetary currency vocabulary, excluding crypto/provider pseudo-codes.
-Effect v4 already provides BigDecimal; conversion uses that existing exact
-decimal implementation. Display rounds half away from zero to ISO currency
-fraction digits. Intl formats integer BigInts and localized fractional digits,
-so even large amounts never pass through JavaScript Number.
+Frankfurter v2 supplies optional dated reference FX. CSV preserves exact decimal
+tokens; supported codes intersect SIX's authoritative ISO 4217 vocabulary.
+Display rounds half away from zero to the target currency's fraction digits.
+Conversion never creates an authoritative observation or implies acceptance of
+another currency. Display-only FX failure leaves normal reads usable; a dependent
+budget/sort fails explicitly. Independent pairs use concurrency four and one
+fixed rate per pair for the request. Token-owned PostgreSQL leases, expiry and
+failure cooldown bound refresh work; network calls run outside transactions.
+Defaults are 24-hour refresh and 72-hour maximum effective-date age. Cleanup
+failure preserves the original meaningful FX failure.
 
-The PostgreSQL cache retains provider/date/pair history. Refresh defaults to
-24 hours; effective-date age defaults to 72 hours (measured from the end of
-the provider date to allow normal weekends). Expiring token leases bound
-cross-process refreshes without holding a database transaction across HTTP.
-Failed refreshes have a short cooldown. Cached rates past the maximum age are
-never used. Provider HTTP has timeout, size and pair/date validation.
+Saved currency belongs to User. Query keys, local choices and late responses are
+scoped to the verified account; saves include the expected account identity.
+Guest local preference does not override a newly verified member preference.
+Display conversion changes do not refetch restaurant rows.
 
-Account currency overrides local explicit preference; local preference serves
-guests and accounts without a saved currency. No geographic inference is
-persisted. Currency-only display changes fetch rates, not restaurant rows.
+## Private scan lifecycle
 
-## Design and verification
+`/scan` accepts JPEG, PNG and WebP camera/gallery inputs: at most six pages,
+8 MiB each and 24 MiB together. The server bounds request bytes before form
+allocation, verifies signatures and decoding, limits images to 20 megapixels and
+12,000 pixels per dimension, applies orientation and re-encodes without EXIF.
+It reserves an opaque `menu/{session-id}/{uuid}` key before storage, then reads
+back bytes and verifies checksum/size before confirmation. Failed uploads remain
+registered for deletion retry. Pages can be reordered/removed locally before
+processing; revisions retain the extraction's source page identities.
 
-The existing cream, navy, orange, expressive heading and compact editorial
-cards are the visual references. Search uses labelled native controls, a list
-alternative to the optional map, explicit Near Me consent, empty/error/retry
-states and a mobile list/map toggle. The map is lazily mounted in ClientOnly.
+The four private workflow tables are `menu_scan_sessions`, `menu_scan_assets`,
+`menu_scan_revisions` and `menu_scan_contributions`.
+`menu_scan_contribution_menus` maps promoted relational menus and supporting
+pages to the reviewed submission. JSONB holds versioned private drafts, not
+published restaurant truth. The server replaces model identifiers and assigns
+identities to customer-added entries when saved. Revisions are immutable and
+corrections use an expected-revision compare-and-set. Printed text, translation,
+interpretation, unknown values and uncertainty remain separate.
 
-Verification covers fresh Flyway migration/validation, actual PostgreSQL/PostGIS
-queries and constraints, mocked FX failure/concurrency/decimal tests, production
-SSR/build and browser checks. Synthetic fixtures never become product data.
-Global geographic price analytics, public crowdsourcing, POS integration
-and live availability are outside this slice.
+Guests receive a 32-byte random capability in an HttpOnly, SameSite=Strict cookie
+(`__Host-fj-menu-guest` with Secure over HTTPS; a development-only name over HTTP).
+Only its SHA-256 hash is stored. A scan UUID or checksum does not authorize
+access. Every read, photo read and mutation checks ownership and expiry.
+Member access uses the verified Better Auth user; moving an earlier guest scan
+into an account requires an explicit capability-checked claim. Account changes
+remount private scan UI state. Reviewers use database RBAC, not guest cookies.
 
-## Menu scanner (Implemented)
+Personal scans expire after 24 hours. Explicit, unchecked `menu-facts-v1` consent
+submits one exact saved revision and extends private review retention to 30 days.
+That ceiling also applies to approved photographs and drafts: approval creates
+no indefinitely retained photo copy and never publishes images. Reviewed
+relational facts and minimal contribution/audit metadata may remain after
+erasure. The submitted revision number remains after its erasable JSON reference
+becomes NULL. Private access expires immediately; physical deletion is eventual
+and depends on the maintenance schedule and storage availability.
 
-Guests can scan a physical menu without registration at `/scan`: up to six
-JPEG/PNG/WebP photographs (8 MiB each, 24 MiB total), target-language choice,
-optional branch association, Muse `muse-spark-1.3` structured extraction,
-customer correction as a new immutable revision, dish/variant/quantity
-selection with an exact-decimal subtotal, and a bilingual waiter-facing order
-card. The deterministic React renderer feeds both reviewed relational menus
-and private scan drafts; the model never generates UI code.
+## Extraction and provider limits
 
-Private scans expire after 24 hours; contributions under explicit
-`menu-facts-v1` consent are retained up to 30 days for review. Photos stay in
-the private Garage bucket (server-only credentials, signed owner-scoped
-reads); structured drafts stay in PostgreSQL JSONB. Guest access uses a
-server-issued unguessable capability (sha256-persisted, short-lived cookie);
-members claim scans into their account after sign-in. Reviewers inspect photo
-+ extraction + branch + price associations through `/admin/restaurants` and
-promote approved facts through the existing menu/evidence/price operations —
-never by flipping a draft public. `restaurantVerified` cannot be self-asserted
-(schema accepts only `false`; imports force `false`); approving a price or
-serving observation publishes the item through a review-gated status change
-requiring `restaurant:review`.
+The server-only `MenuExtractor` adapter uses standard `muse-spark-1.3` through
+`POST https://api.meta.ai/v1/chat/completions`. Authorized server-read bytes are
+sent as multiple inline base64 image blocks with strict JSON Schema,
+`store: false`, no tools, no provider file uploads and no Contributor mode.
+The AI trust boundary validates shape, limits, exact money, currencies and
+source-asset membership. Menu text rejects NUL and malformed Unicode before
+PostgreSQL JSONB persistence. Normalized drafts use a conservative UTF-8 size
+bound including JSON spacing; oversized extraction/corrections fail explicitly
+before insertion. Truncation, refusal or invalid output fails recoverably;
+there is no freeform repair chain or model-generated executable UI. Full-page
+references remain; accurate bounding boxes are not claimed.
 
-## Operating the MVP
+The HTTP request has a 60-second application budget. The default 20-second
+adapter deadline covers response-body consumption, backoff and at most one
+retry. Cancellation reaches provider and storage requests. PostgreSQL guards at
+most four active extractions with a 90-second token-owned lease and five attempts
+per scan. Leases survive restarts, but extraction is request-bound: no untracked
+background promise or durable background job is launched. An expired lease can
+be retried explicitly; success reuses the stored revision.
 
-Authorized curators use `/admin/restaurants` to create a business/venue, enter a
-source-backed menu import, and submit observations. Imports remain pending until
-an actor with `restaurant:review` approves the price and serving evidence.
-Re-importing an existing offering must preserve its identity; append a new dated
-observation for price changes. Archive offerings to retire them. Source keys
-prevent duplicated submissions. Photo/file references are metadata only; this
-slice does not implement uploading, OCR or public receipt collection.
+[Meta's vision](https://dev.meta.ai/docs/image-understanding) and
+[structured-output](https://dev.meta.ai/docs/structured-output) guides document
+the request combination. Standard mode and `store: false` do not establish zero
+provider retention. Review the deployment account's
+[terms](https://dev.meta.ai/legal/terms-of-service) and
+[zero-data-retention policy](https://dev.meta.ai/help/policies-and-privacy/zero-data-retention)
+before processing customer photographs. FeastJourney's deletion policy applies
+to its own storage and cannot promise Meta deletion.
 
-Optional settings are listed in `.env.example`: `FX_ENDPOINT`,
-`FX_REFRESH_HOURS` (24), `FX_MAX_AGE_HOURS` (72),
-`RESTAURANT_REVIEW_DAYS` (90), the browser-visible licensed
-`VITE_MAP_STYLE_URL`, the scanner group (`MENU_SCANNER_ENABLED=false` by
-default plus `MENU_SCAN_*` bounds; reuses `MODEL_API_KEY`/`MODEL_BASE_URL`),
-and the private-bucket group (`S3_ENDPOINT_INTERNAL`, `S3_REGION`,
-`S3_BUCKET_PRIVATE`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`). Without a style URL, the restaurant list remains usable.
-The [Frankfurter documentation](https://frankfurter.dev/) describes its public,
-keyless daily-reference API and encourages caching; provider availability and
-abuse limits still apply. Currency vocabulary comes from
-[SIX ISO 4217 maintenance](https://www.six-group.com/en/products-services/financial-information/data-standards.html).
+No live Muse call or semantic extraction benchmark is verified for this work.
+Provider mocks test request shape and failures, not OCR, translation quality,
+layout association accuracy, model access or real strict-schema acceptance.
+A live multilingual benchmark remains necessary before claiming extraction
+accuracy or empirically choosing one versus two model stages.
 
-No restaurant inventory ships with this change. Administrators must supply
-verifiable sources before results appear. New discovery labels are currently
-English. Hosted map tiles and provider billing/restrictions must be configured
-for the deployment; browser verification used an intercepted empty test style.
-Live Frankfurter access was checked separately; ordinary tests use mocked FX.
-Live Muse extraction was exercised only through mocked provider contracts;
-no real customer image leaves the test suite. Public crowdsourcing,
-binary-source verification, POS integrations, global
-origin-country price comparisons and live availability remain deferred.
+## Contribution review and promotion
+
+After receiving a usable personal menu, customers may opt in separately.
+Submission publishes nothing. An actor with both `restaurant:manage` and
+`restaurant:review` inspects photographs, the exact revision, branch, original
+and translated text, variants, uncertainty and price semantics at
+`/admin/restaurants`. Approval requires selected items/prices, a confirmed sales
+channel and private-evidence rights/privacy review. Rejection need not invent an
+unknown channel. Observation dates must be in the past and validity must end by
+the contribution's evidence-retention horizon.
+
+Promotion reuses existing import, observation review and publication operations
+in one locked database transaction, including mandatory audit. Registered private
+objects are reused; no model/storage call runs inside that transaction. Each
+per-page menu records all supporting asset IDs. Only selected prices are
+approved; unselected/unknown prices remain unavailable. No canonical dish match
+or dietary guarantee is inferred. Source creation is attributed to the
+authenticated curator; guest provenance stays separate and private. Repeating
+the same completed decision is idempotent; a conflicting decision fails.
+After rejection, the customer may save a corrected revision and give fresh
+consent for that new snapshot. The rejected contribution is retained unchanged;
+pending and approved submissions cannot be silently replaced.
+
+Authorized reviewers see checksum-match counts from other retained contributions.
+Personal scans without contribution consent never enter that lookup, and no
+foreign scan IDs or photographs are disclosed through the hint. A matching image
+does not establish branch identity or freshness.
+
+## Operation and verification
+
+Enable scanning with `MENU_SCANNER_ENABLED=true`, `MODEL_API_KEY`, documented
+`MENU_SCAN_*` limits and private S3 settings in
+[environment configuration](../infra/environment.md). Missing Muse/storage
+configuration does not disable unrelated discovery; invalid enabled settings fail
+at the scanner's use boundary. Browsers only talk to FeastJourney: this path
+needs no browser S3 endpoint, signed URL or S3 CORS configuration.
+
+Schedule `bun run maintenance:menu-scans` at least every 15 minutes outside web
+traffic. No automatic scheduler or in-process timer is installed. Each run
+processes at most 100 expired sessions and 100 eligible assets with concurrency
+four. Failed deletions retain metadata and wait 15 minutes before retry. Completed
+sessions clear their current-revision pointer before draft erasure. Monitor
+failed counts and schedule execution; see the [storage runbook](../infra/object-storage.md).
+
+One deterministic React renderer supports reviewed menus and private drafts,
+original names, reviewed translations, variant prices, uncertainty and ingredient
+provenance. It offers touch/keyboard quantity controls and a high-contrast waiter
+dialog with customer-reviewed original-language instructions. Search retains a
+list alternative to the map; Near Me and map-area search clear conflicting named
+areas. English/Vietnamese interface labels are supplied; menu text can use all
+seven supported scanner languages.
+
+Currency queries and local member preference storage are account-scoped.
+Verified server preferences, including an explicit original-currency-only choice,
+take precedence over an older local value; late responses for another identity
+are ignored. Guest browser preferences use their own separate key.
+
+Report static checks, real PostgreSQL/Garage tests, browser journeys and live
+third-party calls separately. No historical PR test count or skipped CI commit
+establishes current readiness. The product vision, MVP and trust-and-safety
+documents referenced by `AGENTS.md` remain missing; this document does not invent
+requirements in their place.
