@@ -105,3 +105,13 @@ Do not expose raw SQL/driver exceptions through RPC. Translate expected Effect f
 Database contracts: Flyway owns all ordered DDL in `db/migrations/`; every domain owns its Reylo query files under `server/repository/sql/`. Typed query results do not replace business invariants or evidence provenance checks. Read `docs/architecture/persistence.md` before adding database layers or a repository facade.
 
 For multi-module atomic writes, the coordinating workflow establishes a single transaction scope and supplies the same transaction-bound client to participating repositories. Each module retains ownership of its data and validation rules.
+
+## Private menu scanning and waiter cards
+
+Restaurant Discovery owns scan operations, private revision documents, corrections, consent, reviewer decisions and promotion. `MenuExtractor` is the server-only vision capability; `PrivateMenuStorage` owns private byte IO. Food still owns canonical dishes and User still owns verified sessions, RBAC and currency preferences. No guest identity is inserted into the authenticated user table.
+
+`POST /api/menu-scans` validates discriminated JSON actions (`create`, `get`, `extract`, `revise`, `claim`, `delete`, `contribute`, `listContributions`, `getContribution`, `review`); multipart uploads carry `scanId`, `pageNumber` and `file`. Private GETs accept either scan or contribution ID plus asset ID. Every operation checks ownership or fresh reviewer grants. No response includes a storage key, bearer cookie or provider credential. Failures carry safe domain tag, status, code, retryability and optional cooldown; unexpected defects are redacted.
+
+Both reviewed relational offerings and private documents project into `InteractiveMenu`. React owns selection and the waiter card. Source prices remain decimal strings; incomplete or mixed-currency selections have no single subtotal. A displayed card is never a submitted restaurant order. Reviewed translations belong to immutable offering rows and only display for their reviewed language; unsupported translations remain absent.
+
+Contribution review takes selected items/prices, a confirmed branch/channel, observed/review dates and explicit private-evidence rights review. Promotion joins one database transaction through the existing import/review operations; it makes no provider or object-store call inside the transaction. Registered photos keep the consented expiry. See [Restaurant Discovery](restaurant-discovery.md) for lifecycle and failure contracts.

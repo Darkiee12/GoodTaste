@@ -1,75 +1,132 @@
-# Object storage — Garage local, S3 interface everywhere
+# Private menu object storage
 
-## Decision status
-Garage replaces MinIO for **local development**, using the upstream `dxflrs/garage:v2.5.0` image. See [ADR 0003](../decisions/0003-garage-local-s3.md). Its single-node configuration has no redundancy and is not a production topology. There is no application storage implementation yet.
+Garage is the local S3-compatible store, using `dxflrs/garage:v2.5.0`
+([ADR 0003](../decisions/0003-garage-local-s3.md)). The local single-node topology
+has no redundancy and is not a production deployment. PostgreSQL owns metadata,
+ownership, state, checksums and retention; Garage holds private image bytes.
 
 ## Local setup
 
-Copy `infra/.env.example` to `infra/.env` only if you do not already have that file. Keep existing PostgreSQL settings. Replace the Garage placeholders with independently generated local secrets:
+Keep existing `infra/.env` values. If the file does not exist, copy
+`infra/.env.example`. Generate distinct local-only credentials and store them
+only in the ignored environment file:
 
-- `GARAGE_RPC_SECRET`: generate 32 bytes as 64 hex characters (`openssl rand -hex 32`).
-- `S3_ACCESS_KEY_ID`: `GK` followed by a new 32-character hex value (`openssl rand -hex 16`).
-- `S3_SECRET_ACCESS_KEY`: another independent 64-character hex value (`openssl rand -hex 32`).
+- `GARAGE_RPC_SECRET`: 32 random bytes encoded as 64 hex characters.
+- `S3_ACCESS_KEY_ID`: `GK` followed by a fresh 32-character hex value.
+- `S3_SECRET_ACCESS_KEY`: another independent 64-character hex value.
 
-Save values only in the ignored `infra/.env`; do not paste them into logs or commit them. On an existing MinIO setup, add these variables and remove unused `MINIO_*` settings. Do not rerun credential generation as a rotation procedure: persisted keys need explicit Garage administration.
+Do not regenerate credentials as an ad hoc rotation: persisted Garage keys need
+explicit administration. Never print secrets or expanded Compose configuration.
 
-```bash
+```sh
 docker compose --env-file infra/.env -f infra/compose.yaml config --quiet
 docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait garage
 docker compose --env-file infra/.env -f infra/compose.yaml exec -T garage /garage status
 docker compose --env-file infra/.env -f infra/compose.yaml exec -T garage /garage bucket info feastjourney-private
 ```
 
-Garage initializes its single-node layout and the private `feastjourney-private` bucket at startup. Only the configured local S3 key receives access. Metadata and blobs persist separately in `garage_meta` and `garage_data`. Keep both volumes. RPC is container-loopback only; website and HTTP administration listeners are disabled. No host ports are published.
+Startup initializes the single-node layout, private `feastjourney-private`
+bucket and configured local key. Preserve both `garage_meta` and `garage_data`
+volumes. The base Compose file publishes no ports; RPC is loopback-only and
+website/HTTP administration listeners are disabled.
 
-Future network-local S3 clients use `http://garage:3900`, region `garage`, bucket `feastjourney-private`, Signature V4, and path-style addressing. The local bootstrap key is bucket-owner scoped; a production app needs a separate least-privilege key. Garage uses its own per-key bucket grants, not AWS bucket policies or object ACLs.
+An app inside Compose uses `S3_ENDPOINT_INTERNAL=http://garage:3900`,
+`S3_REGION=garage` and `S3_BUCKET_PRIVATE=feastjourney-private`, with Signature V4
+and path-style addressing. Host-run apps/tests can use the explicit local
+`infra/compose.ports.yaml` overlay, which maps S3 to `127.0.0.1:3900`. Set their
+internal endpoint accordingly. Do not expose storage or administration publicly.
 
-The host-run landing page does not need an S3 connection. Host clients and browser uploads need a separately reviewed loopback mapping or reverse proxy; do not use Docker DNS names in browser URLs.
+The local bootstrap key is bucket-owner scoped. Production must use a separate
+least-privilege application key for the private bucket and a maintained,
+backed-up storage topology. Garage uses per-key bucket grants, not AWS object
+ACLs or bucket policies; no public ACL or website endpoint is enabled.
 
-## Bucket design
-- `feastjourney-private`: private menu uploads, user review drafts, extracted/debug assets if justified.
-- Public images: **not in scope** until consent/moderation/rights and delivery strategy are implemented.
-- Key strategy: `menu/{session-id}/{opaque-uuid}` and `review/{session-id}/{opaque-uuid}`; opaque IDs prevent filenames/PII in keys.
-- Postgres `Asset` row stores owner, purpose, key, bucket, MIME, size, checksum, retention timestamps; do not store direct permanent object URLs.
+## Implemented upload and read path
 
-## Upload lifecycle
-1. Server validates session/intent, file category, MIME extension allowlist, size/quota and throttling.
-2. Server allocates opaque object key and short-lived signed PUT (or server-streamed upload if runtime/provider constraints require).
-3. Browser uploads over a correctly configured **browser-reachable** S3 hostname; internal Docker `garage:3900` cannot be used by the browser.
-4. Backend verifies object exists, declared MIME/size/checksum when possible; marks `uploaded` → `ready` or `rejected`.
-5. AI analysis references an authorized asset; read/download via short-lived signed GET or server stream.
-6. Expiration/deletion removes metadata access then binary, with tracked retry for failures/orphans.
+`src/server/integrations/private-menu-storage.ts` is server-only. Its Effect Layer
+owns a lazily initialized S3 client and releases connections at shutdown.
+Unrelated discovery does not depend on configured storage. Credentials and opaque
+object keys never become browser application data.
 
-## Content handling
-- Initially permit JPEG, PNG and WebP; verify actual file signature and decoded dimensions, not only `Content-Type`.
-- Apply strict byte/pixel count limits; sanitize metadata/EXIF as needed; reject SVG/HTML/executable formats.
-- Retain original images only as long as needed; choose a concrete short default at implementation and expose it in privacy notice.
-- No public ACLs, public buckets or wildcard write CORS. CORS exact origin/method/header for upload; signed URLs expire quickly.
+1. The browser posts a photograph through the same-origin `/api/menu-scans`
+   endpoint. The server checks the request origin, rate budget, verified member
+   or guest capability and scan ownership.
+2. Request bytes are bounded before form allocation. JPEG, PNG and WebP signatures
+   must match the declared type; Sharp decodes with a 20-megapixel limit and
+   rejects images over 12,000 pixels per dimension or animated/multipage files.
+   At most six pages, 8 MiB each and 24 MiB total are accepted.
+3. Orientation is applied and the image is re-encoded as JPEG without EXIF or
+   trailing payloads. The server reserves `menu/{scan-id}/{opaque-uuid}` metadata
+   before writing the object.
+4. A bounded read-back verifies byte count and SHA-256 before the asset becomes
+   ready. Failure/interruption attempts removal; the committed reservation tracks
+   any cleanup still required.
+5. Owners and authorized reviewers read photos through authenticated same-origin
+   GET requests using scan/contribution and asset IDs. Responses are private,
+   no-store and never expose the object key. Muse receives authorized server-read
+   inline bytes; no public photo URL or provider file upload is needed.
 
-## Runtime configuration contracts
-- App service endpoint: `S3_ENDPOINT_INTERNAL`, credentials, region, bucket, path-style compatibility.
-- Signed browser URL endpoint: `S3_ENDPOINT_PUBLIC` (its hostname and scheme must be resolvable from a browser). Avoid signing for an internal hostname then string-rewriting URL signatures.
-- Configure same bucket/region and endpoint addressing consistently across upload and access operations.
+This path uses no presigned URL and requires no browser-visible S3 hostname or
+S3 CORS. `S3_ENDPOINT_PUBLIC` is not consumed. Do not sign an internal hostname
+then rewrite it; direct signed browser upload would require a separate reviewed
+contract. Browsers never need Docker DNS names.
 
-## Deletions and tests
-- Unit: key ownership checks, type/size validation, expiry logic.
-- Integration: upload → confirm → signed read → delete → no access, with distinct sessions.
-- Failure injection: object uploaded but DB write fails; DB row exists but object missing; expired signed URL; invalid image.
+Promotion reuses registered scan assets rather than making untracked
+`evidence/` copies. Approval does not publish photographs. Relational source and
+menu provenance records identify the supporting pages, while their private bytes
+retain the customer's consented lifecycle.
 
-## Existing MinIO data and rollback
+## Retention and deletion
 
-The configuration change does not migrate objects. Never point Garage at a MinIO data directory: their on-disk formats differ. No MinIO volumes are deleted or repurposed. If another environment has existing uploads, preserve its old configuration, credentials, and data, pause writers, and copy through the two S3 endpoints with a reviewed tool such as `rclone copy`. Verify object counts, content, metadata, and access isolation before changing application endpoints. Avoid `sync --delete` or removing the source.
+Personal scans expire after 24 hours. Optional `menu-facts-v1` contribution
+consent allows up to 30 days for private photographs and draft JSON, including
+approved submissions. Reviewed relational facts and minimal attribution/audit
+metadata may remain after private data erasure; a prior revision number is not
+a permanent copy of its JSON. The provider's independent retention is described
+in the [scanner contract](../architecture/restaurant-discovery.md).
 
-Garage does not support S3 object versioning or AWS bucket-policy APIs. Do not assume versions or policies can be copied; Garage bucket grants must be configured separately. Reissue presigned URLs against the new hostname/region rather than rewriting old signatures. Rollback restores the old service/endpoint while retaining both sets of data; writes made after cutover require reconciliation.
+Expired/deleted sessions immediately lose customer/reviewer access. Physical
+erasure is eventual: operators must schedule `bun run maintenance:menu-scans`,
+normally every 15 minutes, outside web request traffic. The CLI needs the
+application database and private storage settings, not OAuth/email credentials.
+It does not install its own timer.
 
-Keep future SDK interactions behind the server-only storage boundary. Before enabling uploads, manually verify PUT, HEAD, GET, presigned access, anonymous denial, CORS, and deletion of disposable objects. No tests or application features are added by this scaffold change.
+Each run handles at most 100 expired sessions and 100 eligible assets, with
+four concurrent removals. A two-minute upload grace prevents deletion racing an
+active upload; unconfirmed abandoned uploads become eligible after five minutes.
+Storage failures increment tracked attempts and defer retry for 15 minutes,
+without an infinite same-run retry loop. Only after all registered assets are
+deleted does a session clear its current revision and erase private draft JSON.
+Contribution metadata keeps the submitted revision number with a NULL draft
+reference. A failed removal keeps metadata for retry. Monitor reports and a
+nonzero exit status; do not promise immediate complete deletion during an outage.
 
 ## Verification
 
-On 2026-10-27, `docker compose --env-file infra/.env.example -f infra/compose.yaml config --quiet` and `bun run check` passed. An isolated Garage v2.5.0 instance using temporary credentials and `/tmp` bind storage passed manual Signature V4 PUT, HEAD, GET, and presigned GET checks; unsigned GET returned 403. Restarting the instance preserved the object and access behavior. No host ports were published, existing services/volumes were untouched, and no MinIO data was copied. Browser CORS and the future application adapter remain unverified.
+Use synthetic images and a proven disposable bucket/namespace. Tests should
+cover upload confirmation, decoded limits, forged MIME, missing objects,
+cross-session denial, cancellation, post-upload database failure, bounded
+deletion failure/retry and expired draft erasure. PostgreSQL/Garage integration
+is distinct from mocked provider tests and from browser evidence; consult
+[database testing](../development/database-testing.md) for commands and report
+the current run's outcomes rather than historical scaffold results.
 
-## Upstream references
+Historical 2026-10-27 smoke tests covered Signature V4 PUT/HEAD/GET, signed GET,
+anonymous denial and restart persistence. Those results do not verify the
+current application adapter, browser journeys or a production deployment.
 
-- [Garage quick start and bootstrap flags](https://garagehq.deuxfleurs.fr/documentation/quick-start/)
-- [Configuration and secret environment variables](https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/)
-- [S3 compatibility and permission differences](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/)
+## Existing data and rollback
+
+Garage cannot reuse MinIO's on-disk format. Never delete or repurpose existing
+volumes to recover an error. A migration from another store requires a reviewed
+copy through S3 endpoints, verified content/access and reconciliation of writes
+before rollback. Garage does not offer S3 versioning or AWS bucket-policy APIs.
+
+Rollback the application only while its schema remains compatible. Do not use
+Flyway clean/repair or object deletion as a rollback shortcut. Future direct
+signed access would need its own endpoint, expiry and authorization validation.
+
+[Garage quick start](https://garagehq.deuxfleurs.fr/documentation/quick-start/),
+[configuration](https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/)
+and [S3 compatibility](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/)
+describe the supported provider behavior.

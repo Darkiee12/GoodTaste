@@ -34,6 +34,9 @@ Four read-only audits complement oxlint. Tool versions are pinned in `package.js
 - **Dependencies** (`audit:dependencies` → `bun audit`): fails on known CVEs. A `tinypool` override in `package.json` pins the transitive fix oxfmt's range blocks; re-check the override whenever oxfmt is upgraded.
 - **AI slop** (`audit:slop` → `bunx aislop@0.18.1 ci`): errors-only gate over application code (see `.aislop/config.yml`, which excludes vendored `repos/`). Known accepted warnings: dish-data duplication shape in `food-locations.ts` (data tables legitimately repeat; a shared helper would reintroduce the lat/lon positional footgun the `Latitude`/`Longitude` brands eliminate).
 - **React Doctor** (`audit:react-doctor`): error-gated with telemetry and supply-chain scans off. `doctor.config.json` downgrades the hydration-branch rule to warn: the globe's reduced-motion branch only renders inside a `ClientOnly` boundary, so it can never hydrate on the server.
+  The audit calls the explicit pinned `doctor` project script, which avoids the
+  CLI's coding-agent setup prompt. Serial scanning bounds local worker use;
+  rule severity is unchanged and no generated agent files are installed.
 - **React Compiler readiness** (`audit:react-compiler`): informational today — the compiler is not adopted. Keep it green so adoption stays a one-step decision.
 
 ## Scope

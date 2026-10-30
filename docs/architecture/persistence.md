@@ -134,6 +134,10 @@ A guest or member is represented by a trusted Effect `Data.TaggedEnum` actor; it
 
 Input parsing belongs at HTTP/AI/external-provider trust boundaries; do not introduce duplicate Zod row validators just because Reylo returns a row. Domain invariants still need checks and safe output serialization.
 
+## Private scan persistence
+
+Private scan JSONB is decoded as a versioned external document at the actual AI/customer trust boundary. It does not replace relational menu tables. Model and new customer draft IDs are assigned by the server. Revisions append under an expected-revision check; submitted revisions are fixed snapshots. Cleanup deletes expired private JSON and bytes while retaining minimal consent/review attribution and approved relational facts. Single-row inserts use a provable single `VALUES` row; callers do not normalize Reylo arrays into rows.
+
 ## References
 
 - https://reylo.dev/#sql
