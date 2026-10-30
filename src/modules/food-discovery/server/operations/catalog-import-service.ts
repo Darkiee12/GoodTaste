@@ -132,6 +132,7 @@ export interface ImportJobIssueRecord {
   readonly dishId: string | null;
   readonly recordIndex: number | null;
   readonly recordSlug: string | null;
+  readonly duplicateOf: string | null;
   readonly createdAt: string;
 }
 
@@ -202,21 +203,25 @@ export const IMPORT_APPLY_BATCH_SIZE = MAX_IMPORT_RECORDS;
  * Best-effort duplicate target from a stored import-record payload envelope.
  * Corrupt payloads surface as null and fail loudly at apply time, never
  * silently. Module scope: captures nothing from the service closure.
- * Uses Effect's documented safe-parse idiom (Option.liftThrowable over
- * JSON.parse, then a schema decode) instead of try/catch.
+ * Plain try/catch JSON parse plus a schema decode, matching the repo's
+ * established cursor.ts / quiz-model.ts idiom.
  */
 const StoredDuplicateEnvelope = Schema.Struct({ duplicateOf: Schema.NullOr(Schema.String) });
-
-const safeJsonParse = Option.liftThrowable(JSON.parse);
 
 const storedDuplicateOf = (payloadText: string | null): string | null => {
   if (payloadText === null || payloadText === "") {
     return null;
   }
 
-  const decoded = Option.flatMap(safeJsonParse(payloadText), (raw) =>
-    Schema.decodeUnknownOption(StoredDuplicateEnvelope)(raw),
-  );
+  let raw: unknown;
+
+  try {
+    raw = JSON.parse(payloadText);
+  } catch {
+    return null;
+  }
+
+  const decoded = Schema.decodeUnknownOption(StoredDuplicateEnvelope)(raw);
 
   if (Option.isSome(decoded) && decoded.value.duplicateOf !== null) {
     return decoded.value.duplicateOf;
