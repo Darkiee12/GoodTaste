@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -20,6 +20,7 @@ import type {
   ValidateOutcome,
 } from "@/components/admin/import-wizard/types";
 import { UploadStage } from "@/components/admin/import-wizard/upload-stage";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import {
   adminImportApplyFn,
   adminImportJobDetailFn,
@@ -276,15 +277,20 @@ function AdminImportWizard() {
 
   return (
     <div className="bg-cream text-ink">
-      <p>
-        <Link to="/admin/imports" search={{ lang }}>
-          {copy.adminImportBackToImports}
-        </Link>
-      </p>
+      <AdminPageHeader
+        lang={lang}
+        breadcrumbs={[
+          { label: copy.adminWorkspace, to: "/admin", search: { lang } },
+          { label: copy.adminImports, to: "/admin/imports", search: { lang } },
+          { label: copy.adminImportsNewTitle },
+        ]}
+        title={copy.adminImportsNewTitle}
+        description={copy.adminImportSchemaLifecycle}
+      />
 
-      <h1 className="font-display text-4xl tracking-wide">{copy.adminImportsNewTitle}</h1>
-
-      <StepProgress copy={copy} stage={stage} />
+      <div className="mt-4">
+        <StepProgress copy={copy} stage={stage} />
+      </div>
 
       {stage === "upload" ? (
         <UploadStage

@@ -1,14 +1,16 @@
-import { createFileRoute, getRouteApi, Link, redirect, useRouter } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { z } from "zod";
 
+import { AdminPageHeader, shortJobId } from "@/components/admin/page-header";
 import { ImportStatusBadge } from "@/components/admin/ui";
 import { adminImportJobDetailFn } from "@/modules/food-discovery/admin.functions";
 import { importJobStatusSchema } from "@/modules/food-discovery/admin.schema";
 import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
 import { formatAdminDateTime } from "@/shared/format";
-import { messagesFor } from "@/shared/i18n";
+import { messagesFor, type Locale } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -237,10 +239,36 @@ const recordStatusClass = (status: JobRecord["status"]): string => {
   return "border-amber-200 bg-amber-50 text-amber-800";
 };
 
+function ImportJobHeader({
+  badge,
+  jobId,
+  lang,
+}: {
+  readonly badge?: ReactNode;
+  readonly jobId: string;
+  readonly lang: Locale;
+}): ReactNode {
+  const copy = messagesFor(lang);
+
+  return (
+    <AdminPageHeader
+      lang={lang}
+      breadcrumbs={[
+        { label: copy.adminWorkspace, to: "/admin", search: { lang } },
+        { label: copy.adminImports, to: "/admin/imports", search: { lang } },
+        { label: `${copy.adminImportsJob} ${shortJobId(jobId)}` },
+      ]}
+      title={`${copy.adminImportsJob} ${jobId}`}
+      badge={badge}
+    />
+  );
+}
+
 function AdminImportDetailError({ reset }: { readonly reset: () => void }) {
   const { lang } = rootRoute.useSearch();
   const copy = messagesFor(lang);
   const router = useRouter();
+  const { jobId } = Route.useParams();
 
   const retry = (): void => {
     reset();
@@ -250,18 +278,10 @@ function AdminImportDetailError({ reset }: { readonly reset: () => void }) {
   return (
     // The admin shell provides the page container; this view owns content only.
     <div>
-      <p className="mb-4">
-        <Link
-          to="/admin/imports"
-          search={{ lang }}
-          className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
-        >
-          {copy.adminImportBackToImports}
-        </Link>
-      </p>
+      <ImportJobHeader jobId={jobId} lang={lang} />
       <p
         role="alert"
-        className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
+        className="mt-4 rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
       >
         {copy.adminLoadFailed}
       </p>
@@ -341,19 +361,12 @@ function AdminImportDetail() {
 
   if (detail === null) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8">
-        <p className="mb-4">
-          <Link
-            to="/admin/imports"
-            search={{ lang }}
-            className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
-          >
-            {copy.adminImportBackToImports}
-          </Link>
-        </p>
+      // The admin shell provides the page container; this view owns content only.
+      <div>
+        <ImportJobHeader jobId={jobId} lang={lang} />
         <p
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
+          className="mt-4 rounded-lg border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-800"
         >
           {copy.adminLoadFailed}
         </p>
@@ -402,22 +415,11 @@ function AdminImportDetail() {
   return (
     // The admin shell provides the page container; this view owns content only.
     <div>
-      <p className="mb-4">
-        <Link
-          to="/admin/imports"
-          search={{ lang }}
-          className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-blue-hover underline underline-offset-4"
-        >
-          {copy.adminImportBackToImports}
-        </Link>
-      </p>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-4xl tracking-wide">
-          {copy.adminImportsJob} {detail.job.id}
-        </h1>
-        <ImportStatusBadge status={detail.job.status} />
-      </div>
+      <ImportJobHeader
+        jobId={detail.job.id}
+        lang={lang}
+        badge={<ImportStatusBadge status={detail.job.status} />}
+      />
 
       {applying ? (
         <section
