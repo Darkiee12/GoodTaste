@@ -1,0 +1,15 @@
+# Migration-only image for the Dokploy swarm stack. Flyway plus the
+# versioned migrations baked in — no volume mounts, so the CI-rendered
+# stack file is fully self-contained (Dokploy `raw` stacks have no repo
+# checkout to mount from).
+#
+# Built and pushed by CI alongside the app image; never built by hand.
+# Runtime configuration arrives exclusively through FLYWAY_* environment
+# variables (see docker-compose.swarm.yml); no credentials are baked in.
+FROM flyway/flyway:13.11.1
+
+COPY db/migrations /flyway/sql
+
+# connectRetries keeps the one-shot container from racing the database;
+# depends_on healthchecks order it first, this is the second layer.
+CMD ["-connectRetries=60", "migrate"]

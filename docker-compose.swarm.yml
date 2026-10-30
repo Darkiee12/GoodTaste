@@ -1,0 +1,161 @@
+# Dokploy swarm stack TEMPLATE — never deployed directly.
+#
+# CI renders an immutable copy (pinned GHCR image SHAs) and pushes it with
+#   POST /api/compose.update {composeId, sourceType: "raw", composeType: "stack"}
+# then rolls it out with POST /api/compose.deploy {composeId, ...}.
+# Dokploy Compose service: source Raw, compose type Stack.
+#
+# Template parameters (substituted by the render script, never by hand):
+#   GHCR_IMAGE_PREFIX  e.g. ghcr.io/darkiee12
+#   VERSION            e.g. sha-<40-hex> (rollback: any immutable tag)
+# Every other ${VAR} is runtime configuration from the Dokploy stack
+# environment UI. `:?` fails the deploy fast with a named variable.
+#
+# Local structural validation only (never deploys prod data):
+#   VERSION=test GHCR_IMAGE_PREFIX=ghcr.io/example ... docker compose -f docker-compose.swarm.yml config --quiet
+
+x-app-security: &app-security
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:exec,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-restart-policy: &restart-policy
+  condition: any
+  delay: 5s
+
+services:
+  postgres:
+    image: postgis/postgis:18-3.6-alpine
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - infra
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER must be set} -d ${POSTGRES_DB:?POSTGRES_DB must be set}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      update_config:
+        order: stop-first
+        parallelism: 1
+        failure_action: rollback
+      restart_policy: *restart-policy
+
+  # One-shot gate: runs migrations to completion BEFORE the app rolls out
+  # (see the app's start-first update below), then exits. `none` keeps a
+  # successful exit from restarting. Never `repair`/`clean` here.
+  migrator:
+    <<: *app-security
+    image: ${GHCR_IMAGE_PREFIX:?GHCR_IMAGE_PREFIX must be set}/feastjourney-migrator:${VERSION:?VERSION must be set}
+    networks:
+      - infra
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      FLYWAY_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      FLYWAY_SCHEMAS: feastjourney
+      FLYWAY_DEFAULT_SCHEMA: feastjourney
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+      FLYWAY_BASELINE_ON_MIGRATE: "false"
+      FLYWAY_CLEAN_DISABLED: "true"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none
+
+  app:
+    <<: *app-security
+    image: ${GHCR_IMAGE_PREFIX:?GHCR_IMAGE_PREFIX must be set}/feastjourney:${VERSION:?VERSION must be set}
+    networks:
+      - dokploy-network
+      - internal
+      - infra
+    expose:
+      - "3000"
+    environment:
+      # Inside this network the database is `postgres:5432`. Keep passwords
+      # free of URL-special characters (`@`, `:`, `/`) or percent-encode them.
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL must be the exact public https origin, no trailing slash}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID must be set}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET must be set}
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID:?FACEBOOK_CLIENT_ID must be set}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET:?FACEBOOK_CLIENT_SECRET must be set}
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST must be set}
+      SMTP_PORT: ${SMTP_PORT:?SMTP_PORT must be set}
+      SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD must be set}
+      EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM must be set}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      RATE_LIMIT_PUBLIC: ${RATE_LIMIT_PUBLIC:-60}
+      RATE_LIMIT_SEARCH: ${RATE_LIMIT_SEARCH:-20}
+      RATE_LIMIT_ADMIN: ${RATE_LIMIT_ADMIN:-10}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-15000}
+      OWNER_EMAIL: ${OWNER_EMAIL:-}
+      RECOMMENDATION_PROVIDER: ${RECOMMENDATION_PROVIDER:-deterministic}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_MODEL_ID: ${MODEL_MODEL_ID:-muse-spark-1.3}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://api.meta.ai/v1}
+      MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-15000}
+      MODEL_CANDIDATE_LIMIT: ${MODEL_CANDIDATE_LIMIT:-60}
+      MODEL_OUTPUT_LIMIT: ${MODEL_OUTPUT_LIMIT:-10}
+      MODEL_MAX_TOKENS: ${MODEL_MAX_TOKENS:-4000}
+    deploy:
+      replicas: 1
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: dokploy-network
+        traefik.http.routers.feastjourney.rule: "Host(`${APP_HOST:?APP_HOST must be the public hostname}`)"
+        traefik.http.routers.feastjourney.entrypoints: websecure
+        traefik.http.routers.feastjourney.tls.certresolver: letsencrypt
+        traefik.http.services.feastjourney.loadbalancer.server.port: "3000"
+      update_config:
+        order: start-first
+        parallelism: 1
+        failure_action: rollback
+        delay: 10s
+      rollback_config:
+        order: start-first
+        parallelism: 1
+      restart_policy: *restart-policy
+    # Liveness comes from the image itself (bun fetch /health/live);
+    # readiness (/health/ready) is for humans and the deploy wait loop,
+    # never the restart loop — a wedged database must not flap the container.
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  dokploy-network:
+    external: true
+  internal:
+    driver: overlay
+    attachable: true
+  infra:
+    driver: overlay
+    attachable: true
+    internal: true
