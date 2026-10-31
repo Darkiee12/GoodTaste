@@ -118,6 +118,9 @@ jobs:
           # fails the build-image job minutes later with a confusing
           # "artifact not found". Fail here, where the evidence is fresh.
           if-no-files-found: error
+          # .output is a dot-directory: without this the action matches
+          # nothing and uploads an empty artifact (warned, exit 0).
+          include-hidden-files: true
       - name: Failure diagnostics (no secrets)
         if: failure()
         run: |
