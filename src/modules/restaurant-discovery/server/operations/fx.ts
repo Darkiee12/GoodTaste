@@ -1,4 +1,4 @@
-import { Clock, Config, Context, Effect, Exit, Layer } from "effect";
+import { Clock, Config, Context, Effect, Exit, Layer, Schedule } from "effect";
 
 import {
   acceptableRate,
@@ -112,17 +112,27 @@ export function makeFxRates(provider: FxProvider["Service"], policy: FxPolicy) {
         if (usable) return cached;
 
         // Another replica may own a cold refresh. Bound waiting below the HTTP request timeout.
-        for (let attempt = 0; attempt < 30; attempt += 1) {
-          yield* Effect.sleep("100 millis");
-          const refreshed = yield* runQuery("fx/wait", (sql) => latest.run(sql, params));
+        // The poll reports staleness as a typed FxUnavailable so Effect.retry only repeats
+        // that case (Schedule.spaced("100 millis") x 29 retries = 30 freshness checks);
+        // database failures propagate immediately, and interruption never retries.
+        const poll = Effect.flatMap(
+          Effect.zip(
+            runQuery("fx/wait", (sql) => latest.run(sql, params)),
+            Clock.currentTimeMillis,
+          ),
+          ([refreshed, refreshedAt]) =>
+            refreshed !== null && acceptableRate(refreshed, refreshedAt, policy.maxAgeMs)
+              ? Effect.succeed(refreshed)
+              : Effect.fail(
+                  new FxUnavailable({ reason: "Reference rate is refreshing; retry shortly" }),
+                ),
+        );
 
-          const refreshedAt = yield* Clock.currentTimeMillis;
-
-          if (refreshed !== null && acceptableRate(refreshed, refreshedAt, policy.maxAgeMs))
-            return refreshed;
-        }
-
-        return yield* new FxUnavailable({ reason: "Reference rate is refreshing; retry shortly" });
+        return yield* Effect.retry(poll, {
+          while: (error) => error instanceof FxUnavailable,
+          times: 29,
+          schedule: Schedule.spaced("100 millis"),
+        });
       }
 
       return yield* Effect.onExit(

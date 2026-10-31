@@ -182,6 +182,7 @@ export const PrivateMenuStorageLive = Layer.effect(
             }
           } finally {
             await reader.cancel();
+            reader.releaseLock();
           }
 
           if (
