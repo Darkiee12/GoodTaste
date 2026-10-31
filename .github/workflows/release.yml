@@ -25,7 +25,7 @@
 #   CF_ACCESS_CLIENT_SECRET (Cloudflare Access service token allowed ONLY
 #   on the Dokploy dashboard path).
 # - GHCR: nothing to configure; GITHUB_TOKEN with job-level packages:write
-#   publishes ghcr.io/<owner-lowercase>/feastjourney{,-migrator}. Dokploy
+#   publishes ghcr.io/<owner-lowercase>/feastjourney{,-migrator,-garage}. Dokploy
 #   pulls with its own registry credential — never the publish token.
 
 name: Release
@@ -155,6 +155,13 @@ jobs:
           # volume mounts, so the raw Dokploy stack is self-contained.
           - service: feastjourney-migrator
             dockerfile: infra/Dockerfile.migrator
+            needs_output: "false"
+          # Garage: baked non-secret TOML (infra/garage.swarm.toml) plus the
+          # pinned upstream daemon. No app source, no secrets, no .output.
+          # Same immutable :sha-<SHA> tag as app/migrator so the rendered
+          # Swarm stack pins all three images to one release.
+          - service: feastjourney-garage
+            dockerfile: infra/Dockerfile.garage
             needs_output: "false"
     outputs:
       image: ${{ steps.meta.outputs.image }}

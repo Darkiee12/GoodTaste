@@ -243,19 +243,30 @@ never let this job run on PRs.
   maintenance window (sessions invalidate).
 - Reboot behavior: Dokploy + DB restart on boot; app waits on readiness,
   not on fixed sleeps.
-- **Garage is excluded from production.** Verified: no `src/` import
-  touches S3/object storage (only `infra/compose.yaml` references Garage,
-  for local dev). PR #3 serves no binary uploads, so production runs no
-  object store at all — no Garage container, no bucket, no S3 secrets.
-  When uploads land, pick a maintained S3-compatible service (the
-  single-node Garage topology is local-only by design) and revisit this
-  section.
+- **Garage runs in Swarm as a single node (NOT highly available).**
+  The stack includes `feastjourney-garage:<sha>` (config-baked immutable
+  image), pinned to the labeled durable-storage node with persistent
+  `garage_meta` + `garage_data` volumes, S3 on `http://garage:3900`
+  (internal overlay only, no public port). See [object storage](object-storage.md)
+  and [ADR 0004](../decisions/0004-garage-swarm.md). Durability is the
+  backup/restore procedure, not replication: daily encrypted off-host bundles
+  + quarterly `--test` restore drills. If the drill has not passed, production
+  readiness is UNVERIFIED.
 
-### 9a. Dish photography: object storage and delivery (landed, local-only)
+### 9a. Dish photography: object storage and delivery (live consumer)
 
-First-party dish photos (upload → review → publish) now exist and run
-against the **local** Garage dev service only. Production still has no
-object store until an operator provisions one.
+First-party dish photos (upload → review → publish) run against local
+Garage in dev and Swarm Garage in staging/production (same `DishMediaStorage`
+S3 adapter, same bucket layout, same same-origin delivery).
+
+- Swarm prerequisites (operator, before first staging deploy): label one
+  durable node (`docker node update --label-add feastjourney-storage=true`),
+  fill Dokploy secrets (`GARAGE_RPC_SECRET`, `GARAGE_BOOTSTRAP_*`,
+  `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`, `S3_REGION`,
+  `S3_BUCKET_PRIVATE`/`S3_BUCKET_MEDIA`), then provision the least-privilege
+  app key with `infra/scripts/garage-provision.sh`. Missing prerequisites
+  fail the deploy fast; existing objects are never silently replaced.
+  Rollback = prior immutable `:sha-<SHA>` stack tag; volumes untouched.
 
 - Object layout (bucket-configurable, default `feastjourney-private`):
   `dish-media/dishes/{dishId}/{mediaId}/{version}/{width}.webp`
@@ -272,13 +283,15 @@ object store until an operator provisions one.
   Cloudflare with edge caching when a production origin exists; the
   route needs no per-request re-encode and only one indexed row lookup
   per cache miss.
-- New server env (shared names, never shared values; production values
-  come from the secret store when an S3-compatible bucket is chosen):
-  `S3_ENDPOINT_INTERNAL` (Compose network `http://garage:3900`; host
-  loopback only for local debugging), `S3_REGION` (`garage` locally),
-  `S3_BUCKET_MEDIA` (defaults to `S3_BUCKET_PRIVATE`), plus the existing
-  `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`. The app never exposes
-  these to the browser; presigned browser upload URLs are not used.
+- New server env (shared names, never shared values; Swarm values come from
+  Dokploy secrets, see `infra/.env.production.example`):
+  `S3_ENDPOINT_INTERNAL` (`http://garage:3900` on both Compose and Swarm
+  internal networks; host loopback only for local debugging), `S3_REGION`
+  (`garage`), `S3_BUCKET_MEDIA` (defaults to `S3_BUCKET_PRIVATE`), plus
+  least-privilege `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` for the app and
+  separate `GARAGE_RPC_SECRET` / `GARAGE_BOOTSTRAP_*` for the Garage service.
+  The app never exposes these to the browser; presigned browser upload URLs
+  are not used. The Swarm app holds no admin/RPC credentials.
 - Local-only operator note (2026-10-30): `infra/.env` S3 secrets were
   regenerated after the Garage bootstrap, so the stored default key no
   longer authenticated (`No such key`). A new local key

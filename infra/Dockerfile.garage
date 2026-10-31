@@ -1,0 +1,27 @@
+# Garage S3 image for the Dokploy Swarm stack — immutable, config-baked.
+#
+# Why a custom image instead of `dxflrs/garage:v2.5.0` directly:
+# Dokploy `raw` stacks are rendered by CI and deployed without a repository
+# checkout, so a repository-local bind mount such as `./infra/garage.toml`
+# cannot exist on the deployment host. Baking the non-secret TOML into the
+# image keeps the rendered stack self-contained and the deployment
+# reproducible. Production secrets never enter the image: RPC secret and
+# bootstrap S3 keys arrive only as Swarm/Dokploy runtime environment.
+#
+# Built and pushed by CI alongside the app/migrator images (see
+# .github/workflows/release.yml). Tags are immutable `:sha-<SHA>` (rollback:
+# any prior immutable tag). Never `latest`.
+#
+# Runtime contract (see docker-compose.swarm.yml):
+# - command: ["/garage", "server", "--single-node", "--default-bucket"]
+# - env: GARAGE_RPC_SECRET, GARAGE_DEFAULT_ACCESS_KEY,
+#   GARAGE_DEFAULT_SECRET_KEY, GARAGE_DEFAULT_BUCKET (bootstrap/admin only;
+#   the app uses separate least-privilege S3_* credentials).
+# - volumes: garage_meta -> /var/lib/garage/meta,
+#   garage_data -> /var/lib/garage/data (both persistent, node-constrained).
+# - network: internal `infra` overlay only; S3 reachable at http://garage:3900.
+FROM dxflrs/garage:v2.5.0
+
+COPY infra/garage.swarm.toml /etc/garage.toml
+# Note: no RUN verification here — dxflrs/garage is a minimal image without a
+# shell, so RUN steps cannot execute. A missing source fails the COPY above.

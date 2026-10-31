@@ -8,6 +8,7 @@ Decisions are recorded when a choice materially affects the repository's enginee
 
 | [0002](0002-postgis-and-maplibre.md) | Accepted for scaffold | PostGIS restaurant spatial search; MapLibre React maps and separate tile provider |
 | [0003](0003-garage-local-s3.md) | Accepted for local development | Garage replaces MinIO behind the S3 boundary; private single-node storage |
+| [0004](0004-garage-swarm.md) | Proposed (this PR) | Garage single-node topology for Swarm staging/production (baked image, placement, credential split, backups) |
 
 Previous references to other ADR numbers in this scaffold are not proof those documents have been written. Do not fabricate approvals for missing decisions; create an ADR when a real decision is reviewed.
 
