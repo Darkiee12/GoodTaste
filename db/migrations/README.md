@@ -64,6 +64,34 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 - `V20261031_001__country_short_names_preferred.sql` — prefer short
   English country names in choosers and cards where a formal/short pair
   exists (e.g. "United States", not "United States of America").
+- `V20261101_001__restaurant_discovery_and_currency.sql` — Restaurant Discovery
+  foundation (from PR#6 `V20261028_100`): businesses, venues (PostGIS), names,
+  cuisines, menus/items/variants, sources, serving evidence, price observations,
+  FX cache/leases, `user_profiles.preferred_currency`, `restaurant:manage/review` grants.
+- `V20261101_002__restaurant_observation_integrity.sql` — immutable provenance
+  and receipt source/amount triggers (from `V20261028_101`).
+- `V20261101_003__restaurant_search_names.sql` — diacritic-folded search names
+  trigger (from `V20261028_102`).
+- `V20261101_004__authoritative_iso_currencies.sql` — SIX ISO 4217 currency
+  authority swap (from `V20261028_103`).
+- `V20261101_005__venue_coordinate_projections.sql` — generated lon/lat
+  projections (from `V20261028_104`).
+- `V20261101_006__offering_identity_and_retirement.sql` — item/variant identity
+  immutability + retirement (from `V20261028_105`).
+- `V20261101_007__unknown_receipt_adjustments.sql` — nullable receipt adjustments
+  (from `V20261028_106`).
+- `V20261101_008__private_menu_scans.sql` — private scan sessions/assets/revisions/
+  contributions (from `V20261029_001`).
+- `V20261101_009__unverified_source_authority.sql` — remove restaurant-verified
+  price authority tier (from `V20261029_002`).
+- `V20261101_010__contribution_evidence_menus.sql` — contribution-to-menu mapping
+  (from `V20261029_003`).
+- `V20261101_011__scan_retention_and_reviewed_text.sql` — retention, reviewed
+  translations, supporting pages (from `V20261030_100`).
+- `V20261101_012__restaurant_item_source.sql` — venue-scoped source FK for
+  price-free items (from `V20261030_101`).
+- `V20261101_013__reviewed_variant_and_price_text.sql` — reviewed variant text +
+  original printed price tokens (from `V20261030_102` + `_103`).
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

@@ -226,7 +226,7 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
       }
 
       const response = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           fetch(`${config.baseUrl}/chat/completions`, {
             method: "POST",
             headers: {
@@ -242,7 +242,11 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
               response_format: RANKING_RESPONSE_FORMAT,
               max_tokens: config.maxTokens,
             }),
-            signal: AbortSignal.timeout(config.timeoutMs),
+            // Surface fiber interruption (request timeout, client disconnect)
+            // to the provider request instead of leaving it running in the
+            // background until its own timeout. Matches muse-menu and the
+            // Frankfurter provider, which both combine the Effect signal.
+            signal: AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs)]),
           }),
         catch: () => new MetaRequestError({ reason: "Meta ranking request failed" }),
       }).pipe(
