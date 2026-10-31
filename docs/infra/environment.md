@@ -45,7 +45,8 @@ fast when a required value is missing; see `.env.example` for the full list):
 
 - `DATABASE_URL`: server-only PostgreSQL connection for application runtime or direct Reylo development type analysis, as appropriate.
 - For Reylo analysis, the URL must point **directly** to a migrated Postgres schema; avoid transaction-mode PgBouncer. A distinct development/CI connection may be used instead of the runtime pool URL.
-- `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=feastjourney-private`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose network.
+- `S3_ENDPOINT_INTERNAL=http://garage:3900`, `S3_REGION=garage`, `S3_BUCKET_PRIVATE=feastjourney-private`, `S3_BUCKET_MEDIA` (defaults to the private bucket), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; use path-style S3 addressing. The internal URL only works inside the Compose/Swarm `infra` network. `DishMediaStorage` fails fast with `DishMediaStorageMisconfigured` when endpoint or credentials are absent.
+- Swarm adds separated Garage bootstrap/admin identity: `GARAGE_RPC_SECRET`, `GARAGE_BOOTSTRAP_ACCESS_KEY`, `GARAGE_BOOTSTRAP_SECRET_KEY` (Garage service only; never given to the app). See `infra/.env.production.example` and [object storage](object-storage.md) for provisioning (`garage-provision.sh`), rotation, and backup contracts.
 - `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL` are **not** application variables: no code reads them. The implemented equivalents are `RECOMMENDATION_PROVIDER`, `MODEL_*`, and `BETTER_AUTH_URL`. Do not reintroduce the old names.
 

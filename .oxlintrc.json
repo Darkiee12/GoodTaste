@@ -164,7 +164,7 @@
     // keep the unsafe-* warns off here like the other engine-limitation
     // overrides above.
     {
-      "files": [".github/workflows/scripts/**/*.mjs"],
+      "files": [".github/workflows/scripts/**/*.mjs", "infra/scripts/**/*.mjs"],
       "rules": {
         "typescript/no-unsafe-assignment": "off",
         "typescript/no-unsafe-member-access": "off",
