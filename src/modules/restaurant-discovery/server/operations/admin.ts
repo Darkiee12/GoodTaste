@@ -91,7 +91,6 @@ export function validateReceiptPrice(
 export const restaurantAdminData = Effect.gen(function* () {
   yield* authorize("manage");
   const venues = yield* runQuery("restaurants/admin-list", (sql) => venuesQuery.run(sql));
-  const queue = yield* runQuery("restaurants/admin-queue", (sql) => queueQuery.run(sql));
   const actor = yield* CurrentActor;
   const authorization = yield* Authorization;
 
@@ -100,6 +99,12 @@ export const restaurantAdminData = Effect.gen(function* () {
     actions: ["review"],
   });
 
+  if (!canReview) {
+    return { venues, queue: [], canReview };
+  }
+
+  const queue = yield* runQuery("restaurants/admin-queue", (sql) => queueQuery.run(sql));
+
   return { venues, queue, canReview };
 });
 
@@ -107,6 +112,8 @@ export const writeVenue = Effect.fn("restaurants.writeVenue")(function* (
   input: z.infer<typeof venueWriteSchema>,
 ) {
   const actorId = yield* authorize("manage");
+
+  if (input.status === "published") yield* authorize("review");
 
   return yield* withTransaction(
     "restaurants/write-venue",
@@ -417,6 +424,8 @@ export const setMenuStatus = Effect.fn("restaurants.setMenuStatus")(function* (
   input: z.infer<typeof menuStatusSchema>,
 ) {
   const actorId = yield* authorize("manage");
+
+  if (input.status === "published") yield* authorize("review");
 
   return yield* withTransaction(
     "restaurants/menu-status",
