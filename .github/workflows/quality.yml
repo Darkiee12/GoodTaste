@@ -154,23 +154,44 @@ jobs:
           docker compose -f /tmp/docker-compose.garage-ci.yml config --quiet
       - name: Required S3 secrets fail closed without values
         run: |
-          set +e
-          VERSION=test GHCR_IMAGE_PREFIX=ghcr.io/example \
-          POSTGRES_USER=u POSTGRES_PASSWORD=p POSTGRES_DB=db \
-          BETTER_AUTH_URL=https://example.test BETTER_AUTH_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-          GOOGLE_CLIENT_ID=x GOOGLE_CLIENT_SECRET=x FACEBOOK_CLIENT_ID=x FACEBOOK_CLIENT_SECRET=x \
-          SMTP_HOST=x SMTP_PORT=587 SMTP_USERNAME=x SMTP_PASSWORD=x EMAIL_FROM=x@example.test \
-          APP_HOST=example.test GARAGE_RPC_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-          GARAGE_BOOTSTRAP_ACCESS_KEY=x GARAGE_BOOTSTRAP_SECRET_KEY=x \
-          docker compose -f /tmp/docker-compose.garage-ci.yml config --quiet 2>/tmp/garage-missing-s3.log
-          code=$?
-          set -e
-          if [ "$code" = "0" ]; then
-            echo "error: rendered stack validated without S3_ACCESS_KEY_ID" >&2
-            exit 1
-          fi
-          grep -q 'S3_ACCESS_KEY_ID' /tmp/garage-missing-s3.log
-          echo "ok: missing S3 credentials fail the render"
+          # Each case omits exactly one credential while supplying a
+          # disposable single-char value for the other, so a non-zero exit
+          # necessarily proves THAT variable is required. No message-text
+          # grep: compose interpolation-error wording varies by version, and
+          # the exit code is the fail-closed proof. Captured output holds
+          # only interpolation errors with placeholder values; no real
+          # secrets ever reach this step.
+          base_env() {
+            env \
+              VERSION=test GHCR_IMAGE_PREFIX=ghcr.io/example \
+              POSTGRES_USER=u POSTGRES_PASSWORD=p POSTGRES_DB=db \
+              BETTER_AUTH_URL=https://example.test BETTER_AUTH_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+              GOOGLE_CLIENT_ID=x GOOGLE_CLIENT_SECRET=x FACEBOOK_CLIENT_ID=x FACEBOOK_CLIENT_SECRET=x \
+              SMTP_HOST=x SMTP_PORT=587 SMTP_USERNAME=x SMTP_PASSWORD=x EMAIL_FROM=x@example.test \
+              APP_HOST=example.test GARAGE_RPC_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+              GARAGE_BOOTSTRAP_ACCESS_KEY=x GARAGE_BOOTSTRAP_SECRET_KEY=x \
+              "$@"
+          }
+          check_missing() {
+            missing="$1"
+            log="$2"
+            shift 2
+            echo "--- expecting failure without ${missing} ---"
+            if base_env "$@" docker compose -f /tmp/docker-compose.garage-ci.yml config --quiet 2>"$log"; then
+              echo "error: rendered stack validated without ${missing}" >&2
+              return 1
+            fi
+            echo "compose refused without ${missing}; captured output:"
+            cat "$log"
+            if grep -q "$missing" "$log"; then
+              echo "(output names ${missing})"
+            else
+              echo "(output does not name it; exit-code refusal is the proof)"
+            fi
+            echo "ok: missing ${missing} fails the render"
+          }
+          check_missing S3_ACCESS_KEY_ID /tmp/garage-missing-id.log S3_SECRET_ACCESS_KEY=x
+          check_missing S3_SECRET_ACCESS_KEY /tmp/garage-missing-secret.log S3_ACCESS_KEY_ID=x
       - name: Isolated Garage S3 round-trip, anon denial, restart persistence
         run: bash infra/scripts/garage-verify.sh
       - name: Dish-photo pipeline against disposable Garage + Postgres
