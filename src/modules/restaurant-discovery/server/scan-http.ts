@@ -37,6 +37,7 @@ import { clientFailure } from "@/server/http/client-failure";
 import { RateLimitPolicy } from "@/server/http/rate-limit";
 import { resolveClientIdentity } from "@/server/http/request";
 import { menuScanConfig } from "@/server/integrations/menu-scan-config";
+import { ExtractionUnavailable } from "@/server/integrations/muse-menu";
 import { appRuntime, withRequestTimeout } from "@/server/runtime";
 
 const commandSchema = z.discriminatedUnion("action", [
@@ -217,15 +218,21 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
 
     switch (input.action) {
       case "create": {
+        // Deployment misconfiguration is a provider outage (503), never a
+        // user validation error: the request itself may be perfectly valid.
         const scanner = yield* Effect.try({
           try: menuScanConfig,
           catch: () =>
-            new ScanInputError({ reason: "Menu analysis is not configured for this deployment." }),
+            new ExtractionUnavailable({
+              reason: "Menu analysis is unavailable. Please retry later.",
+              retryable: false,
+            }),
         });
 
         if (scanner === null)
-          return yield* new ScanInputError({
-            reason: "Menu analysis is not enabled for this deployment.",
+          return yield* new ExtractionUnavailable({
+            reason: "Menu analysis is unavailable. Please retry later.",
+            retryable: false,
           });
 
         const { action: _action, ...command } = input;

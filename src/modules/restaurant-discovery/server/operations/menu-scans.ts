@@ -437,10 +437,16 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
         return yield* getMenuScan(principal, scanId);
       }),
-    (lease) =>
-      runQuery("menu/release-extraction", (sql) =>
+    (lease, exit) => {
+      // Success already completed the session; only a failed or interrupted
+      // extraction releases the lease for expiry or retry. Matches
+      // attachMenuPhoto, which also skips cleanup on success.
+      if (Exit.isSuccess(exit)) return Effect.void;
+
+      return runQuery("menu/release-extraction", (sql) =>
         failExtraction.run(sql, { id: scanId, token: lease }),
-      ).pipe(Effect.catch(() => Effect.logWarning("Menu analysis lease release requires expiry"))),
+      ).pipe(Effect.catch(() => Effect.logWarning("Menu analysis lease release requires expiry")));
+    },
   );
 });
 
