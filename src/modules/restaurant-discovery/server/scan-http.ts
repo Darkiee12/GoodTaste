@@ -33,6 +33,7 @@ import { withActor } from "@/server/auth/current-actor";
 import { resolveSession } from "@/server/auth/session";
 import { appConfig } from "@/server/config";
 import { serverEnv } from "@/server/env";
+import { BodyLimitError, boundedBody } from "@/server/http/body-limit";
 import { clientFailure } from "@/server/http/client-failure";
 import { RateLimitPolicy } from "@/server/http/rate-limit";
 import { resolveClientIdentity } from "@/server/http/request";
@@ -56,47 +57,6 @@ const photoSchema = z.union([
   z.strictObject({ scanId: z.uuid(), assetId: z.uuid() }),
   z.strictObject({ contributionId: z.uuid(), assetId: z.uuid() }),
 ]);
-
-/** Count bytes before JSON/form-data allocation. The outer request budget covers reads. */
-async function boundedBody(
-  request: Request,
-  limit: number,
-  signal: AbortSignal,
-): Promise<Uint8Array> {
-  if (Number(request.headers.get("content-length")) > limit || request.body === null)
-    throw new ScanInputError({ reason: "Request body is missing or too large." });
-  const reader = request.body.getReader();
-  const chunks: Array<Uint8Array> = [];
-  let length = 0;
-
-  const abort = () => {
-    void reader.cancel();
-  };
-
-  signal.addEventListener("abort", abort, { once: true });
-
-  try {
-    for (;;) {
-      if (signal.aborted) throw new ScanInputError({ reason: "Upload was interrupted." });
-      // oxlint-disable-next-line no-await-in-loop -- A stream reader advances one chunk at a time.
-      const part = await reader.read();
-
-      if (part.done) break;
-      length += part.value.length;
-
-      if (length > limit)
-        throw new ScanInputError({
-          reason: "The upload is too large. Choose a smaller photograph.",
-        });
-      chunks.push(part.value);
-    }
-
-    return Buffer.concat(chunks);
-  } finally {
-    signal.removeEventListener("abort", abort);
-    await reader.cancel();
-  }
-}
 
 export async function handleMenuScanRequest(request: Request): Promise<Response> {
   const requestId = crypto.randomUUID();
@@ -178,7 +138,10 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
             headers: { "Content-Type": contentType },
           }).formData();
         },
-        catch: () => new ScanInputError({ reason: "The photo upload is invalid or too large." }),
+        catch: (error) =>
+          error instanceof BodyLimitError
+            ? new ScanInputError({ reason: error.reason })
+            : new ScanInputError({ reason: "The photo upload is invalid or too large." }),
       });
 
       const parsed = scanIdSchema
