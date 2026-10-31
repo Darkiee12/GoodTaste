@@ -28,11 +28,24 @@ remain SSR content. The renderer passes Vite's bundled MapLibre v6 worker URL
 through the React wrapper's `workerUrl` option; CSS is included by the application
 stylesheet. Browser globals are confined to the client renderer and user actions.
 
-Desktop shows list and map side by side. Mobile has a list/map toggle. Marker
-buttons and list actions share the selected venue ID; the popup opens the branch
-detail. The list remains a keyboard-accessible alternative to map interaction.
-Camera selection uses `jumpTo`, with no new animated transitions. Cooperative
-gestures avoid capturing normal mobile page scrolling.
+Desktop shows list and map side by side (list ≈35–40% on wide screens).
+Mobile shows a large map with a draggable bottom sheet holding the results,
+plus an expand control and a full-list switch. Marker buttons and list actions
+share the selected venue ID; a design-token preview card (name, address, dish
+match, View menu link, close action) opens the branch detail. The native
+`Popup` overlay is intentionally not used: the installed wrapper never
+attaches its native popup instance in this stack (verified with zero console
+errors — the instance stays closed while markers, attribution and camera all
+work), and a DOM card is keyboard-focusable, styled and announced like the
+rest of the UI. A marker selection scrolls the matching card into view; a
+card's Show-on-map action selects the marker and keeps the map visible. The
+list remains a keyboard-accessible alternative to map interaction. Camera selection uses
+`jumpTo`, with no new animated transitions. Cooperative gestures avoid
+capturing normal mobile page scrolling. The map renders whenever it is
+configured, even with zero results: it centers on an explicit user origin,
+map bounds from the URL, or a clearly labeled default browsing region
+(Vietnam), and offers labeled region picks when no region is selected. Map
+cameras never initialize at longitude 0, latitude 0.
 
 Only settled user map movements update proposed bounds. The user explicitly
 chooses **Search this map area**; there are no per-frame database requests.

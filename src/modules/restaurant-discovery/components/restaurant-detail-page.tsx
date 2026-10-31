@@ -26,6 +26,26 @@ export function RestaurantDetailPage() {
   return (
     <article className="discovery-page">
       <nav aria-label="Discover">
+        <Link
+          to="/restaurants"
+          search={{
+            lang: search.lang,
+            dish: search.dish,
+            fromDish: search.fromDish,
+            channel: search.channel,
+          }}
+        >
+          ← Back to results
+        </Link>
+        {search.fromDish !== undefined && (
+          <Link
+            to="/dishes/$dishId"
+            params={{ dishId: search.fromDish }}
+            search={{ lang: search.lang }}
+          >
+            ← Back to dish
+          </Link>
+        )}
         <Link to="/restaurants" search={{ lang: search.lang }}>
           Find restaurants
         </Link>
@@ -90,6 +110,9 @@ export function RestaurantDetailPage() {
               locale={search.lang}
               rates={conversion.rates}
               initialVariant={search.variant}
+              returnVenueId={venue.id}
+              returnChannel={search.channel}
+              storageKey={`order:${venue.id}:${search.channel}`}
             />
           )}
         </section>
@@ -100,6 +123,7 @@ export function RestaurantDetailPage() {
             selected={venue.id}
             onSelect={() => {}}
             lang={search.lang}
+            center={{ longitude: venue.longitude, latitude: venue.latitude, zoom: 14 }}
           />
           <p className="mt-3 text-sm">{venue.address}</p>
         </aside>
