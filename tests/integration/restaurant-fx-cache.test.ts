@@ -254,4 +254,41 @@ describe("PostgreSQL FX cache with mocked provider", () => {
 
     expect(current?.rate).toBe("0.00004");
   });
+  test("a lease loser waits for the winner's refresh without a provider fetch", async () => {
+    const fixtureFx = fixture();
+    const key = `${fixtureFx.id}:VND:USD`;
+    const foreignToken = crypto.randomUUID();
+    expect(await claim.run(sql, { key, token: foreignToken })).not.toBeNull();
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const observed = await run(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(fixtureFx.fx.rate("VND", "USD"));
+        yield* Effect.sleep("250 millis");
+        yield* Effect.tryPromise({
+          try: () =>
+            sql`INSERT INTO feastjourney.currency_exchange_rates(provider,base_currency,quote_currency,rate,effective_date) VALUES(${fixtureFx.id},'VND','USD','0.00004',${today}::date)`,
+          catch: () => new FxUnavailable({ reason: "test setup failed" }),
+        });
+
+        return yield* Fiber.join(fiber);
+      }),
+    );
+
+    expect(observed.rate).toBe("0.00004");
+    expect(fixtureFx.calls()).toBe(0);
+  });
+  test("an unrefreshed wait exhausts to retry-shortly without a provider fetch", async () => {
+    const fixtureFx = fixture();
+    const key = `${fixtureFx.id}:JPY:USD`;
+    expect(await claim.run(sql, { key, token: crypto.randomUUID() })).not.toBeNull();
+
+    const failure = await run(Effect.flip(fixtureFx.fx.rate("JPY", "USD")));
+    expect(failure._tag).toBe("FxUnavailable");
+
+    if (failure instanceof FxUnavailable)
+      expect(failure.reason).toBe("Reference rate is refreshing; retry shortly");
+    expect(fixtureFx.calls()).toBe(0);
+  }, 10000);
 });
