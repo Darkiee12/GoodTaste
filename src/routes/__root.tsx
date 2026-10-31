@@ -128,6 +128,16 @@ function AppLayout() {
         : routeIds.some((routeId) => routeId === entry.to || routeId.startsWith(`${entry.to}/`)),
     );
 
+  const hasAdminSurface =
+    capabilities.admin ||
+    capabilities.overview ||
+    capabilities.dishes ||
+    capabilities.imports ||
+    capabilities.reviews ||
+    capabilities.members ||
+    capabilities.roles ||
+    capabilities.restaurants;
+
   // First visit only: default to the browser's language when it is a fully
   // translated UI locale. Manual picks are remembered and never overridden;
   // an explicit ?lang= URL wins over detection.
@@ -263,6 +273,30 @@ function AppLayout() {
                   >
                     {copy.ctaRecommend}
                   </Link>
+                  <Link
+                    to="/restaurants"
+                    search={{ lang }}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.navRestaurants}
+                  </Link>
+                  <Link
+                    to="/scan"
+                    search={{ lang }}
+                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                  >
+                    {copy.navScanMenu}
+                  </Link>
+                  {hasAdminSurface ? (
+                    <Link
+                      to="/admin"
+                      search={{ lang }}
+                      activeOptions={{ exact: false }}
+                      className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-mango no-underline hover:bg-white/10 hover:text-white aria-[current=page]:bg-white/10 aria-[current=page]:text-white"
+                    >
+                      {copy.adminWorkspace}
+                    </Link>
+                  ) : null}
                 </>
               )}
             </nav>

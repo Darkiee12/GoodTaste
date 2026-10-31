@@ -636,6 +636,13 @@ export function RecommendSection() {
             <p className="mt-3 max-w-[60ch] text-lg text-muted">
               {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
             </p>
+            {showResults &&
+            outcome !== null &&
+            (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+              <p className="mt-2 max-w-[60ch] text-base font-bold text-ink">
+                {copy.recResultsCount.replace("{count}", String(outcome.dishes.length))}
+              </p>
+            ) : null}
             {detectedName !== null ? (
               <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
                 {formatTemplate(copy.recWhereExploring, detectedName)}
