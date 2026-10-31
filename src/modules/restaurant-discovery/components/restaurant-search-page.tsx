@@ -1,6 +1,5 @@
 import { Link, getRouteApi } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, ChevronUp, List, Map as MapIcon, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import {
@@ -8,41 +7,48 @@ import {
   useExchangeRates,
   usePreferredCurrency,
 } from "@/modules/restaurant-discovery/components/currency-tools";
+import { FilterChips } from "@/modules/restaurant-discovery/components/filter-chips";
+import { LocationChooser } from "@/modules/restaurant-discovery/components/location-chooser";
+import {
+  MapSearchBar,
+  type SearchPick,
+} from "@/modules/restaurant-discovery/components/map-search-bar";
 import { RestaurantCard } from "@/modules/restaurant-discovery/components/restaurant-card";
 import type { RestaurantCardModel } from "@/modules/restaurant-discovery/components/restaurant-card";
 import { restaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
-import {
-  DatasetEmptyState,
-  NoMatchState,
-} from "@/modules/restaurant-discovery/components/restaurant-empty-states";
 import { RestaurantFiltersSheet } from "@/modules/restaurant-discovery/components/restaurant-filters-sheet";
-import type { MapBounds } from "@/modules/restaurant-discovery/components/restaurant-map";
+import type {
+  MapBounds,
+  FrameRequest,
+} from "@/modules/restaurant-discovery/components/restaurant-map";
 import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
+import { ResultsDrawer } from "@/modules/restaurant-discovery/components/results-drawer";
 import {
-  RestaurantSearchHero,
-  type SearchPick,
-} from "@/modules/restaurant-discovery/components/restaurant-search-hero";
-import { DEFAULT_MAP_CENTER, type MapCenter } from "@/modules/restaurant-discovery/map-bounds";
+  ResultsSheet,
+  type SheetSnap,
+} from "@/modules/restaurant-discovery/components/results-sheet";
+import { VenuePreview } from "@/modules/restaurant-discovery/components/venue-preview";
+import {
+  queryGeolocationPermission,
+  readSavedCamera,
+  readStoredPlace,
+  requestUserPosition,
+  writeSavedCamera,
+  writeStoredPlace,
+  type UserPosition,
+} from "@/modules/restaurant-discovery/location-storage";
+import { CITY_PRESETS, DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
 import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
 import type {
   DishRestaurantResult,
   RestaurantResult,
 } from "@/modules/restaurant-discovery/server/index";
-import type { Locale } from "@/shared/i18n";
 
 const route = getRouteApi("/restaurants/");
 
 const mapAvailable = z.url().safeParse(import.meta.env.VITE_MAP_STYLE_URL).success;
-
-const REGION_PRESETS = [
-  { id: "vietnam", west: 102.0, south: 8.0, east: 110.0, north: 24.0, zoom: 5 },
-  { id: "hcmc", west: 106.4, south: 10.4, east: 107.0, north: 11.1, zoom: 11 },
-  { id: "hanoi", west: 105.5, south: 20.8, east: 106.1, north: 21.3, zoom: 11 },
-] as const;
-
-type RegionId = (typeof REGION_PRESETS)[number]["id"];
 
 function boundsZoom(west: number, east: number, south: number, north: number): number {
   const span = Math.max(Math.abs(east - west), Math.abs(north - south));
@@ -58,51 +64,40 @@ function boundsZoom(west: number, east: number, south: number, north: number): n
   return 13;
 }
 
-function DishChip({
-  dishName,
-  dishSlug,
-  lang,
-  onExpandArea,
-  onClearDish,
-}: {
-  readonly dishName: string;
-  readonly dishSlug: string;
-  readonly lang: Locale;
-  readonly onExpandArea: () => void;
-  readonly onClearDish: () => void;
-}) {
-  const copy = restaurantCopy(lang);
+function useIsDesktop(): boolean {
+  // SSR-safe: the first client render matches the server (mobile shell),
+  // then syncs to the real viewport without remounting the map.
+  const [desktop, setDesktop] = useState(false);
 
-  return (
-    <section aria-label={copy.servingTitle.replace("{name}", dishName)} className="res-dish-chip">
-      <span className="res-chip-dot" aria-hidden="true" />
-      <p className="res-chip-label">{copy.servingTitle.replace("{name}", dishName)}</p>
-      <span className="res-chip-evidence">{copy.dishEvidence}</span>
-      <span className="res-chip-actions">
-        <Link
-          to="/dishes/$dishId"
-          params={{ dishId: dishSlug }}
-          search={{ lang }}
-          className="res-chip-link"
-        >
-          <ArrowLeft aria-hidden="true" />
-          {copy.backToDish}
-        </Link>
-        <button type="button" className="res-chip-btn" onClick={onExpandArea}>
-          {copy.expandArea}
-        </button>
-        <button
-          type="button"
-          className="res-chip-btn"
-          onClick={onClearDish}
-          aria-label={copy.clearDish}
-        >
-          <X aria-hidden="true" />
-          {copy.clearDish}
-        </button>
-      </span>
-    </section>
-  );
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 64rem)");
+    const update = () => setDesktop(query.matches);
+
+    update();
+    query.addEventListener("change", update);
+
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  return desktop;
+}
+
+function regionSearchKey(search: RestaurantSearch): string {
+  return JSON.stringify({
+    q: search.q,
+    area: search.area,
+    cuisine: search.cuisine,
+    dish: search.dish ?? null,
+    west: search.west ?? null,
+    south: search.south ?? null,
+    east: search.east ?? null,
+    north: search.north ?? null,
+    longitude: search.longitude ?? null,
+    latitude: search.latitude ?? null,
+    radius: search.radius,
+    channel: search.channel,
+    portion: search.portion ?? null,
+  });
 }
 
 export function RestaurantSearchPage() {
@@ -111,14 +106,27 @@ export function RestaurantSearchPage() {
   const navigate = route.useNavigate();
   const preference = usePreferredCurrency();
   const copy = restaurantCopy(search.lang);
+  const isDesktop = useIsDesktop();
+
   const [selected, setSelected] = useState<string | null>(null);
-  const [bounds, setBounds] = useState<MapBounds | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [proposedBounds, setProposedBounds] = useState<MapBounds | null>(null);
   const [message, setMessage] = useState("");
-  const [locationBusy, setLocationBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKey, setSheetKey] = useState(0);
-  const [sheet, setSheet] = useState<"peek" | "expanded" | "full">("peek");
-  const dragStart = useRef<{ y: number; sheet: "peek" | "expanded" | "full" } | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>(0);
+  const [frame, setFrame] = useState<FrameRequest | null>(null);
+  const [userPos, setUserPos] = useState<UserPosition | null>(null);
+  const [chooserManual, setChooserManual] = useState(false);
+  const [chooserDismissed, setChooserDismissed] = useState(false);
+  const [chooserAuto, setChooserAuto] = useState(false);
+
+  const initRan = useRef(false);
+  const firstSearch = useRef(search);
+  const latestKey = useRef("");
+  const listTitleRef = useRef<HTMLHeadingElement>(null);
 
   const isDishMode = data.results.dish !== null;
 
@@ -145,32 +153,51 @@ export function RestaurantSearchPage() {
   const hasScope = search.area !== "" || hasCoords || search.q !== "" || search.cuisine !== "";
   const datasetEmpty = data.areas.length === 0 && rows.length === 0;
 
-  const mapCenter: MapCenter = (() => {
-    if (search.longitude !== undefined && search.latitude !== undefined) {
-      return { longitude: search.longitude, latitude: search.latitude, zoom: 13 };
+  const searchKey = useMemo(() => regionSearchKey(search), [search]);
+
+  useEffect(() => {
+    latestKey.current = searchKey;
+  }, [searchKey]);
+
+  const reportCamera = useCallback(
+    (camera: { longitude: number; latitude: number; zoom: number }) => {
+      writeSavedCamera({ searchKey: latestKey.current, ...camera });
+    },
+    [],
+  );
+
+  // Mount-once initial center, SSR-safe: pure rules from the loader
+  // search. Session-camera restore happens via frame in the init effect.
+  const [initialCenter] = useState(() => {
+    const s = firstSearch.current;
+
+    if (s.longitude !== undefined && s.latitude !== undefined) {
+      return { longitude: s.longitude, latitude: s.latitude, zoom: 13 };
     }
 
     if (
-      search.west !== undefined &&
-      search.south !== undefined &&
-      search.east !== undefined &&
-      search.north !== undefined
+      s.west !== undefined &&
+      s.south !== undefined &&
+      s.east !== undefined &&
+      s.north !== undefined
     ) {
-      const crossesAntimeridian = search.east < search.west;
+      const crosses = s.east < s.west;
 
-      const longitude = crossesAntimeridian
-        ? (((((search.west + search.east + 360) / 2 + 180) % 360) + 360) % 360) - 180
-        : (search.west + search.east) / 2;
+      const longitude = crosses
+        ? (((((s.west + s.east + 360) / 2 + 180) % 360) + 360) % 360) - 180
+        : (s.west + s.east) / 2;
 
       return {
         longitude,
-        latitude: (search.south + search.north) / 2,
-        zoom: boundsZoom(search.west, search.east, search.south, search.north),
+        latitude: (s.south + s.north) / 2,
+        zoom: boundsZoom(s.west, s.east, s.south, s.north),
       };
     }
 
-    return DEFAULT_MAP_CENTER;
-  })();
+    return { ...DEFAULT_MAP_CENTER };
+  });
+
+  const [suppressFit, setSuppressFit] = useState(false);
 
   const regionLabel = (() => {
     if (search.longitude !== undefined) return copy.mapRegionOrigin;
@@ -181,6 +208,12 @@ export function RestaurantSearchPage() {
 
     return copy.mapRegionDefault;
   })();
+
+  const cuisineLabel =
+    search.cuisine === ""
+      ? null
+      : (data.cuisines.find((cuisine) => cuisine.slug === search.cuisine)?.displayName ??
+        search.cuisine);
 
   const activeFilterCount =
     (search.cuisine === "" ? 0 : 1) +
@@ -203,6 +236,169 @@ export function RestaurantSearchPage() {
       search: { ...parsed.data, lang: search.lang, fromDish: search.fromDish },
     });
   };
+
+  const applyCity = (id: string) => {
+    const city = CITY_PRESETS.find((entry) => entry.id === id);
+
+    if (city === undefined) return;
+    writeStoredPlace({ kind: "city", id });
+    setMessage("");
+    setProposedBounds(null);
+    setChooserManual(false);
+    setChooserDismissed(true);
+    setChooserAuto(false);
+    setFrame({
+      key: `city-${id}-${Date.now()}`,
+      longitude: city.longitude,
+      latitude: city.latitude,
+      zoom: city.zoom,
+    });
+    void navigate({
+      replace: true,
+      search: {
+        ...search,
+        area: "",
+        longitude: undefined,
+        latitude: undefined,
+        west: city.west,
+        south: city.south,
+        east: city.east,
+        north: city.north,
+        sort: search.sort === "nearest" ? "recommended" : search.sort,
+      },
+    });
+  };
+
+  const locateUser = async (opts: { silent: boolean }) => {
+    setLocating(true);
+
+    try {
+      const position = await requestUserPosition();
+      setLocating(false);
+      setMessage("");
+      setUserPos(position);
+      setChooserManual(false);
+      setChooserDismissed(true);
+      setChooserAuto(false);
+      setFrame({
+        key: `user-${Date.now()}`,
+        longitude: position.longitude,
+        latitude: position.latitude,
+        zoom: 14,
+      });
+      void navigate({
+        replace: true,
+        search: {
+          ...search,
+          area: "",
+          longitude: position.longitude,
+          latitude: position.latitude,
+          west: undefined,
+          east: undefined,
+          south: undefined,
+          north: undefined,
+        },
+      });
+    } catch {
+      setLocating(false);
+
+      if (!opts.silent) {
+        setMessage(copy.locationDenied);
+        setChooserManual(true);
+      } else {
+        setChooserAuto(true);
+      }
+    }
+  };
+
+  // Location-first initialization, exactly once per mount.
+  useEffect(() => {
+    if (initRan.current) return;
+
+    initRan.current = true;
+    const s = firstSearch.current;
+    const hasRegion = s.area !== "" || s.longitude !== undefined || s.west !== undefined;
+
+    if (hasRegion) {
+      const saved = readSavedCamera(regionSearchKey(s));
+
+      if (saved !== null) {
+        setSuppressFit(true);
+        setFrame({ key: `restore-${Date.now()}`, ...saved });
+      }
+
+      return;
+    }
+
+    const stored = readStoredPlace();
+
+    if (stored !== null) {
+      const city = CITY_PRESETS.find((entry) => entry.id === stored.id);
+
+      if (city !== undefined) {
+        setProposedBounds(null);
+        setFrame({
+          key: `city-${city.id}-${Date.now()}`,
+          longitude: city.longitude,
+          latitude: city.latitude,
+          zoom: city.zoom,
+        });
+        void navigate({
+          replace: true,
+          search: {
+            ...s,
+            area: "",
+            longitude: undefined,
+            latitude: undefined,
+            west: city.west,
+            south: city.south,
+            east: city.east,
+            north: city.north,
+            sort: s.sort === "nearest" ? "recommended" : s.sort,
+          },
+        });
+
+        return;
+      }
+    }
+
+    void queryGeolocationPermission().then((permission) => {
+      if (permission !== "granted") {
+        setChooserAuto(true);
+
+        return;
+      }
+
+      void requestUserPosition()
+        .then((position) => {
+          setUserPos(position);
+          setFrame({
+            key: `user-${Date.now()}`,
+            longitude: position.longitude,
+            latitude: position.latitude,
+            zoom: 14,
+          });
+          void navigate({
+            replace: true,
+            search: {
+              ...firstSearch.current,
+              area: "",
+              longitude: position.longitude,
+              latitude: position.latitude,
+              west: undefined,
+              east: undefined,
+              south: undefined,
+              north: undefined,
+            },
+          });
+        })
+        .catch(() => {
+          setChooserAuto(true);
+        });
+    });
+    // Mount-only: reacting later would fight the user's own navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const expandArea = () => {
     setMessage("");
@@ -239,32 +435,6 @@ export function RestaurantSearchPage() {
     });
   };
 
-  const browseNearby = () => {
-    setMessage("");
-    clearDish();
-  };
-
-  const pickRegion = (id: RegionId) => {
-    const preset = REGION_PRESETS.find((entry) => entry.id === id);
-
-    if (preset === undefined) return;
-    setMessage("");
-    setBounds(null);
-    void navigate({
-      search: {
-        ...search,
-        area: "",
-        longitude: undefined,
-        latitude: undefined,
-        west: preset.west,
-        south: preset.south,
-        east: preset.east,
-        north: preset.north,
-        sort: search.sort === "nearest" ? "recommended" : search.sort,
-      },
-    });
-  };
-
   const clearAll = () => {
     setMessage("");
     void navigate({
@@ -291,9 +461,7 @@ export function RestaurantSearchPage() {
   };
 
   const submitText = (text: string) => {
-    if (text === "") {
-      return;
-    }
+    if (text === "") return;
 
     applyPatch({
       q: text,
@@ -329,47 +497,25 @@ export function RestaurantSearchPage() {
     });
   };
 
-  const nearMe = () => {
-    if (!("geolocation" in navigator)) {
-      setMessage(copy.locationDenied);
-
-      return;
-    }
-
-    setLocationBusy(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocationBusy(false);
-        setMessage("");
-        void navigate({
-          search: {
-            ...search,
-            area: "",
-            longitude: position.coords.longitude,
-            latitude: position.coords.latitude,
-            west: undefined,
-            east: undefined,
-            south: undefined,
-            north: undefined,
-          },
-        });
-      },
-      () => {
-        setLocationBusy(false);
-        setMessage(copy.locationDenied);
-      },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
-    );
-  };
-
   const handleSelect = (id: string) => {
     setSelected(id);
+    setPreviewOpen(true);
 
-    if (typeof document !== "undefined") {
-      document
-        .getElementById(`res-card-${id}`)
-        ?.scrollIntoView({ block: "nearest", behavior: "auto" });
-    }
+    if (!isDesktop) setSheetSnap(1);
+
+    if (isDesktop) setDrawerOpen(true);
+  };
+
+  const closePreview = (focusResults: boolean) => {
+    setPreviewOpen(false);
+
+    if (focusResults) listTitleRef.current?.focus({ preventScroll: true });
+  };
+
+  const clearSelection = () => {
+    setSelected(null);
+    setPreviewOpen(false);
+    listTitleRef.current?.focus({ preventScroll: true });
   };
 
   const channelLabel = channelLabelFor(search.channel, copy);
@@ -410,64 +556,367 @@ export function RestaurantSearchPage() {
   };
 
   const selectedVenue = selected === null ? undefined : rows.find((venue) => venue.id === selected);
-
   const selectedModel = selectedVenue === undefined ? null : modelFor(selectedVenue);
 
-  const locationText = () => {
-    if (search.longitude !== undefined) {
-      return `${copy.nearYou} · ${search.radius / 1000} km · `;
-    }
-
-    if (search.area !== "") {
-      return `${search.area} · `;
-    }
-
-    return `${copy.showingAll} · `;
-  };
-
   const showDishZero = isDishMode && rows.length === 0 && !datasetEmpty && data.areas.length > 0;
+
   const showDatasetZero = rows.length === 0 && (datasetEmpty || !hasScope);
-  const showNoMatch = rows.length === 0 && hasScope && !isDishMode && !datasetEmpty;
+
+  const showFiltersTight =
+    rows.length === 0 && hasScope && !isDishMode && !datasetEmpty && data.areas.length > 0;
+
+  const showNoArea =
+    rows.length === 0 && hasScope && !isDishMode && !datasetEmpty && data.areas.length === 0;
+
+  const countLabel =
+    rows.length === 1 ? copy.placesOne : copy.placesCount.replace("{count}", String(rows.length));
+
+  const resultsBody = (
+    <>
+      <FilterChips
+        copy={copy}
+        search={search}
+        lang={search.lang}
+        dishName={dishName}
+        dishSlug={dishSlug}
+        cuisineLabel={cuisineLabel}
+        onPatch={applyPatch}
+      />
+      {conversion.unavailable && (
+        <p aria-live="polite" className="mapapp-note">
+          {copy.priceNote}
+        </p>
+      )}
+      {showDatasetZero && (
+        <div className="mapapp-status" aria-live="polite">
+          <h3>{copy.emptyDatasetTitle}</h3>
+          <p>{copy.emptyDatasetBody}</p>
+          <div className="mapapp-status-actions">
+            <Link className="mapapp-primary-btn" to="/dishes" search={{ lang: search.lang }}>
+              {copy.emptyExplore}
+            </Link>
+            <Link className="mapapp-ghost-btn" to="/scan" search={{ lang: search.lang }}>
+              {copy.emptyScan}
+            </Link>
+          </div>
+        </div>
+      )}
+      {isDishMode && datasetEmpty && (
+        <p aria-live="polite" className="mapapp-note">
+          {copy.noReviewedBody}
+        </p>
+      )}
+      {showDishZero && (
+        <div className="mapapp-status" aria-live="polite">
+          <h3>{copy.noReviewedTitle}</h3>
+          <p>{copy.noReviewedBody}</p>
+          <div className="mapapp-status-actions">
+            <button type="button" className="mapapp-primary-btn" onClick={clearDish}>
+              {copy.browseNearby}
+            </button>
+            <button type="button" className="mapapp-ghost-btn" onClick={expandArea}>
+              {copy.expandArea}
+            </button>
+            <button type="button" className="mapapp-ghost-btn" onClick={clearAll}>
+              {copy.clearFilters}
+            </button>
+          </div>
+        </div>
+      )}
+      {showFiltersTight && (
+        <div className="mapapp-status" aria-live="polite">
+          <h3>{copy.noMatchTitle}</h3>
+          <p>{copy.noMatchBody}</p>
+          <div className="mapapp-status-actions">
+            <button type="button" className="mapapp-primary-btn" onClick={clearAll}>
+              {copy.clearFilters}
+            </button>
+            <button type="button" className="mapapp-ghost-btn" onClick={expandArea}>
+              {copy.expandArea}
+            </button>
+          </div>
+        </div>
+      )}
+      {showNoArea && (
+        <div className="mapapp-status" aria-live="polite">
+          <h3>{copy.noAreaTitle}</h3>
+          <p>{copy.noAreaBody}</p>
+          <div className="mapapp-status-actions">
+            <button type="button" className="mapapp-primary-btn" onClick={expandArea}>
+              {copy.expandArea}
+            </button>
+            <button type="button" className="mapapp-ghost-btn" onClick={clearAll}>
+              {copy.clearFilters}
+            </button>
+          </div>
+        </div>
+      )}
+      {rows.length > 0 && (
+        <>
+          <p aria-live="polite" className="mapapp-count">
+            {countLabel}
+            {rows.length === search.limit &&
+              ` · ${copy.placesCapped.replace("{limit}", String(search.limit))}`}
+          </p>
+          <ul className="mapapp-list" hidden={previewOpen && selectedModel !== null}>
+            {rows.map((venue) => {
+              const model = modelFor(venue);
+
+              return (
+                <li
+                  key={venue.id}
+                  id={`res-card-${venue.id}`}
+                  data-selected={selected === venue.id}
+                >
+                  <RestaurantCard
+                    copy={copy}
+                    model={model}
+                    selected={selected === venue.id}
+                    onShowOnMap={
+                      mapAvailable
+                        ? () => {
+                            handleSelect(venue.id);
+
+                            if (!isDesktop) setSheetSnap(0);
+                          }
+                        : null
+                    }
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {previewOpen && selectedModel !== null && (
+        <VenuePreview
+          copy={copy}
+          lang={search.lang}
+          model={selectedModel}
+          onBack={() => closePreview(true)}
+          onClose={clearSelection}
+          onShowOnMap={() => {
+            if (!isDesktop) setSheetSnap(0);
+          }}
+        />
+      )}
+      <details className="mapapp-options">
+        <summary>{copy.displayOptions}</summary>
+        <CurrencySelector preference={preference} />
+        <label className="mapapp-sort">
+          <span>{copy.sortLabel}</span>
+          <select
+            value={search.sort}
+            onChange={(event) => {
+              const value = event.target.value;
+
+              if (
+                value === "recommended" ||
+                value === "nearest" ||
+                value === "price_low" ||
+                value === "price_high"
+              ) {
+                applyPatch({ sort: value });
+              }
+            }}
+          >
+            <option value="recommended">{copy.sortRecommended}</option>
+            <option value="nearest" disabled={search.longitude === undefined}>
+              {copy.sortNearest}
+            </option>
+            <option value="price_low" disabled={!isDishMode}>
+              {copy.sortPriceLow}
+            </option>
+            <option value="price_high" disabled={!isDishMode}>
+              {copy.sortPriceHigh}
+            </option>
+          </select>
+        </label>
+      </details>
+    </>
+  );
+
+  const chooserVisible = chooserManual || (chooserAuto && !chooserDismissed);
 
   return (
-    <div className="res-map-page">
-      <RestaurantSearchHero
-        key={[
-          search.q,
-          search.area,
-          search.cuisine,
-          search.lang,
-          search.dish ?? "",
-          search.fromDish ?? "",
-        ].join("|")}
-        compact
-        copy={copy}
-        areas={data.areas}
-        cuisines={data.cuisines}
-        initialText={search.q}
-        initialArea={search.area}
-        activeFilterCount={activeFilterCount}
-        locationBusy={locationBusy}
-        onSubmitText={submitText}
-        onPick={applyPick}
-        onAreaChange={(area) =>
-          applyPatch({
-            area,
-            longitude: undefined,
-            latitude: undefined,
-            west: undefined,
-            south: undefined,
-            east: undefined,
-            north: undefined,
-            sort: search.sort === "nearest" ? "recommended" : search.sort,
-          })
-        }
-        onNearMe={nearMe}
-        onOpenFilters={() => {
-          setSheetKey((key) => key + 1);
-          setSheetOpen(true);
-        }}
-      />
+    <div className="mapapp">
+      <a href="#mapapp-results" className="mapapp-skip">
+        {copy.skipMap}
+      </a>
+      <div className="mapapp-body" data-desktop={isDesktop}>
+        <div className="mapapp-mapwrap">
+          {mapAvailable ? (
+            <RestaurantMapPanel
+              points={rows}
+              selected={selected}
+              onSelect={handleSelect}
+              onBounds={setProposedBounds}
+              onCamera={reportCamera}
+              lang={search.lang}
+              center={initialCenter}
+              emptyNote={isDishMode ? copy.noReviewedBody : copy.mapEmpty}
+              frame={frame}
+              selectionPadding={
+                isDesktop
+                  ? { leftPx: drawerOpen ? 416 : 0 }
+                  : { bottomRatio: sheetSnap === 2 ? 0.7 : 0.42 }
+              }
+              userPosition={userPos}
+              fitKey={searchKey}
+              suppressInitialFit={suppressFit}
+            />
+          ) : (
+            <div className="discovery-map-fallback" aria-live="polite">
+              <h2>{copy.mapFailedTitle}</h2>
+              <p>{copy.mapConfigMissing}</p>
+            </div>
+          )}
+          {proposedBounds !== null && mapAvailable && (
+            <button
+              type="button"
+              className="mapapp-search-area"
+              onClick={() => {
+                void navigate({
+                  search: {
+                    ...search,
+                    ...proposedBounds,
+                    area: "",
+                    longitude: undefined,
+                    latitude: undefined,
+                    sort: search.sort === "nearest" ? "recommended" : search.sort,
+                  },
+                });
+                setProposedBounds(null);
+              }}
+            >
+              {copy.searchThisArea}
+            </button>
+          )}
+          {chooserVisible && (
+            <div className="mapapp-chooser-float">
+              <LocationChooser
+                copy={copy}
+                locating={locating}
+                dismissible
+                onPickCity={applyCity}
+                onUseLocation={() => void locateUser({ silent: false })}
+                onDismiss={() => {
+                  setChooserManual(false);
+                  setChooserDismissed(true);
+                  setChooserAuto(false);
+                }}
+              />
+            </div>
+          )}
+          <div className="mapapp-maptools">
+            {userPos?.accuracyMeters !== null && userPos?.accuracyMeters !== undefined && (
+              <span className="mapapp-accuracy" aria-live="polite">
+                {copy.locationAccuracy.replace("{meters}", String(userPos.accuracyMeters))}
+              </span>
+            )}
+            <button
+              type="button"
+              className="mapapp-recenter"
+              onClick={() => {
+                if (userPos !== null) {
+                  setFrame({
+                    key: `recenter-${Date.now()}`,
+                    longitude: userPos.longitude,
+                    latitude: userPos.latitude,
+                    zoom: 14,
+                  });
+                } else {
+                  void locateUser({ silent: false });
+                }
+              }}
+              disabled={locating}
+              aria-label={copy.recenter}
+              title={copy.recenter}
+            >
+              <span aria-hidden="true" className="mapapp-recenter-dot" />
+            </button>
+          </div>
+        </div>
+        {isDesktop ? (
+          <ResultsDrawer
+            copy={copy}
+            open={drawerOpen}
+            onToggle={() => setDrawerOpen((open) => !open)}
+            title={copy.resultsTitle}
+          >
+            <MapSearchBar
+              copy={copy}
+              cuisines={data.cuisines}
+              initialText={search.q}
+              activeFilterCount={activeFilterCount}
+              locationBusy={locating}
+              overlay={false}
+              onSubmitText={submitText}
+              onPick={applyPick}
+              onNearMe={() => void locateUser({ silent: false })}
+              onOpenFilters={() => {
+                setSheetKey((key) => key + 1);
+                setSheetOpen(true);
+              }}
+              onOpenLocation={() => setChooserManual(true)}
+            />
+            <p className="mapapp-region" aria-live="polite">
+              {regionLabel}
+            </p>
+            <div id="mapapp-results">
+              <h2 ref={listTitleRef} tabIndex={-1} className="sr-only">
+                {copy.resultsTitle}
+              </h2>
+              {message !== "" && (
+                <p role="alert" className="mapapp-alert">
+                  {message}
+                </p>
+              )}
+              {resultsBody}
+            </div>
+          </ResultsDrawer>
+        ) : (
+          <>
+            <div className="mapapp-topsearch">
+              <MapSearchBar
+                copy={copy}
+                cuisines={data.cuisines}
+                initialText={search.q}
+                activeFilterCount={activeFilterCount}
+                locationBusy={locating}
+                overlay
+                onSubmitText={submitText}
+                onPick={applyPick}
+                onNearMe={() => void locateUser({ silent: false })}
+                onOpenFilters={() => {
+                  setSheetKey((key) => key + 1);
+                  setSheetOpen(true);
+                }}
+                onOpenLocation={() => setChooserManual(true)}
+              />
+            </div>
+            <ResultsSheet
+              copy={copy}
+              snap={sheetSnap}
+              onSnapChange={setSheetSnap}
+              title={copy.resultsTitle}
+              summary={`${countLabel} · ${regionLabel}`}
+            >
+              <div id="mapapp-results">
+                <h2 ref={listTitleRef} tabIndex={-1} className="sr-only">
+                  {copy.resultsTitle}
+                </h2>
+                {message !== "" && (
+                  <p role="alert" className="mapapp-alert">
+                    {message}
+                  </p>
+                )}
+                {resultsBody}
+              </div>
+            </ResultsSheet>
+          </>
+        )}
+      </div>
       <RestaurantFiltersSheet
         key={sheetKey}
         copy={copy}
@@ -485,306 +934,6 @@ export function RestaurantSearchPage() {
           clearAll();
         }}
       />
-      {message !== "" && (
-        <p role="alert" className="res-alert">
-          {message}
-        </p>
-      )}
-      {isDishMode && dishName !== null && dishSlug !== null && (
-        <DishChip
-          dishName={dishName}
-          dishSlug={dishSlug}
-          lang={search.lang}
-          onExpandArea={expandArea}
-          onClearDish={clearDish}
-        />
-      )}
-      {!mapAvailable && <output className="res-map-missing">{copy.mapConfigMissing}</output>}
-      <div className="res-region-row" aria-live="polite">
-        <p className="res-region-label">{regionLabel}</p>
-        {!hasCoords && search.area === "" && (
-          <fieldset className="res-region-picks">
-            <legend className="sr-only">{copy.regionChoose}</legend>
-            <button type="button" className="res-chip-btn" onClick={() => pickRegion("vietnam")}>
-              {copy.regionVietnam}
-            </button>
-            <button type="button" className="res-chip-btn" onClick={() => pickRegion("hcmc")}>
-              {copy.regionHcmc}
-            </button>
-            <button type="button" className="res-chip-btn" onClick={() => pickRegion("hanoi")}>
-              {copy.regionHanoi}
-            </button>
-          </fieldset>
-        )}
-        <p className="res-region-hint">{copy.mapRegionHint}</p>
-      </div>
-      <div className="res-map-layout" data-sheet={sheet} data-map={mapAvailable ? "on" : "off"}>
-        <section aria-label={copy.listView} className="res-list-pane">
-          <div className="res-toolbar">
-            <p aria-live="polite" className="res-count">
-              {rows.length === 1 ? copy.oneRestaurant : `${rows.length} ${copy.manyRestaurants}`}
-              {rows.length === search.limit &&
-                ` · ${copy.resultLimit.replace("{limit}", String(search.limit))}`}
-            </p>
-            <div className="res-tools">
-              <CurrencySelector
-                preference={preference}
-                equivalentsIn={copy.equivalentsIn}
-                originalOnly={copy.originalOnly}
-              />
-              <label className="res-sort">
-                <span className="sr-only">{copy.sortLabel}</span>
-                <select
-                  value={search.sort}
-                  onChange={(event) => {
-                    const value = event.target.value;
-
-                    if (
-                      value === "recommended" ||
-                      value === "nearest" ||
-                      value === "price_low" ||
-                      value === "price_high"
-                    ) {
-                      applyPatch({ sort: value });
-                    }
-                  }}
-                >
-                  <option value="recommended">{copy.sortRecommended}</option>
-                  <option value="nearest" disabled={search.longitude === undefined}>
-                    {copy.sortNearest}
-                  </option>
-                  <option value="price_low" disabled={!isDishMode}>
-                    {copy.sortPriceLow}
-                  </option>
-                  <option value="price_high" disabled={!isDishMode}>
-                    {copy.sortPriceHigh}
-                  </option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <p className="res-location">
-            {locationText()}
-            {search.longitude !== undefined && (
-              <button
-                type="button"
-                onClick={() =>
-                  void navigate({
-                    search: {
-                      ...search,
-                      longitude: undefined,
-                      latitude: undefined,
-                      sort: "recommended",
-                    },
-                  })
-                }
-              >
-                {copy.clearFilters}
-              </button>
-            )}
-          </p>
-          {conversion.unavailable && (
-            <p aria-live="polite" className="res-note">
-              {copy.priceNote}
-            </p>
-          )}
-          {showDatasetZero && <DatasetEmptyState copy={copy} lang={search.lang} />}
-          {isDishMode && datasetEmpty && (
-            <p aria-live="polite" className="res-note">
-              {copy.noReviewedBody}
-            </p>
-          )}
-          {showDishZero && (
-            <div className="res-empty">
-              <h2>{copy.noReviewedTitle}</h2>
-              <p aria-live="polite">{copy.noReviewedBody}</p>
-              <div className="res-empty-actions">
-                <button type="button" className="res-primary" onClick={browseNearby}>
-                  {copy.browseNearby}
-                </button>
-                <button type="button" className="res-ghost" onClick={expandArea}>
-                  {copy.expandArea}
-                </button>
-                <button type="button" className="res-ghost" onClick={clearAll}>
-                  {copy.clearFilters}
-                </button>
-              </div>
-            </div>
-          )}
-          {showNoMatch && <NoMatchState copy={copy} onClear={clearAll} />}
-          {rows.length > 0 && (
-            <ul className="res-list">
-              {rows.map((venue) => {
-                const model = modelFor(venue);
-
-                return (
-                  <li
-                    key={venue.id}
-                    id={`res-card-${venue.id}`}
-                    data-selected={selected === venue.id}
-                  >
-                    <RestaurantCard
-                      copy={copy}
-                      model={model}
-                      selected={selected === venue.id}
-                      onShowOnMap={
-                        mapAvailable
-                          ? () => {
-                              handleSelect(venue.id);
-                              setSheet("peek");
-                            }
-                          : null
-                      }
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-        {mapAvailable && (
-          <section aria-label={copy.mapView} className="res-map-pane">
-            <div
-              className="res-sheet-handle"
-              role="toolbar"
-              aria-label={copy.mapView}
-              onPointerDown={(event) => {
-                dragStart.current = { y: event.clientY, sheet };
-
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }}
-              onPointerUp={(event) => {
-                const start = dragStart.current;
-
-                dragStart.current = null;
-
-                if (start === null) return;
-                const dy = event.clientY - start.y;
-
-                if (dy < -120) {
-                  setSheet("full");
-                } else if (dy < -40) {
-                  setSheet(start.sheet === "peek" ? "expanded" : "full");
-                } else if (dy > 40) {
-                  setSheet(start.sheet === "full" ? "expanded" : "peek");
-                }
-              }}
-            >
-              <span aria-hidden="true" className="res-sheet-grip" />
-              <span className="res-sheet-buttons">
-                <button
-                  type="button"
-                  className="res-chip-btn"
-                  aria-expanded={sheet !== "peek"}
-                  onClick={() => setSheet(sheet === "peek" ? "expanded" : "peek")}
-                >
-                  {sheet === "peek" ? (
-                    <>
-                      <ChevronUp aria-hidden="true" />
-                      {copy.sheetExpand}
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown aria-hidden="true" />
-                      {copy.sheetCollapse}
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="res-chip-btn"
-                  aria-pressed={sheet === "full"}
-                  onClick={() => setSheet(sheet === "full" ? "peek" : "full")}
-                >
-                  {sheet === "full" ? <MapIcon aria-hidden="true" /> : <List aria-hidden="true" />}
-                  {sheet === "full" ? copy.mapView : copy.sheetFullList}
-                </button>
-              </span>
-            </div>
-            {bounds !== null && (
-              <button
-                type="button"
-                className="res-search-area"
-                onClick={() => {
-                  void navigate({
-                    search: {
-                      ...search,
-                      ...bounds,
-                      area: "",
-                      longitude: undefined,
-                      latitude: undefined,
-                      sort: search.sort === "nearest" ? "recommended" : search.sort,
-                    },
-                  });
-                  setBounds(null);
-                }}
-              >
-                {copy.searchThisArea}
-              </button>
-            )}
-            <div className="res-map-wrap">
-              <RestaurantMapPanel
-                points={rows}
-                selected={selected}
-                onSelect={handleSelect}
-                onBounds={setBounds}
-                lang={search.lang}
-                center={mapCenter}
-                emptyNote={isDishMode ? copy.noReviewedBody : copy.mapEmpty}
-              />
-              {selectedModel !== null && (
-                <article className="res-preview" aria-label={selectedModel.name}>
-                  <div className="res-preview-body">
-                    <p className="res-card-eyebrow">
-                      {selectedModel.area}
-                      {selectedModel.distanceKm !== null &&
-                        ` · ${copy.kmAway.replace("{km}", selectedModel.distanceKm)}`}
-                    </p>
-                    <h3>
-                      <Link
-                        to="/restaurants/$venueId"
-                        params={{ venueId: selectedModel.id }}
-                        search={selectedModel.detailSearch}
-                      >
-                        {selectedModel.name}
-                      </Link>
-                    </h3>
-                    <p className="res-card-addr">{selectedModel.address}</p>
-                    {selectedModel.dish !== null && (
-                      <p className="res-match-dish">
-                        {selectedModel.dish.itemName} · {selectedModel.dish.variantName}
-                        {selectedModel.dish.amount !== null &&
-                          selectedModel.dish.currency !== null &&
-                          ` · ${selectedModel.dish.amount} ${selectedModel.dish.currency}`}
-                      </p>
-                    )}
-                    <span className="res-preview-actions">
-                      <Link
-                        className="res-view"
-                        to="/restaurants/$venueId"
-                        params={{ venueId: selectedModel.id }}
-                        search={selectedModel.detailSearch}
-                      >
-                        {copy.viewMenu}
-                      </Link>
-                      <button
-                        type="button"
-                        className="res-chip-btn"
-                        onClick={() => setSelected(null)}
-                        aria-label={copy.previewClose}
-                      >
-                        <X aria-hidden="true" />
-                        {copy.previewClose}
-                      </button>
-                    </span>
-                  </div>
-                </article>
-              )}
-            </div>
-            <p className="res-map-attr">{copy.mapAttributionNote}</p>
-          </section>
-        )}
-      </div>
     </div>
   );
 }

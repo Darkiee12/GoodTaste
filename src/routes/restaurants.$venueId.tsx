@@ -7,9 +7,16 @@ import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.funct
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 
 export const Route = createFileRoute("/restaurants/$venueId")({
+  // Carried from the main-track worktree (dish → venue → dish back-links).
+  // Owner sign-off still needed.
   validateSearch: z.object({
     channel: channelSchema.default("dine_in"),
     variant: z.uuid().optional(),
+    dish: z
+      .string()
+      .regex(/^[1-9][0-9]{0,18}$/)
+      .optional(),
+    fromDish: z.string().min(1).max(120).optional(),
   }),
   loaderDeps: ({ search }) => ({ channel: search.channel }),
   loader: ({ params, deps }) =>

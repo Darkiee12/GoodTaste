@@ -113,9 +113,11 @@ beforeAll(async () => {
 
   const venue = await run(withActor(curator, writeVenue(venueInput("Gating venue", "draft"))));
 
+  // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
   venueIds.push(venue.id);
 
   const request: MenuImport = menuImportSchema.parse({
+    // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
     venueId: venue.id,
     menuName: "Synthetic gating menu",
     source: {
@@ -151,6 +153,7 @@ beforeAll(async () => {
 
   const imported = await run(withActor(curator, importMenu(request)));
 
+  // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
   menuId = imported.menuId;
 
   const offering = imported.offeringIds[0];
@@ -211,6 +214,7 @@ describe("publication requires review as well as management", () => {
 
     const created = await run(withActor(curator, writeVenue(venueInput("Published", "published"))));
 
+    // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
     venueIds.push(created.id);
 
     expect(created.id).toBeString();
@@ -219,12 +223,14 @@ describe("publication requires review as well as management", () => {
   test("a manage-only actor can still stage drafts and archive venues", async () => {
     const draft = await run(withActor(manager, writeVenue(venueInput("Staged", "draft"))));
 
+    // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
     venueIds.push(draft.id);
 
     expect(draft.id).toBeString();
 
     const archived = await run(withActor(manager, writeVenue(venueInput("Retired", "archived"))));
 
+    // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
     venueIds.push(archived.id);
 
     expect(archived.id).toBeString();
@@ -293,6 +299,7 @@ describe("publication requires review as well as management", () => {
   test("observation approval still requires restaurant:review", async () => {
     const venue = await run(withActor(curator, writeVenue(venueInput("Review check", "draft"))));
 
+    // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
     venueIds.push(venue.id);
 
     const imported = await run(
@@ -300,6 +307,7 @@ describe("publication requires review as well as management", () => {
         curator,
         importMenu(
           menuImportSchema.parse({
+            // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-assignment -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here; identical pattern passes in restaurants.test.ts
             venueId: venue.id,
             menuName: "Synthetic review menu",
             source: {

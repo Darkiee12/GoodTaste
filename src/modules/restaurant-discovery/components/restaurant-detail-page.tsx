@@ -1,4 +1,4 @@
-import { Link, getRouteApi } from "@tanstack/react-router";
+import { Link, getRouteApi, useRouter } from "@tanstack/react-router";
 
 import {
   CurrencySelector,
@@ -9,8 +9,32 @@ import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/i
 import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
 import { presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
+import type { Locale } from "@/shared/i18n";
 
 const route = getRouteApi("/restaurants/$venueId");
+
+/** Back prefers router history so the map page restores its exact camera;
+ *  only a direct load falls back to a fresh results search. */
+function BackToResults({ lang }: { readonly lang: Locale }) {
+  const router = useRouter();
+  const navigate = route.useNavigate();
+
+  const goBack = (): void => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.history.back();
+
+      return;
+    }
+
+    void navigate({ to: "/restaurants", search: { lang } });
+  };
+
+  return (
+    <button type="button" onClick={goBack} className="discovery-back">
+      ← Back to results
+    </button>
+  );
+}
 
 export function RestaurantDetailPage() {
   const { venue, offerings } = route.useLoaderData();
@@ -26,17 +50,7 @@ export function RestaurantDetailPage() {
   return (
     <article className="discovery-page">
       <nav aria-label="Discover">
-        <Link
-          to="/restaurants"
-          search={{
-            lang: search.lang,
-            dish: search.dish,
-            fromDish: search.fromDish,
-            channel: search.channel,
-          }}
-        >
-          ← Back to results
-        </Link>
+        <BackToResults lang={search.lang} />
         {search.fromDish !== undefined && (
           <Link
             to="/dishes/$dishId"
@@ -110,9 +124,6 @@ export function RestaurantDetailPage() {
               locale={search.lang}
               rates={conversion.rates}
               initialVariant={search.variant}
-              returnVenueId={venue.id}
-              returnChannel={search.channel}
-              storageKey={`order:${venue.id}:${search.channel}`}
             />
           )}
         </section>

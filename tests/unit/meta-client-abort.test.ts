@@ -26,17 +26,24 @@ describe("Meta ranking request cancellation", () => {
   test("external interruption aborts the in-flight provider request", async () => {
     let aborted = false;
 
-    const stub: typeof fetch = (_url, init) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener(
-          "abort",
-          () => {
-            aborted = true;
-            reject(new Error("synthetic interruption"));
-          },
-          { once: true },
-        );
-      });
+    const stub = Object.assign(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(new Error("synthetic interruption"));
+            },
+            { once: true },
+          );
+        }),
+      {
+        preconnect: (_url: string | URL) => {
+          // Synthetic stub: preconnect is irrelevant to abort semantics.
+        },
+      },
+    ) satisfies typeof fetch;
 
     globalThis.fetch = stub;
 
